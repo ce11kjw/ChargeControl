@@ -31,7 +31,7 @@ ok "zip found"
 info "Validating module structure..."
 REQUIRED=(module.prop service.sh post-fs-data.sh uninstall.sh \
           server.py charge_control.py stats.py config.json \
-          webroot/index.html webroot/styles.css webroot/script.js start_server.sh)
+          webroot/index.html webroot/styles.css webroot/script.js start_server.sh launcher.py)
 
 for f in "${REQUIRED[@]}"; do
     if [ -f "$f" ]; then
@@ -70,6 +70,7 @@ INCLUDE=(
     stats.py
     config.json
     start_server.sh
+    launcher.py
     README.md
 )
 
