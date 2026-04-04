@@ -31,7 +31,7 @@ ok "zip found"
 info "Validating module structure..."
 REQUIRED=(module.prop service.sh post-fs-data.sh uninstall.sh \
           server.py charge_control.py stats.py config.json \
-          index.html styles.css script.js start_server.sh)
+          webroot/index.html webroot/styles.css webroot/script.js start_server.sh)
 
 for f in "${REQUIRED[@]}"; do
     if [ -f "$f" ]; then
@@ -69,9 +69,6 @@ INCLUDE=(
     charge_control.py
     stats.py
     config.json
-    index.html
-    styles.css
-    script.js
     start_server.sh
     README.md
 )
@@ -82,6 +79,12 @@ for f in "${INCLUDE[@]}"; do
         ok "Added $f"
     fi
 done
+
+# Also include webroot/ if present
+if [ -d "webroot" ]; then
+    zip -qr "$ZIP_PATH" webroot/
+    ok "Added webroot/"
+fi
 
 # Also include docs/ if present
 if [ -d "docs" ]; then
