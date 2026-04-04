@@ -1,0 +1,12 @@
+# ChargeControl – common.prop
+# Optional system properties exposed to the framework.
+
+# Module identifier
+ro.chargecontrol.version=1.0.1
+ro.chargecontrol.author=ce11kjw
+
+# Default server port (read by service.sh if set)
+ro.chargecontrol.server.port=8080
+
+# Enable thermal throttling protection
+ro.chargecontrol.thermal.enabled=true

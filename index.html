@@ -1,42 +1,213 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="styles.css">
-    <title>ChargeControl</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChargeControl Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>ChargeControl Dashboard</h1>
-        </header>
-        <section id="status">
-            <h2>Charging Status</h2>
-            <p id="chargingStatus">Loading...</p>
-        </section>
-        <section id="modes">
-            <h2>Charging Modes</h2>
-            <p id="chargingModes">Loading...</p>
-        </section>
-        <section id="statistics">
-            <h2>Statistics</h2>
-            <p id="chargingStatistics">Loading...</p>
-        </section>
-        <section id="temperature">
-            <h2>Temperature Monitoring</h2>
-            <p id="temperatureMonitoring">Loading...</p>
-        </section>
-        <section id="ai-predictions">
-            <h2>AI Predictions</h2>
-            <p id="aiPredictions">Loading...</p>
-        </section>
-        <section id="protocol-recognition">
-            <h2>Protocol Recognition</h2>
-            <p id="protocolRecognition">Loading...</p>
-        </section>
+  <!-- ── Navigation ───────────────────────────────────────── -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span class="nav-icon">⚡</span>
+      <span class="nav-title">ChargeControl</span>
     </div>
-    <script src="script.js"></script>
+    <div class="nav-actions">
+      <button id="themeToggle" class="btn btn-icon" title="Toggle theme">🌙</button>
+      <span id="connectionStatus" class="badge badge-success">Connected</span>
+    </div>
+  </nav>
+
+  <main class="layout">
+    <!-- ── Sidebar ──────────────────────────────────────────── -->
+    <aside class="sidebar">
+      <nav class="sidebar-nav">
+        <a href="#" class="sidebar-link active" data-tab="dashboard">📊 Dashboard</a>
+        <a href="#" class="sidebar-link" data-tab="control">🎛️ Control</a>
+        <a href="#" class="sidebar-link" data-tab="modes">⚡ Modes</a>
+        <a href="#" class="sidebar-link" data-tab="stats">📈 Statistics</a>
+        <a href="#" class="sidebar-link" data-tab="config">⚙️ Settings</a>
+      </nav>
+    </aside>
+
+    <!-- ── Main content ──────────────────────────────────────── -->
+    <div class="content">
+
+      <!-- ═══════════════════ DASHBOARD TAB ═══════════════════ -->
+      <section class="tab-panel active" id="tab-dashboard">
+        <h2 class="section-title">Dashboard</h2>
+
+        <!-- Status cards -->
+        <div class="card-grid">
+          <div class="card card--accent">
+            <div class="card-label">Battery Level</div>
+            <div class="card-value" id="batteryLevel">—</div>
+            <div class="battery-bar-wrap">
+              <div class="battery-bar" id="batteryBar"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-label">Status</div>
+            <div class="card-value" id="chargingStatus">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Temperature</div>
+            <div class="card-value" id="batteryTemp">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Current Mode</div>
+            <div class="card-value" id="currentMode">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Voltage</div>
+            <div class="card-value" id="batteryVoltage">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Current</div>
+            <div class="card-value" id="batteryCurrent">—</div>
+          </div>
+        </div>
+
+        <!-- Temperature trend chart (last 60 snapshots) -->
+        <div class="card card--full">
+          <div class="card-header">
+            <span>Temperature History</span>
+            <button class="btn btn-sm" id="refreshChart">↺ Refresh</button>
+          </div>
+          <canvas id="tempChart" height="140"></canvas>
+        </div>
+
+        <!-- Battery health -->
+        <div class="card card--full" id="healthCard">
+          <div class="card-label">Battery Health Score</div>
+          <div class="card-value" id="healthScore">—</div>
+          <p class="card-sub" id="healthDetail"></p>
+        </div>
+      </section>
+
+      <!-- ═══════════════════ CONTROL TAB ═══════════════════ -->
+      <section class="tab-panel" id="tab-control">
+        <h2 class="section-title">Charging Control</h2>
+
+        <!-- Enable / disable -->
+        <div class="card">
+          <div class="card-header">Charging Switch</div>
+          <label class="toggle-wrap">
+            <span>Enable Charging</span>
+            <div class="toggle">
+              <input type="checkbox" id="chargingToggle" checked />
+              <span class="toggle-slider"></span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Charge limit slider -->
+        <div class="card">
+          <div class="card-header">Maximum Charge Limit</div>
+          <div class="slider-row">
+            <input type="range" id="chargeLimitSlider" min="20" max="100" value="80" />
+            <span class="slider-value" id="chargeLimitValue">80%</span>
+          </div>
+          <p class="card-sub">Charging will stop when battery reaches this level.</p>
+          <button class="btn btn-primary" id="applyLimitBtn">Apply Limit</button>
+        </div>
+
+        <!-- Temperature threshold -->
+        <div class="card">
+          <div class="card-header">Temperature Threshold</div>
+          <div class="slider-row">
+            <input type="range" id="tempThresholdSlider" min="30" max="50" value="40" />
+            <span class="slider-value" id="tempThresholdValue">40°C</span>
+          </div>
+          <div class="slider-row">
+            <label>Critical Temp:</label>
+            <input type="range" id="tempCriticalSlider" min="35" max="55" value="45" />
+            <span class="slider-value" id="tempCriticalValue">45°C</span>
+          </div>
+          <button class="btn btn-primary" id="applyTempBtn">Apply Thresholds</button>
+        </div>
+
+        <!-- Temperature protection -->
+        <div class="card">
+          <div class="card-header">Temperature Protection</div>
+          <p class="card-sub">Manually trigger a temperature check.</p>
+          <button class="btn btn-warning" id="tempCheckBtn">Run Temperature Check</button>
+          <div id="tempCheckResult" class="result-box hidden"></div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════ MODES TAB ═══════════════════ -->
+      <section class="tab-panel" id="tab-modes">
+        <h2 class="section-title">Charging Modes</h2>
+        <div class="modes-grid" id="modesGrid">
+          <!-- Populated by JS -->
+        </div>
+        <div id="modeSetResult" class="result-box hidden"></div>
+      </section>
+
+      <!-- ═══════════════════ STATISTICS TAB ═══════════════════ -->
+      <section class="tab-panel" id="tab-stats">
+        <h2 class="section-title">Charging Statistics</h2>
+
+        <div class="tab-sub-nav">
+          <button class="btn btn-sm active" data-period="daily">Daily (7d)</button>
+          <button class="btn btn-sm" data-period="weekly">Weekly</button>
+          <button class="btn btn-sm" data-period="monthly">Monthly</button>
+        </div>
+
+        <canvas id="statsChart" height="180"></canvas>
+
+        <div class="card card--full">
+          <div class="card-header">
+            <span>Sessions Data</span>
+            <div class="export-btns">
+              <button class="btn btn-sm" id="exportCsv">⬇ CSV</button>
+              <button class="btn btn-sm" id="exportJson">⬇ JSON</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="statsTable">
+              <thead id="statsTableHead"></thead>
+              <tbody id="statsTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════ SETTINGS TAB ═══════════════════ -->
+      <section class="tab-panel" id="tab-config">
+        <h2 class="section-title">Settings</h2>
+
+        <div class="card card--full">
+          <div class="card-header">
+            <span>Configuration (JSON)</span>
+            <div>
+              <button class="btn btn-sm" id="loadConfigBtn">Load</button>
+              <button class="btn btn-primary btn-sm" id="saveConfigBtn">Save</button>
+            </div>
+          </div>
+          <textarea id="configEditor" class="config-editor" spellcheck="false"></textarea>
+          <div id="configResult" class="result-box hidden"></div>
+        </div>
+
+        <!-- Schedule rules (basic UI) -->
+        <div class="card card--full">
+          <div class="card-header">Quick Presets</div>
+          <div class="presets-grid">
+            <button class="btn preset-btn" data-preset="night">🌙 Night (Trickle 80%)</button>
+            <button class="btn preset-btn" data-preset="work">💼 Work (Normal 90%)</button>
+            <button class="btn preset-btn" data-preset="travel">✈️ Travel (Fast 100%)</button>
+            <button class="btn preset-btn" data-preset="save">🌿 Save (Trickle 60%)</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Toast notifications -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="script.js"></script>
 </body>
 </html>

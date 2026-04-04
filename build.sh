@@ -1,37 +1,101 @@
 #!/bin/bash
-
-# build.sh script for ChargeControl
+# ChargeControl – build.sh
+# Validates module files and creates the installable KernelSU ZIP.
 
 set -e
 
-# Function to check dependencies
-check_dependencies() {
-    echo "Checking dependencies..."
-    # Add commands to check dependencies here
-}
+# ── Colors ────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+ok()   { echo -e "${GREEN}  ✓ $*${NC}"; }
+warn() { echo -e "${YELLOW}  ⚠ $*${NC}"; }
+err()  { echo -e "${RED}  ✗ $*${NC}"; exit 1; }
+info() { echo -e "${BLUE}  → $*${NC}"; }
 
-# Function to build the kernel module
-build_kernel_module() {
-    echo "Building kernel module..."
-    # Add commands to build the kernel module here
-}
+echo ""
+echo -e "${BLUE}═══════════════════════════════════════${NC}"
+echo -e "${BLUE}   ChargeControl Module Builder        ${NC}"
+echo -e "${BLUE}═══════════════════════════════════════${NC}"
+echo ""
 
-# Function to prepare Python components
-prepare_python_components() {
-    echo "Preparing Python components..."
-    # Add commands to prepare Python components here
-}
+# ── Read version from module.prop ─────────────────────────
+VERSION=$(grep '^version=' module.prop | cut -d= -f2)
+VERSION_CODE=$(grep '^versionCode=' module.prop | cut -d= -f2)
+info "Version: $VERSION (code: $VERSION_CODE)"
 
-# Function to create installation package
-create_installation_package() {
-    echo "Creating installation package..."
-    # Add commands to create installation package here
-}
+# ── Check required tools ──────────────────────────────────
+info "Checking tools..."
+command -v zip  >/dev/null 2>&1 || err "zip is not installed"
+ok "zip found"
 
-# Main script execution
-check_dependencies
-build_kernel_module
-prepare_python_components
-create_installation_package
+# ── Required module files ─────────────────────────────────
+info "Validating module structure..."
+REQUIRED=(module.prop service.sh post-fs-data.sh uninstall.sh \
+          server.py charge_control.py stats.py config.json \
+          index.html styles.css script.js start_server.sh)
 
-echo "Build process completed successfully."
+for f in "${REQUIRED[@]}"; do
+    if [ -f "$f" ]; then
+        ok "$f"
+    else
+        warn "Missing: $f"
+    fi
+done
+
+# ── Create output directory ───────────────────────────────
+OUTPUT_DIR="out"
+mkdir -p "$OUTPUT_DIR"
+
+ZIP_NAME="ChargeControl_${VERSION}.zip"
+ZIP_PATH="$OUTPUT_DIR/$ZIP_NAME"
+
+# ── Remove old build ──────────────────────────────────────
+[ -f "$ZIP_PATH" ] && rm -f "$ZIP_PATH"
+
+# ── Set executable permissions ────────────────────────────
+info "Setting permissions..."
+chmod +x service.sh post-fs-data.sh uninstall.sh start_server.sh build.sh 2>/dev/null || true
+ok "Permissions set"
+
+# ── Package module ────────────────────────────────────────
+info "Creating ZIP: $ZIP_PATH"
+
+INCLUDE=(
+    module.prop
+    service.sh
+    post-fs-data.sh
+    uninstall.sh
+    common.prop
+    server.py
+    charge_control.py
+    stats.py
+    config.json
+    index.html
+    styles.css
+    script.js
+    start_server.sh
+    README.md
+)
+
+for f in "${INCLUDE[@]}"; do
+    if [ -f "$f" ]; then
+        zip -q "$ZIP_PATH" "$f"
+        ok "Added $f"
+    fi
+done
+
+# Also include docs/ if present
+if [ -d "docs" ]; then
+    zip -qr "$ZIP_PATH" docs/
+    ok "Added docs/"
+fi
+
+echo ""
+echo -e "${GREEN}═══════════════════════════════════════${NC}"
+echo -e "${GREEN}   Build complete!                     ${NC}"
+echo -e "${GREEN}   Output: $ZIP_PATH                   ${NC}"
+if command -v du >/dev/null 2>&1; then
+    SIZE=$(du -sh "$ZIP_PATH" | cut -f1)
+    echo -e "${GREEN}   Size:   $SIZE                       ${NC}"
+fi
+echo -e "${GREEN}═══════════════════════════════════════${NC}"
+echo ""
