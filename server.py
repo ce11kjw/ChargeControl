@@ -22,8 +22,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+WEBROOT = os.path.join(BASE_DIR, "webroot")
 
-app = Flask(__name__, static_folder=BASE_DIR, static_url_path="")
+app = Flask(__name__, static_folder=WEBROOT, static_url_path="")
 CORS(app)
 
 # ── Initialise database ──────────────────────────────────────────────────────
@@ -60,7 +61,7 @@ _snapshot_thread.start()
 
 @app.route("/")
 def index():
-    return send_from_directory(BASE_DIR, "index.html")
+    return send_from_directory(WEBROOT, "index.html")
 
 
 # ── Battery / status ─────────────────────────────────────────────────────────
