@@ -5,6 +5,33 @@
 
 'use strict';
 
+/* ── API 基地址 ────────────────────────────────────────────
+   默认指向本机 127.0.0.1:8080。
+   局域网访问时可通过以下方式覆盖：
+     - URL 参数：http://<设备IP>:8080/?api=http://<设备IP>:8080
+     - 浏览器控制台：localStorage.setItem('cc-api-base', 'http://<设备IP>:8080')
+   ──────────────────────────────────────────────────────── */
+const API_BASE = (() => {
+  // Validate that a string is a safe http/https origin; return null if invalid.
+  function sanitizeOrigin(val) {
+    if (!val) return null;
+    try {
+      const u = new URL(val);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+      return u.origin; // strips path, query, hash and normalises
+    } catch { return null; }
+  }
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = sanitizeOrigin(params.get('api'));
+  if (fromQuery) {
+    localStorage.setItem('cc-api-base', fromQuery);
+    return fromQuery;
+  }
+  const stored = sanitizeOrigin(localStorage.getItem('cc-api-base'));
+  if (stored) return stored;
+  return 'http://127.0.0.1:8080';
+})();
+
 // 兼容 CanvasRenderingContext2D.roundRect（Chrome < 99 及旧版 WebView）
 if (!CanvasRenderingContext2D.prototype.roundRect) {
   CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, radii) {
@@ -51,15 +78,16 @@ const API = {
 /* ── 工具函数 ──────────────────────────────────────────────── */
 
 async function apiFetch(url, opts = {}) {
+  const fullUrl = url.startsWith('http') ? url : API_BASE + url;
   try {
-    const res = await fetch(url, {
+    const res = await fetch(fullUrl, {
       headers: { 'Content-Type': 'application/json' },
       ...opts,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
-    console.error('[API错误]', url, err.message);
+    console.error('[API错误]', fullUrl, err.message);
     throw err;
   }
 }
@@ -459,7 +487,14 @@ function drawBarChart(canvasId, labels, dataset, color = '#4f8ef7') {
 
 /* ── 导出 ───────────────────────────────────────────────── */
 
-$('exportCsv').addEventListener('click', () => { window.location.href = API.export.csv; });
+$('exportCsv').addEventListener('click', () => {
+  try {
+    const exportUrl = new URL(API.export.csv, API_BASE);
+    if (exportUrl.protocol === 'http:' || exportUrl.protocol === 'https:') {
+      window.location.href = exportUrl.toString();
+    }
+  } catch { /* ignore invalid URL */ }
+});
 
 $('exportJson').addEventListener('click', async () => {
   const data = await apiFetch(API.export.json);
