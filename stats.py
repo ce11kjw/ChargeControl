@@ -1,6 +1,6 @@
 """
-ChargeControl - Statistics & Analytics Module
-Tracks charging sessions and provides aggregated reports.
+充电控制 - 统计与分析模块
+记录充电会话并提供汇总报告。
 """
 
 import sqlite3
@@ -23,7 +23,7 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create database tables if they do not exist."""
+    """如果数据库表不存在则创建。"""
     with _get_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS charging_sessions (
@@ -53,7 +53,7 @@ def init_db() -> None:
 
 def record_snapshot(capacity: int, temperature: float, voltage_mv: float | None,
                     current_ma: float | None, status: str, mode: str) -> int:
-    """Insert a real-time battery snapshot into the database."""
+    """将实时电池快照插入数据库。"""
     now = datetime.utcnow().isoformat()
     with _get_conn() as conn:
         cur = conn.execute(
@@ -66,7 +66,7 @@ def record_snapshot(capacity: int, temperature: float, voltage_mv: float | None,
 
 
 def start_session(start_level: int, mode: str) -> int:
-    """Record the beginning of a charging session."""
+    """记录充电会话的开始。"""
     now = datetime.utcnow().isoformat()
     with _get_conn() as conn:
         cur = conn.execute(
@@ -77,7 +77,7 @@ def start_session(start_level: int, mode: str) -> int:
 
 
 def end_session(session_id: int, end_level: int, max_temp: float) -> bool:
-    """Record the end of a charging session and compute derived metrics."""
+    """记录充电会话结束并计算衍生指标。"""
     now = datetime.utcnow().isoformat()
     with _get_conn() as conn:
         row = conn.execute(
@@ -104,7 +104,7 @@ def end_session(session_id: int, end_level: int, max_temp: float) -> bool:
 
 
 def get_daily_stats(days: int = 7) -> list[dict]:
-    """Return per-day aggregated charging statistics for the last N days."""
+    """返回最近 N 天的按日汇总充电统计。"""
     since = (datetime.utcnow() - timedelta(days=days)).isoformat()
     with _get_conn() as conn:
         rows = conn.execute(
@@ -124,7 +124,7 @@ def get_daily_stats(days: int = 7) -> list[dict]:
 
 
 def get_weekly_stats() -> list[dict]:
-    """Return per-week aggregated stats for the last 12 weeks."""
+    """返回最近 12 周的按周汇总统计。"""
     since = (datetime.utcnow() - timedelta(weeks=12)).isoformat()
     with _get_conn() as conn:
         rows = conn.execute(
@@ -144,7 +144,7 @@ def get_weekly_stats() -> list[dict]:
 
 
 def get_monthly_stats() -> list[dict]:
-    """Return per-month aggregated stats for the last 12 months."""
+    """返回最近 12 个月的按月汇总统计。"""
     since = (datetime.utcnow() - timedelta(days=365)).isoformat()
     with _get_conn() as conn:
         rows = conn.execute(
@@ -164,7 +164,7 @@ def get_monthly_stats() -> list[dict]:
 
 
 def get_recent_snapshots(limit: int = 60) -> list[dict]:
-    """Return the most recent battery snapshots."""
+    """返回最近的电池快照记录。"""
     with _get_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM battery_snapshots ORDER BY timestamp DESC LIMIT ?",
@@ -174,7 +174,7 @@ def get_recent_snapshots(limit: int = 60) -> list[dict]:
 
 
 def get_battery_health_trend() -> dict:
-    """Estimate battery health trend from voltage/capacity data."""
+    """根据电压/电量数据估算电池健康趋势。"""
     with _get_conn() as conn:
         row = conn.execute(
             """SELECT
@@ -190,7 +190,7 @@ def get_battery_health_trend() -> dict:
     avg_temp = row["avg_temp"] or 0
     max_temp = row["max_temp"] or 0
 
-    # Simple heuristic: deduct health score based on high temperatures
+    # 简单启发式：根据高温扣减健康评分
     health_score = 100
     if avg_temp > 38:
         health_score -= 10
@@ -208,7 +208,7 @@ def get_battery_health_trend() -> dict:
 
 
 def export_csv() -> str:
-    """Export all charging sessions as a CSV string."""
+    """将所有充电会话导出为 CSV 字符串。"""
     with _get_conn() as conn:
         rows = conn.execute("SELECT * FROM charging_sessions ORDER BY start_time").fetchall()
 
@@ -222,14 +222,14 @@ def export_csv() -> str:
 
 
 def export_json() -> list[dict]:
-    """Export all charging sessions as a list of dicts (JSON-serialisable)."""
+    """将所有充电会话导出为字典列表（可序列化为 JSON）。"""
     with _get_conn() as conn:
         rows = conn.execute("SELECT * FROM charging_sessions ORDER BY start_time").fetchall()
     return [dict(r) for r in rows]
 
 
 def prune_old_data(retention_days: int = 90) -> int:
-    """Delete records older than retention_days and return number of rows removed."""
+    """删除超过保留天数的记录，并返回已删除的行数。"""
     cutoff = (datetime.utcnow() - timedelta(days=retention_days)).isoformat()
     with _get_conn() as conn:
         cur1 = conn.execute(

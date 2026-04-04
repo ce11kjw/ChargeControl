@@ -1,11 +1,11 @@
 /* ==========================================================
-   ChargeControl – Frontend Script
-   Vanilla JS, no framework dependencies.
+   充电控制 – 前端脚本
+   原生 JS，无框架依赖。
    ========================================================== */
 
 'use strict';
 
-// Polyfill for CanvasRenderingContext2D.roundRect (Chrome < 99, older WebViews)
+// 兼容 CanvasRenderingContext2D.roundRect（Chrome < 99 及旧版 WebView）
 if (!CanvasRenderingContext2D.prototype.roundRect) {
   CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, radii) {
     const r = Array.isArray(radii) ? radii[0] ?? 0 : (radii ?? 0);
@@ -48,7 +48,7 @@ const API = {
   },
 };
 
-/* ── Helpers ──────────────────────────────────────────────── */
+/* ── 工具函数 ──────────────────────────────────────────────── */
 
 async function apiFetch(url, opts = {}) {
   try {
@@ -59,7 +59,7 @@ async function apiFetch(url, opts = {}) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
-    console.error('[API]', url, err.message);
+    console.error('[API错误]', url, err.message);
     throw err;
   }
 }
@@ -90,7 +90,7 @@ function showResult(id, data, isError = false) {
   el.classList.remove('hidden');
 }
 
-/* ── Theme toggle ─────────────────────────────────────────── */
+/* ── 主题切换 ─────────────────────────────────────────── */
 
 function initTheme() {
   const saved = localStorage.getItem('cc-theme') || 'dark';
@@ -106,7 +106,7 @@ $('themeToggle').addEventListener('click', () => {
   localStorage.setItem('cc-theme', next);
 });
 
-/* ── Sidebar / tab navigation ─────────────────────────────── */
+/* ── 侧边栏 / 标签页导航 ─────────────────────────────── */
 
 document.querySelectorAll('.sidebar-link').forEach(link => {
   link.addEventListener('click', e => {
@@ -122,7 +122,7 @@ document.querySelectorAll('.sidebar-link').forEach(link => {
   });
 });
 
-/* ── Dashboard ────────────────────────────────────────────── */
+/* ── 仪表盘 ────────────────────────────────────────────── */
 
 let tempChartCtx, tempChartData;
 
@@ -140,7 +140,8 @@ function updateDashboard(battery) {
 
 function updateMode(config) {
   const mode = config?.charging?.mode ?? '—';
-  setText('currentMode', mode.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()));
+  const meta = MODE_META[mode];
+  setText('currentMode', meta ? meta.label : mode.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()));
 }
 
 async function refreshStatus() {
@@ -149,7 +150,7 @@ async function refreshStatus() {
     updateDashboard(data.battery ?? {});
     updateMode(data.config ?? {});
 
-    // Sync control UI
+    // 同步控制界面
     const charging = data.config?.charging ?? {};
     const toggle = $('chargingToggle');
     if (toggle) toggle.checked = data.battery?.charging_enabled !== false;
@@ -172,15 +173,15 @@ async function refreshStatus() {
       setText('tempCriticalValue', charging.temperature_critical + '°C');
     }
 
-    $('connectionStatus').textContent = 'Connected';
+    $('connectionStatus').textContent = '已连接';
     $('connectionStatus').className = 'badge badge-success';
   } catch {
-    $('connectionStatus').textContent = 'Offline';
+    $('connectionStatus').textContent = '离线';
     $('connectionStatus').className = 'badge badge-danger';
   }
 }
 
-/* ── Mini chart (temperature history) ────────────────────── */
+/* ── 迷你图表（温度历史） ────────────────────────────────── */
 
 function drawLineChart(canvasId, labels, dataset, color = '#4f8ef7', label = '') {
   const canvas = $(canvasId);
@@ -208,7 +209,7 @@ function drawLineChart(canvasId, labels, dataset, color = '#4f8ef7', label = '')
   function xOf(i) { return pad.left + i * xStep; }
   function yOf(v) { return pad.top + h - ((v - min) / range) * h; }
 
-  // Grid lines
+  // 网格线
   ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#2e3350';
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
@@ -221,7 +222,7 @@ function drawLineChart(canvasId, labels, dataset, color = '#4f8ef7', label = '')
     ctx.fillText(val, pad.left - 4, y + 3);
   }
 
-  // X labels (every ~10 points)
+  // X轴标签（每约10个点一个）
   ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8892a4';
   ctx.font = '10px sans-serif';
   ctx.textAlign = 'center';
@@ -230,7 +231,7 @@ function drawLineChart(canvasId, labels, dataset, color = '#4f8ef7', label = '')
     if (i % step === 0) ctx.fillText(lbl, xOf(i), H - 6);
   });
 
-  // Gradient fill
+  // 渐变填充
   const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + h);
   grad.addColorStop(0, color + '55');
   grad.addColorStop(1, color + '00');
@@ -243,7 +244,7 @@ function drawLineChart(canvasId, labels, dataset, color = '#4f8ef7', label = '')
   ctx.fillStyle = grad;
   ctx.fill();
 
-  // Line
+  // 折线
   ctx.beginPath();
   ctx.strokeStyle = color;
   ctx.lineWidth = 2;
@@ -261,7 +262,7 @@ async function refreshTempChart() {
       return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
     });
     const temps = snaps.map(s => s.temperature ?? 0);
-    drawLineChart('tempChart', labels, temps, '#f59e0b', 'Temperature °C');
+    drawLineChart('tempChart', labels, temps, '#f59e0b', '温度 °C');
   } catch { /* ignore */ }
 }
 
@@ -270,19 +271,19 @@ async function refreshHealthCard() {
     const h = await apiFetch(API.stats.health);
     setText('healthScore', (h.estimated_health ?? '—') + (h.estimated_health != null ? '%' : ''));
     setText('healthDetail',
-      `Avg temp: ${h.avg_temp}°C  |  Max temp: ${h.max_temp}°C  |  Sessions: ${h.total_sessions}`);
+      `平均温度: ${h.avg_temp}°C  |  最高温度: ${h.max_temp}°C  |  充电次数: ${h.total_sessions}`);
   } catch { /* ignore */ }
 }
 
 $('refreshChart').addEventListener('click', refreshTempChart);
 
-/* ── Control tab ──────────────────────────────────────────── */
+/* ── 控制标签页 ──────────────────────────────────────────── */
 
 $('chargingToggle').addEventListener('change', async e => {
   try {
     const res = await post(API.charging.enable, { enabled: e.target.checked });
-    showToast(res.success ? '✅ Charging ' + (e.target.checked ? 'enabled' : 'disabled') : '❌ Failed');
-  } catch { showToast('❌ Error toggling charging'); }
+    showToast(res.success ? '✅ 充电已' + (e.target.checked ? '启用' : '禁用') : '❌ 操作失败');
+  } catch { showToast('❌ 切换充电状态出错'); }
 });
 
 $('chargeLimitSlider').addEventListener('input', e => {
@@ -293,8 +294,8 @@ $('applyLimitBtn').addEventListener('click', async () => {
   const limit = parseInt($('chargeLimitSlider').value);
   try {
     const res = await post(API.charging.limit, { limit });
-    showToast(res.success ? `✅ Limit set to ${limit}%` : '❌ Failed');
-  } catch { showToast('❌ Error setting limit'); }
+    showToast(res.success ? `✅ 上限已设为 ${limit}%` : '❌ 操作失败');
+  } catch { showToast('❌ 设置上限出错'); }
 });
 
 $('tempThresholdSlider').addEventListener('input', e => {
@@ -314,8 +315,8 @@ $('applyTempBtn').addEventListener('click', async () => {
     cfg.charging.temperature_threshold = threshold;
     cfg.charging.temperature_critical  = critical;
     const res = await post(API.config, cfg);
-    showToast(res.success ? `✅ Thresholds updated` : '❌ Failed');
-  } catch { showToast('❌ Error updating thresholds'); }
+    showToast(res.success ? `✅ 温度阈值已更新` : '❌ 操作失败');
+  } catch { showToast('❌ 更新温度阈值出错'); }
 });
 
 $('tempCheckBtn').addEventListener('click', async () => {
@@ -325,14 +326,14 @@ $('tempCheckBtn').addEventListener('click', async () => {
   } catch (e) { showResult('tempCheckResult', e.message, true); }
 });
 
-/* ── Modes tab ────────────────────────────────────────────── */
+/* ── 模式标签页 ────────────────────────────────────────────── */
 
 const MODE_META = {
-  normal:       { icon: '🔋', label: 'Normal' },
-  fast:         { icon: '⚡', label: 'Fast' },
-  trickle:      { icon: '💧', label: 'Trickle' },
-  power_saving: { icon: '🌿', label: 'Power Saving' },
-  super_saver:  { icon: '🌱', label: 'Super Saver' },
+  normal:       { icon: '🔋', label: '普通' },
+  fast:         { icon: '⚡', label: '快充' },
+  trickle:      { icon: '💧', label: '涓流' },
+  power_saving: { icon: '🌿', label: '省电' },
+  super_saver:  { icon: '🌱', label: '超级省电' },
 };
 
 async function loadModes() {
@@ -357,7 +358,7 @@ async function loadModes() {
           if (res.success) {
             grid.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
             card.classList.add('selected');
-            showToast(`✅ Mode: ${meta.label}`);
+            showToast(`✅ 已切换模式: ${meta.label}`);
             showResult('modeSetResult', res, false);
           } else {
             showResult('modeSetResult', res, true);
@@ -366,10 +367,10 @@ async function loadModes() {
       });
       grid.appendChild(card);
     });
-  } catch (e) { $('modesGrid').textContent = 'Error loading modes: ' + e.message; }
+  } catch (e) { $('modesGrid').textContent = '加载模式失败: ' + e.message; }
 }
 
-/* ── Statistics tab ───────────────────────────────────────── */
+/* ── 统计标签页 ───────────────────────────────────────────── */
 
 let currentPeriod = 'daily';
 
@@ -410,9 +411,9 @@ async function loadStats(period) {
       if (c === 'avg_efficiency')   val = val !== '—' ? parseFloat(val).toFixed(2) : '—';
       if (c === 'max_temp')         val = val !== '—' ? val + '°C' : '—';
       return `<td>${val}</td>`;
-    }).join('') + '</tr>').join('') || '<tr><td colspan="5" style="color:var(--text-muted)">No data yet</td></tr>';
+    }).join('') + '</tr>').join('') || `<tr><td colspan="${cols.length}" style="color:var(--text-muted)">暂无数据</td></tr>`;
 
-    // Draw bar chart (sessions per period)
+    // 绘制柱状图（每期充电次数）
     const labels   = rows.map(r => r[cols[0]]);
     const sessions = rows.map(r => r.sessions ?? 0);
     drawBarChart('statsChart', labels, sessions, '#4f8ef7');
@@ -456,7 +457,7 @@ function drawBarChart(canvasId, labels, dataset, color = '#4f8ef7') {
   });
 }
 
-/* ── Export ───────────────────────────────────────────────── */
+/* ── 导出 ───────────────────────────────────────────────── */
 
 $('exportCsv').addEventListener('click', () => { window.location.href = API.export.csv; });
 
@@ -469,13 +470,13 @@ $('exportJson').addEventListener('click', async () => {
   a.click();
 });
 
-/* ── Config editor ────────────────────────────────────────── */
+/* ── 配置编辑器 ────────────────────────────────────────── */
 
 async function loadConfigEditor() {
   try {
     const cfg = await apiFetch(API.config);
     $('configEditor').value = JSON.stringify(cfg, null, 2);
-  } catch (e) { $('configEditor').value = '// Error loading config: ' + e.message; }
+  } catch (e) { $('configEditor').value = '// 加载配置出错: ' + e.message; }
 }
 
 $('loadConfigBtn').addEventListener('click', loadConfigEditor);
@@ -484,12 +485,12 @@ $('saveConfigBtn').addEventListener('click', async () => {
   try {
     const cfg = JSON.parse($('configEditor').value);
     const res = await post(API.config, cfg);
-    showResult('configResult', res.success ? 'Config saved successfully!' : 'Save failed.', !res.success);
-    showToast(res.success ? '✅ Config saved' : '❌ Save failed');
-  } catch (e) { showResult('configResult', 'JSON parse error: ' + e.message, true); }
+    showResult('configResult', res.success ? '配置保存成功！' : '保存失败。', !res.success);
+    showToast(res.success ? '✅ 配置已保存' : '❌ 保存失败');
+  } catch (e) { showResult('configResult', 'JSON 解析错误: ' + e.message, true); }
 });
 
-/* ── Presets ──────────────────────────────────────────────── */
+/* ── 预设 ──────────────────────────────────────────────── */
 
 const PRESETS = {
   night:  { mode: 'trickle', max_limit: 80,  temperature_threshold: 38, temperature_critical: 43 },
@@ -509,14 +510,14 @@ document.querySelectorAll('.preset-btn').forEach(btn => {
       if (res.success) {
         await post(API.charging.mode, { mode: p.mode });
         await post(API.charging.limit, { limit: p.max_limit });
-        showToast('✅ Preset applied: ' + btn.dataset.preset);
+        showToast('✅ 已应用预设: ' + btn.dataset.preset);
         loadConfigEditor();
       }
     } catch (e) { showToast('❌ ' + e.message); }
   });
 });
 
-/* ── Init & polling ───────────────────────────────────────── */
+/* ── 初始化与轮询 ───────────────────────────────────────── */
 
 initTheme();
 refreshStatus();

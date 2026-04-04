@@ -1,100 +1,100 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ChargeControl Dashboard</title>
+  <title>充电控制 仪表盘</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- ── Navigation ───────────────────────────────────────── -->
+  <!-- ── 导航栏 ───────────────────────────────────────── -->
   <nav class="navbar">
     <div class="nav-brand">
       <span class="nav-icon">⚡</span>
-      <span class="nav-title">ChargeControl</span>
+      <span class="nav-title">充电控制</span>
     </div>
     <div class="nav-actions">
-      <button id="themeToggle" class="btn btn-icon" title="Toggle theme">🌙</button>
-      <span id="connectionStatus" class="badge badge-success">Connected</span>
+      <button id="themeToggle" class="btn btn-icon" title="切换主题">🌙</button>
+      <span id="connectionStatus" class="badge badge-success">已连接</span>
     </div>
   </nav>
 
   <main class="layout">
-    <!-- ── Sidebar ──────────────────────────────────────────── -->
+    <!-- ── 侧边栏 ──────────────────────────────────────────── -->
     <aside class="sidebar">
       <nav class="sidebar-nav">
-        <a href="#" class="sidebar-link active" data-tab="dashboard">📊 Dashboard</a>
-        <a href="#" class="sidebar-link" data-tab="control">🎛️ Control</a>
-        <a href="#" class="sidebar-link" data-tab="modes">⚡ Modes</a>
-        <a href="#" class="sidebar-link" data-tab="stats">📈 Statistics</a>
-        <a href="#" class="sidebar-link" data-tab="config">⚙️ Settings</a>
+        <a href="#" class="sidebar-link active" data-tab="dashboard">📊 仪表盘</a>
+        <a href="#" class="sidebar-link" data-tab="control">🎛️ 控制</a>
+        <a href="#" class="sidebar-link" data-tab="modes">⚡ 模式</a>
+        <a href="#" class="sidebar-link" data-tab="stats">📈 统计</a>
+        <a href="#" class="sidebar-link" data-tab="config">⚙️ 设置</a>
       </nav>
     </aside>
 
-    <!-- ── Main content ──────────────────────────────────────── -->
+    <!-- ── 主内容区 ──────────────────────────────────────── -->
     <div class="content">
 
-      <!-- ═══════════════════ DASHBOARD TAB ═══════════════════ -->
+      <!-- ═══════════════════ 仪表盘标签页 ═══════════════════ -->
       <section class="tab-panel active" id="tab-dashboard">
-        <h2 class="section-title">Dashboard</h2>
+        <h2 class="section-title">仪表盘</h2>
 
-        <!-- Status cards -->
+        <!-- 状态卡片 -->
         <div class="card-grid">
           <div class="card card--accent">
-            <div class="card-label">Battery Level</div>
+            <div class="card-label">电池电量</div>
             <div class="card-value" id="batteryLevel">—</div>
             <div class="battery-bar-wrap">
               <div class="battery-bar" id="batteryBar"></div>
             </div>
           </div>
           <div class="card">
-            <div class="card-label">Status</div>
+            <div class="card-label">充电状态</div>
             <div class="card-value" id="chargingStatus">—</div>
           </div>
           <div class="card">
-            <div class="card-label">Temperature</div>
+            <div class="card-label">温度</div>
             <div class="card-value" id="batteryTemp">—</div>
           </div>
           <div class="card">
-            <div class="card-label">Current Mode</div>
+            <div class="card-label">当前模式</div>
             <div class="card-value" id="currentMode">—</div>
           </div>
           <div class="card">
-            <div class="card-label">Voltage</div>
+            <div class="card-label">电压</div>
             <div class="card-value" id="batteryVoltage">—</div>
           </div>
           <div class="card">
-            <div class="card-label">Current</div>
+            <div class="card-label">电流</div>
             <div class="card-value" id="batteryCurrent">—</div>
           </div>
         </div>
 
-        <!-- Temperature trend chart (last 60 snapshots) -->
+        <!-- 温度趋势图（最近60次快照） -->
         <div class="card card--full">
           <div class="card-header">
-            <span>Temperature History</span>
-            <button class="btn btn-sm" id="refreshChart">↺ Refresh</button>
+            <span>温度历史记录</span>
+            <button class="btn btn-sm" id="refreshChart">↺ 刷新</button>
           </div>
           <canvas id="tempChart" height="140"></canvas>
         </div>
 
-        <!-- Battery health -->
+        <!-- 电池健康度 -->
         <div class="card card--full" id="healthCard">
-          <div class="card-label">Battery Health Score</div>
+          <div class="card-label">电池健康评分</div>
           <div class="card-value" id="healthScore">—</div>
           <p class="card-sub" id="healthDetail"></p>
         </div>
       </section>
 
-      <!-- ═══════════════════ CONTROL TAB ═══════════════════ -->
+      <!-- ═══════════════════ 控制标签页 ═══════════════════ -->
       <section class="tab-panel" id="tab-control">
-        <h2 class="section-title">Charging Control</h2>
+        <h2 class="section-title">充电控制</h2>
 
-        <!-- Enable / disable -->
+        <!-- 启用 / 禁用 -->
         <div class="card">
-          <div class="card-header">Charging Switch</div>
+          <div class="card-header">充电开关</div>
           <label class="toggle-wrap">
-            <span>Enable Charging</span>
+            <span>启用充电</span>
             <div class="toggle">
               <input type="checkbox" id="chargingToggle" checked />
               <span class="toggle-slider"></span>
@@ -102,65 +102,65 @@
           </label>
         </div>
 
-        <!-- Charge limit slider -->
+        <!-- 充电上限滑块 -->
         <div class="card">
-          <div class="card-header">Maximum Charge Limit</div>
+          <div class="card-header">最大充电上限</div>
           <div class="slider-row">
             <input type="range" id="chargeLimitSlider" min="20" max="100" value="80" />
             <span class="slider-value" id="chargeLimitValue">80%</span>
           </div>
-          <p class="card-sub">Charging will stop when battery reaches this level.</p>
-          <button class="btn btn-primary" id="applyLimitBtn">Apply Limit</button>
+          <p class="card-sub">电量达到此值时将停止充电。</p>
+          <button class="btn btn-primary" id="applyLimitBtn">应用上限</button>
         </div>
 
-        <!-- Temperature threshold -->
+        <!-- 温度阈值 -->
         <div class="card">
-          <div class="card-header">Temperature Threshold</div>
+          <div class="card-header">温度阈值</div>
           <div class="slider-row">
             <input type="range" id="tempThresholdSlider" min="30" max="50" value="40" />
             <span class="slider-value" id="tempThresholdValue">40°C</span>
           </div>
           <div class="slider-row">
-            <label>Critical Temp:</label>
+            <label>临界温度：</label>
             <input type="range" id="tempCriticalSlider" min="35" max="55" value="45" />
             <span class="slider-value" id="tempCriticalValue">45°C</span>
           </div>
-          <button class="btn btn-primary" id="applyTempBtn">Apply Thresholds</button>
+          <button class="btn btn-primary" id="applyTempBtn">应用阈值</button>
         </div>
 
-        <!-- Temperature protection -->
+        <!-- 温度保护 -->
         <div class="card">
-          <div class="card-header">Temperature Protection</div>
-          <p class="card-sub">Manually trigger a temperature check.</p>
-          <button class="btn btn-warning" id="tempCheckBtn">Run Temperature Check</button>
+          <div class="card-header">温度保护</div>
+          <p class="card-sub">手动触发温度检测。</p>
+          <button class="btn btn-warning" id="tempCheckBtn">执行温度检测</button>
           <div id="tempCheckResult" class="result-box hidden"></div>
         </div>
       </section>
 
-      <!-- ═══════════════════ MODES TAB ═══════════════════ -->
+      <!-- ═══════════════════ 模式标签页 ═══════════════════ -->
       <section class="tab-panel" id="tab-modes">
-        <h2 class="section-title">Charging Modes</h2>
+        <h2 class="section-title">充电模式</h2>
         <div class="modes-grid" id="modesGrid">
-          <!-- Populated by JS -->
+          <!-- 由 JS 动态填充 -->
         </div>
         <div id="modeSetResult" class="result-box hidden"></div>
       </section>
 
-      <!-- ═══════════════════ STATISTICS TAB ═══════════════════ -->
+      <!-- ═══════════════════ 统计标签页 ═══════════════════ -->
       <section class="tab-panel" id="tab-stats">
-        <h2 class="section-title">Charging Statistics</h2>
+        <h2 class="section-title">充电统计</h2>
 
         <div class="tab-sub-nav">
-          <button class="btn btn-sm active" data-period="daily">Daily (7d)</button>
-          <button class="btn btn-sm" data-period="weekly">Weekly</button>
-          <button class="btn btn-sm" data-period="monthly">Monthly</button>
+          <button class="btn btn-sm active" data-period="daily">每日（7天）</button>
+          <button class="btn btn-sm" data-period="weekly">每周</button>
+          <button class="btn btn-sm" data-period="monthly">每月</button>
         </div>
 
         <canvas id="statsChart" height="180"></canvas>
 
         <div class="card card--full">
           <div class="card-header">
-            <span>Sessions Data</span>
+            <span>充电会话数据</span>
             <div class="export-btns">
               <button class="btn btn-sm" id="exportCsv">⬇ CSV</button>
               <button class="btn btn-sm" id="exportJson">⬇ JSON</button>
@@ -175,37 +175,37 @@
         </div>
       </section>
 
-      <!-- ═══════════════════ SETTINGS TAB ═══════════════════ -->
+      <!-- ═══════════════════ 设置标签页 ═══════════════════ -->
       <section class="tab-panel" id="tab-config">
-        <h2 class="section-title">Settings</h2>
+        <h2 class="section-title">设置</h2>
 
         <div class="card card--full">
           <div class="card-header">
-            <span>Configuration (JSON)</span>
+            <span>配置文件（JSON）</span>
             <div>
-              <button class="btn btn-sm" id="loadConfigBtn">Load</button>
-              <button class="btn btn-primary btn-sm" id="saveConfigBtn">Save</button>
+              <button class="btn btn-sm" id="loadConfigBtn">加载</button>
+              <button class="btn btn-primary btn-sm" id="saveConfigBtn">保存</button>
             </div>
           </div>
           <textarea id="configEditor" class="config-editor" spellcheck="false"></textarea>
           <div id="configResult" class="result-box hidden"></div>
         </div>
 
-        <!-- Schedule rules (basic UI) -->
+        <!-- 快捷预设 -->
         <div class="card card--full">
-          <div class="card-header">Quick Presets</div>
+          <div class="card-header">快捷预设</div>
           <div class="presets-grid">
-            <button class="btn preset-btn" data-preset="night">🌙 Night (Trickle 80%)</button>
-            <button class="btn preset-btn" data-preset="work">💼 Work (Normal 90%)</button>
-            <button class="btn preset-btn" data-preset="travel">✈️ Travel (Fast 100%)</button>
-            <button class="btn preset-btn" data-preset="save">🌿 Save (Trickle 60%)</button>
+            <button class="btn preset-btn" data-preset="night">🌙 夜间（涓流 80%）</button>
+            <button class="btn preset-btn" data-preset="work">💼 办公（普通 90%）</button>
+            <button class="btn preset-btn" data-preset="travel">✈️ 出行（快充 100%）</button>
+            <button class="btn preset-btn" data-preset="save">🌿 省电（涓流 60%）</button>
           </div>
         </div>
       </section>
     </div>
   </main>
 
-  <!-- Toast notifications -->
+  <!-- 弹出通知 -->
   <div id="toast" class="toast hidden"></div>
 
   <script src="script.js"></script>
