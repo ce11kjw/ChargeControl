@@ -78,7 +78,7 @@ const API = {
 /* ── 工具函数 ──────────────────────────────────────────────── */
 
 async function apiFetch(url, opts = {}) {
-  const fullUrl = url.startsWith('http') ? url : API_BASE + url;
+  const fullUrl = url.startsWith('http') ? url : new URL(url, API_BASE).toString();
   try {
     const res = await fetch(fullUrl, {
       headers: { 'Content-Type': 'application/json' },
