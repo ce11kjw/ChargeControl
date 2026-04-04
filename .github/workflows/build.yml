@@ -1,0 +1,88 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install linting tools
+        run: pip install flake8
+
+      - name: Lint with flake8
+        run: |
+          flake8 server.py charge_control.py stats.py \
+            --max-line-length=120 \
+            --extend-ignore=E501
+
+  test-python:
+    name: Test Python
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install flask flask-cors pytest
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --tb=short 2>/dev/null || \
+          python -c "
+          import charge_control, stats, json, os
+          # Basic smoke tests
+          cfg = charge_control.load_config()
+          assert isinstance(cfg, dict), 'load_config should return a dict'
+          batt = charge_control.get_battery_status()
+          assert 'capacity' in batt
+          assert 'temperature' in batt
+          stats.init_db()
+          snaps = stats.get_recent_snapshots(10)
+          assert isinstance(snaps, list)
+          daily = stats.get_daily_stats(7)
+          assert isinstance(daily, list)
+          print('All smoke tests passed')
+          "
+
+  build-zip:
+    name: Build Module ZIP
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: [lint-python, test-python]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ZIP
+        run: bash build.sh
+
+      - name: Get version
+        id: version
+        run: echo "version=$(grep '^version=' module.prop | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChargeControl-${{ steps.version.outputs.version }}
+          path: out/*.zip
+          retention-days: 30

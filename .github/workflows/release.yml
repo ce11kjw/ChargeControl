@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install flask flask-cors
+
+      - name: Get version info
+        id: info
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          VERSION_CLEAN="${VERSION#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version_clean=${VERSION_CLEAN}" >> "$GITHUB_OUTPUT"
+          echo "zip_name=ChargeControl_${VERSION}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Update module.prop version
+        run: |
+          VERSION_CLEAN="${{ steps.info.outputs.version_clean }}"
+          # Derive versionCode from semver (e.g. 1.2.3 → 10203)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_CLEAN"
+          CODE=$(( ${MAJOR:-0} * 10000 + ${MINOR:-0} * 100 + ${PATCH:-0} ))
+          sed -i "s/^version=.*/version=v${VERSION_CLEAN}/" module.prop
+          sed -i "s/^versionCode=.*/versionCode=${CODE}/" module.prop
+          cat module.prop
+
+      - name: Build ZIP
+        run: bash build.sh
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Extract commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --no-merges)
+          else
+            NOTES=$(git log --pretty=format:"- %s" --no-merges -20)
+          fi
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.info.outputs.version }}
+          name: ChargeControl ${{ steps.info.outputs.version }}
+          body: |
+            ## ChargeControl ${{ steps.info.outputs.version }}
+
+            ### What's Changed
+            ${{ steps.changelog.outputs.notes }}
+
+            ### Installation
+            1. Download `ChargeControl_${{ steps.info.outputs.version }}.zip`
+            2. Open **KernelSU Manager** → Modules → Install from storage
+            3. Select the downloaded ZIP and reboot
+
+            ### Web UI
+            After installation, access the dashboard at `http://<device-ip>:8080`
+          files: out/ChargeControl_${{ steps.info.outputs.version }}.zip
+          draft: false
+          prerelease: ${{ contains(steps.info.outputs.version, '-') }}

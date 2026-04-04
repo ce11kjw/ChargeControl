@@ -1,6 +1,7 @@
 id=ChargeControl
 name=ChargeControl
-version=1.0
-versionCode=1
+version=v1.0.1
+versionCode=101
 author=ce11kjw
-description=KernelSU module for charging control
+description=Advanced KernelSU charging control module with Web UI, statistics, and multi-mode support
+updateJson=https://raw.githubusercontent.com/ce11kjw/ChargeControl/main/update.json

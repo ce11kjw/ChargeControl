@@ -1,0 +1,56 @@
+{
+  "version": "1.0.1",
+  "charging": {
+    "max_limit": 80,
+    "min_limit": 20,
+    "mode": "normal",
+    "fast_charge_enabled": true,
+    "temperature_threshold": 40,
+    "temperature_critical": 45
+  },
+  "modes": {
+    "normal": {
+      "max_current_ma": 2000,
+      "max_voltage_mv": 4350,
+      "description": "Standard charging mode"
+    },
+    "fast": {
+      "max_current_ma": 4000,
+      "max_voltage_mv": 4400,
+      "description": "Fast charging mode"
+    },
+    "trickle": {
+      "max_current_ma": 500,
+      "max_voltage_mv": 4200,
+      "description": "Trickle charging for battery longevity"
+    },
+    "power_saving": {
+      "max_current_ma": 1000,
+      "max_voltage_mv": 4300,
+      "description": "Power saving mode"
+    },
+    "super_saver": {
+      "max_current_ma": 300,
+      "max_voltage_mv": 4100,
+      "description": "Super saver mode for maximum battery health"
+    }
+  },
+  "schedule": {
+    "enabled": false,
+    "rules": []
+  },
+  "notifications": {
+    "enabled": true,
+    "charge_complete": true,
+    "temperature_warning": true
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "debug": false
+  },
+  "stats": {
+    "enabled": true,
+    "retention_days": 90
+  }
+}
