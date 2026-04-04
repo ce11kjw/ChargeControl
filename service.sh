@@ -5,38 +5,80 @@
 
 MODDIR="${0%/*}"
 LOG="$MODDIR/module.log"
+PIDFILE="$MODDIR/server.pid"
+LOCKDIR="$MODDIR/.service.lock"
+
+# Maximum seconds to wait for a Python interpreter to become available.
+MAX_WAIT=180
+INTERVAL=2
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 
 log "service.sh started"
 
-# Wait for the system to settle before starting the server
+# --- Prevent concurrent / duplicate starts ---
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    log "INFO: Another instance is already starting (lock exists). Exiting."
+    exit 0
+fi
+# Always release the lock on exit, regardless of how the script terminates.
+trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT
+
+# If the server process recorded in server.pid is still alive, do not restart it.
+if [ -f "$PIDFILE" ]; then
+    OLD_PID="$(cat "$PIDFILE" 2>/dev/null)"
+    if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+        log "INFO: Server already running with PID $OLD_PID. Exiting."
+        exit 0
+    fi
+fi
+
+# Wait for the system to settle before starting the server.
 sleep 15
 
-# Locate a Python interpreter – check common paths on Android and Linux
+# --- Locate a Python interpreter (retries to handle boot-time race conditions) ---
+find_python() {
+    # Prefer absolute Termux paths first; they are unaffected by a minimal root PATH.
+    for candidate in \
+        /data/data/com.termux/files/usr/bin/python3 \
+        /data/data/com.termux/files/usr/bin/python \
+        python3 python \
+        /system/bin/python3 /system/bin/python
+    do
+        if [ -x "$candidate" ] || command -v "$candidate" >/dev/null 2>&1; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 PYTHON=""
-for candidate in python3 python /system/bin/python3 /system/bin/python \
-                 /data/data/com.termux/files/usr/bin/python3 \
-                 /data/data/com.termux/files/usr/bin/python; do
-    # Accept the candidate if it is on PATH or is a directly executable file
-    if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
-        PYTHON="$candidate"
+WAITED=0
+
+while [ "$WAITED" -lt "$MAX_WAIT" ]; do
+    PYTHON="$(find_python)"
+    if [ -n "$PYTHON" ]; then
         break
     fi
+    sleep "$INTERVAL"
+    WAITED=$((WAITED + INTERVAL))
 done
 
 if [ -z "$PYTHON" ]; then
-    log "ERROR: No Python interpreter found. Searched: python3, python,"
-    log "       /system/bin/python3, /system/bin/python, Termux paths."
+    log "ERROR: No Python interpreter found after waiting ${MAX_WAIT}s."
+    log "       Searched: /data/data/com.termux/files/usr/bin/python3,"
+    log "                 /data/data/com.termux/files/usr/bin/python,"
+    log "                 python3, python, /system/bin/python3, /system/bin/python."
     log "       Install Python (e.g. via Termux: pkg install python) and retry."
     exit 1
 fi
 
 log "INFO: Using Python interpreter: $PYTHON ($($PYTHON --version 2>&1))"
 
-# Start the server via launcher.py (handles dependency checks automatically)
-cd "$MODDIR"
+# Start the server via launcher.py (handles dependency checks automatically).
+cd "$MODDIR" || exit 1
 log "Starting ChargeControl server via launcher.py (PID will be written to server.pid)"
 nohup "$PYTHON" launcher.py >> "$LOG" 2>&1 &
-echo $! > "$MODDIR/server.pid"
-log "Server started with PID $(cat "$MODDIR/server.pid")"
+echo $! > "$PIDFILE"
+log "Server started with PID $(cat "$PIDFILE")"
