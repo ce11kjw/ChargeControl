@@ -12,14 +12,23 @@
      - 浏览器控制台：localStorage.setItem('cc-api-base', 'http://<设备IP>:8080')
    ──────────────────────────────────────────────────────── */
 const API_BASE = (() => {
-  const params = new URLSearchParams(window.location.search);
-  const fromQuery = params.get('api');
-  if (fromQuery) {
-    localStorage.setItem('cc-api-base', fromQuery.replace(/\/$/, ''));
-    return fromQuery.replace(/\/$/, '');
+  // Validate that a string is a safe http/https origin; return null if invalid.
+  function sanitizeOrigin(val) {
+    if (!val) return null;
+    try {
+      const u = new URL(val);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+      return u.origin; // strips path, query, hash and normalises
+    } catch { return null; }
   }
-  const stored = localStorage.getItem('cc-api-base');
-  if (stored) return stored.replace(/\/$/, '');
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = sanitizeOrigin(params.get('api'));
+  if (fromQuery) {
+    localStorage.setItem('cc-api-base', fromQuery);
+    return fromQuery;
+  }
+  const stored = sanitizeOrigin(localStorage.getItem('cc-api-base'));
+  if (stored) return stored;
   return 'http://127.0.0.1:8080';
 })();
 
@@ -478,7 +487,14 @@ function drawBarChart(canvasId, labels, dataset, color = '#4f8ef7') {
 
 /* ── 导出 ───────────────────────────────────────────────── */
 
-$('exportCsv').addEventListener('click', () => { window.location.href = API_BASE + API.export.csv; });
+$('exportCsv').addEventListener('click', () => {
+  try {
+    const exportUrl = new URL(API.export.csv, API_BASE);
+    if (exportUrl.protocol === 'http:' || exportUrl.protocol === 'https:') {
+      window.location.href = exportUrl.toString();
+    }
+  } catch { /* ignore invalid URL */ }
+});
 
 $('exportJson').addEventListener('click', async () => {
   const data = await apiFetch(API.export.json);
