@@ -1,6 +1,6 @@
 """
-ChargeControl - Flask Web Server
-Provides the REST API and serves the Web UI.
+充电控制 - Flask Web 服务器
+提供 REST API 并托管 Web 界面。
 """
 
 import json
@@ -27,11 +27,11 @@ WEBROOT = os.path.join(BASE_DIR, "webroot")
 app = Flask(__name__, static_folder=WEBROOT, static_url_path="")
 CORS(app)
 
-# ── Initialise database ──────────────────────────────────────────────────────
+# ── 初始化数据库 ──────────────────────────────────────────────────────────────
 st.init_db()
 
-# ── Background snapshot collector ────────────────────────────────────────────
-_snapshot_interval = 30  # seconds
+# ── 后台快照采集器 ────────────────────────────────────────────────────────────
+_snapshot_interval = 30  # 秒
 
 
 def _snapshot_worker():
@@ -49,7 +49,7 @@ def _snapshot_worker():
                 mode=mode,
             )
         except Exception as exc:
-            logger.warning("Snapshot error: %s", exc)
+            logger.warning("快照记录出错: %s", exc)
         time.sleep(_snapshot_interval)
 
 
@@ -57,28 +57,28 @@ _snapshot_thread = threading.Thread(target=_snapshot_worker, daemon=True)
 _snapshot_thread.start()
 
 
-# ── Static pages ─────────────────────────────────────────────────────────────
+# ── 静态页面 ─────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
     return send_from_directory(WEBROOT, "index.html")
 
 
-# ── Battery / status ─────────────────────────────────────────────────────────
+# ── 电池 / 状态 ─────────────────────────────────────────────────────────────
 
 @app.route("/api/status")
 def api_status():
-    """Return live battery status."""
+    """返回实时电池状态。"""
     return jsonify(cc.get_battery_status())
 
 
 @app.route("/api/settings")
 def api_settings():
-    """Return current configuration + live battery data."""
+    """返回当前配置及实时电池数据。"""
     return jsonify(cc.get_all_settings())
 
 
-# ── Charging control ─────────────────────────────────────────────────────────
+# ── 充电控制 ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/charging/enable", methods=["POST"])
 def api_enable_charging():
@@ -94,11 +94,11 @@ def api_set_limit():
     try:
         limit = int(data["limit"])
     except (KeyError, ValueError):
-        return jsonify({"error": "limit must be an integer 0-100"}), 400
+        return jsonify({"error": "limit 必须为 0-100 之间的整数"}), 400
     try:
         ok = cc.set_charge_limit(limit)
     except ValueError:
-        return jsonify({"error": "limit must be an integer 0-100"}), 400
+        return jsonify({"error": "limit 必须为 0-100 之间的整数"}), 400
     return jsonify({"success": ok, "max_limit": limit})
 
 
@@ -108,11 +108,11 @@ def api_set_mode():
     mode = data.get("mode", "")
     valid_modes = list(cc.MODES.keys())
     if mode not in valid_modes:
-        return jsonify({"error": f"mode must be one of {valid_modes}"}), 400
+        return jsonify({"error": f"mode 必须为以下值之一: {valid_modes}"}), 400
     try:
         ok = cc.set_charging_mode(mode)
     except ValueError:
-        return jsonify({"error": f"mode must be one of {valid_modes}"}), 400
+        return jsonify({"error": f"mode 必须为以下值之一: {valid_modes}"}), 400
     return jsonify({"success": ok, "mode": mode})
 
 
@@ -122,7 +122,7 @@ def api_temp_check():
     return jsonify(result)
 
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# ── 配置管理 ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/config", methods=["GET"])
 def api_get_config():
@@ -133,12 +133,12 @@ def api_get_config():
 def api_save_config():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
-        return jsonify({"error": "JSON object required"}), 400
+        return jsonify({"error": "需要 JSON 对象"}), 400
     ok = cc.save_config(data)
     return jsonify({"success": ok})
 
 
-# ── Statistics ────────────────────────────────────────────────────────────────
+# ── 统计数据 ────────────────────────────────────────────────────────────────
 
 @app.route("/api/stats/daily")
 def api_stats_daily():
@@ -167,7 +167,7 @@ def api_battery_health():
     return jsonify(st.get_battery_health_trend())
 
 
-# ── Data export ───────────────────────────────────────────────────────────────
+# ── 数据导出 ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/export/csv")
 def api_export_csv():
@@ -185,7 +185,7 @@ def api_export_json():
     return jsonify(st.export_json())
 
 
-# ── Charging sessions ─────────────────────────────────────────────────────────
+# ── 充电会话 ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/sessions/start", methods=["POST"])
 def api_session_start():
@@ -202,7 +202,7 @@ def api_session_end():
     try:
         session_id = int(data["session_id"])
     except (KeyError, ValueError):
-        return jsonify({"error": "session_id required"}), 400
+        return jsonify({"error": "需要 session_id"}), 400
     battery = cc.get_battery_status()
     end_level = data.get("level", battery.get("capacity", 0))
     max_temp = data.get("max_temp", battery.get("temperature", 0))
@@ -210,7 +210,7 @@ def api_session_end():
     return jsonify({"success": ok})
 
 
-# ── Modes listing ─────────────────────────────────────────────────────────────
+# ── 充电模式列表 ─────────────────────────────────────────────────────────────
 
 @app.route("/api/modes")
 def api_modes():
@@ -219,7 +219,7 @@ def api_modes():
     return jsonify(modes)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── 程序入口 ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     config = cc.load_config()
@@ -227,5 +227,5 @@ if __name__ == "__main__":
     host = server_cfg.get("host", "0.0.0.0")
     port = server_cfg.get("port", 8080)
     debug = server_cfg.get("debug", False)
-    logger.info("Starting ChargeControl server on %s:%s", host, port)
+    logger.info("正在启动充电控制服务器，地址: %s:%s", host, port)
     app.run(host=host, port=port, debug=debug)

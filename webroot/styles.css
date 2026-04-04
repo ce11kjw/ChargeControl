@@ -1,9 +1,9 @@
 /* ===================================================
-   ChargeControl – Modern Responsive Stylesheet
-   Supports dark / light themes via data-theme attr
+   充电控制 – 现代响应式样式表
+   通过 data-theme 属性支持暗色/亮色主题
    =================================================== */
 
-/* ── CSS variables ──────────────────────────────────── */
+/* ── CSS 变量 ──────────────────────────────────────── */
 :root {
   --bg:          #0f1117;
   --surface:     #1a1d27;
@@ -31,7 +31,7 @@
   --shadow:     0 4px 24px rgba(0,0,0,.1);
 }
 
-/* ── Reset / base ───────────────────────────────────── */
+/* ── 重置 / 基础样式 ───────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
@@ -46,7 +46,7 @@ a { color: var(--accent); text-decoration: none; }
 
 canvas { max-width: 100%; }
 
-/* ── Navbar ─────────────────────────────────────────── */
+/* ── 导航栏 ─────────────────────────────────────────── */
 .navbar {
   display: flex;
   align-items: center;
@@ -63,7 +63,7 @@ canvas { max-width: 100%; }
 .nav-icon  { font-size: 1.4rem; }
 .nav-actions { display: flex; align-items: center; gap: .75rem; }
 
-/* ── Layout ─────────────────────────────────────────── */
+/* ── 布局 ─────────────────────────────────────────── */
 .layout {
   display: flex;
   height: calc(100vh - 52px);
@@ -102,7 +102,7 @@ canvas { max-width: 100%; }
   padding: 1.5rem;
 }
 
-/* ── Tab panels ─────────────────────────────────────── */
+/* ── 标签页面板 ─────────────────────────────────────── */
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
@@ -113,7 +113,7 @@ canvas { max-width: 100%; }
   color: var(--text);
 }
 
-/* ── Cards ──────────────────────────────────────────── */
+/* ── 卡片 ──────────────────────────────────────────── */
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -159,7 +159,7 @@ canvas { max-width: 100%; }
 
 .card-sub  { font-size: .8rem; color: var(--text-muted); margin-top: .5rem; }
 
-/* ── Battery bar ────────────────────────────────────── */
+/* ── 电池进度条 ────────────────────────────────────── */
 .battery-bar-wrap {
   height: 8px;
   background: var(--surface2);
@@ -176,7 +176,7 @@ canvas { max-width: 100%; }
   width: 0%;
 }
 
-/* ── Buttons ────────────────────────────────────────── */
+/* ── 按钮 ────────────────────────────────────────────── */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -208,7 +208,7 @@ canvas { max-width: 100%; }
 
 .btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
-/* ── Toggle switch ──────────────────────────────────── */
+/* ── 拨动开关 ──────────────────────────────────────── */
 .toggle-wrap {
   display: flex;
   align-items: center;
@@ -241,7 +241,7 @@ canvas { max-width: 100%; }
 .toggle input:checked + .toggle-slider { background: var(--accent); border-color: var(--accent); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(20px); background: #fff; }
 
-/* ── Sliders ────────────────────────────────────────── */
+/* ── 滑块 ────────────────────────────────────────────── */
 .slider-row {
   display: flex;
   align-items: center;
@@ -266,7 +266,7 @@ input[type="range"] {
   color: var(--accent);
 }
 
-/* ── Modes grid ─────────────────────────────────────── */
+/* ── 模式网格 ─────────────────────────────────────── */
 .modes-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -291,7 +291,7 @@ input[type="range"] {
 .mode-name  { font-weight: 700; margin-bottom: .25rem; }
 .mode-desc  { font-size: .75rem; color: var(--text-muted); }
 
-/* ── Stats ──────────────────────────────────────────── */
+/* ── 统计 ──────────────────────────────────────────── */
 .tab-sub-nav { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
 
 .table-wrap { overflow-x: auto; }
@@ -313,7 +313,7 @@ tr:hover td { background: var(--surface2); }
 
 .export-btns { display: flex; gap: .5rem; }
 
-/* ── Config editor ──────────────────────────────────── */
+/* ── 配置编辑器 ──────────────────────────────────────── */
 .config-editor {
   width: 100%;
   min-height: 300px;
@@ -331,11 +331,11 @@ tr:hover td { background: var(--surface2); }
 
 .config-editor:focus { outline: 2px solid var(--accent); }
 
-/* ── Presets ────────────────────────────────────────── */
+/* ── 预设 ────────────────────────────────────────────── */
 .presets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: .75rem; }
 .preset-btn { width: 100%; justify-content: center; }
 
-/* ── Result box ─────────────────────────────────────── */
+/* ── 结果框 ─────────────────────────────────────────── */
 .result-box {
   margin-top: .75rem;
   padding: .75rem;
@@ -350,7 +350,7 @@ tr:hover td { background: var(--surface2); }
 .result-box.success { border-color: var(--success); background: rgba(34,197,94,.08); color: var(--success); }
 .result-box.error   { border-color: var(--danger);  background: rgba(239,68,68,.08);  color: var(--danger); }
 
-/* ── Badge ──────────────────────────────────────────── */
+/* ── 徽章 ──────────────────────────────────────────────── */
 .badge {
   padding: .2rem .55rem;
   border-radius: 99px;
@@ -361,7 +361,7 @@ tr:hover td { background: var(--surface2); }
 .badge-success { background: rgba(34,197,94,.15); color: var(--success); }
 .badge-danger  { background: rgba(239,68,68,.15);  color: var(--danger); }
 
-/* ── Toast ──────────────────────────────────────────── */
+/* ── 弹出通知 ──────────────────────────────────────────── */
 .toast {
   position: fixed;
   bottom: 1.5rem;
@@ -378,13 +378,13 @@ tr:hover td { background: var(--surface2); }
 
 .toast.hidden { opacity: 0; pointer-events: none; }
 
-/* ── Responsive ─────────────────────────────────────── */
+/* ── 响应式 ─────────────────────────────────────────── */
 @media (max-width: 640px) {
   .sidebar { display: none; }
   .content { padding: 1rem; }
   .card-value { font-size: 1.3rem; }
 
-  /* Show tabs as bottom nav on mobile */
+  /* 移动端底部导航栏 */
   .layout { flex-direction: column; height: auto; }
   .content { height: calc(100vh - 52px - 56px); overflow-y: auto; }
 

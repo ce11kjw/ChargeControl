@@ -1,6 +1,6 @@
 """
-ChargeControl - Core Charging Control Module
-Manages Android battery charging via kernel sysfs interfaces.
+充电控制 - 核心充电控制模块
+通过内核 sysfs 接口管理 Android 电池充电。
 """
 
 import os
@@ -12,7 +12,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Sysfs paths for battery/charging control
+# 电池/充电控制的 sysfs 路径
 SYSFS_PATHS = {
     "battery_capacity": [
         "/sys/class/power_supply/battery/capacity",
@@ -73,7 +73,7 @@ MODES = {
 
 
 def _read_sysfs(key: str) -> str | None:
-    """Try each candidate path for a sysfs key and return the first readable value."""
+    """依次尝试该 sysfs 键的所有候选路径，返回第一个可读取的值。"""
     for path in SYSFS_PATHS.get(key, []):
         try:
             with open(path, "r") as f:
@@ -84,48 +84,48 @@ def _read_sysfs(key: str) -> str | None:
 
 
 def _write_sysfs(key: str, value: str) -> bool:
-    """Write a value to the first writable sysfs path for the given key."""
+    """将值写入指定键的第一个可写 sysfs 路径。"""
     for path in SYSFS_PATHS.get(key, []):
         try:
             with open(path, "w") as f:
                 f.write(str(value))
-            logger.info("Wrote %s -> %s", value, path)
+            logger.info("已写入 %s -> %s", value, path)
             return True
         except (OSError, PermissionError):
             continue
-    logger.warning("Could not write '%s' to any path for key '%s'", value, key)
+    logger.warning("无法将 '%s' 写入键 '%s' 的任何路径", value, key)
     return False
 
 
 def load_config() -> dict:
-    """Load configuration from config.json."""
+    """从 config.json 加载配置。"""
     try:
         with open(CONFIG_PATH, "r") as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError) as e:
-        logger.error("Failed to load config: %s", e)
+        logger.error("加载配置失败: %s", e)
         return {}
 
 
 def save_config(config: dict) -> bool:
-    """Save configuration to config.json."""
+    """将配置保存到 config.json。"""
     try:
         with open(CONFIG_PATH, "w") as f:
             json.dump(config, f, indent=2)
         return True
     except OSError as e:
-        logger.error("Failed to save config: %s", e)
+        logger.error("保存配置失败: %s", e)
         return False
 
 
 def get_battery_status() -> dict:
-    """Read current battery status from sysfs."""
+    """从 sysfs 读取当前电池状态。"""
     capacity_raw = _read_sysfs("battery_capacity")
     temp_raw = _read_sysfs("battery_temp")
     voltage_raw = _read_sysfs("battery_voltage")
     current_raw = _read_sysfs("battery_current")
 
-    # Temperature is reported in tenths of degrees Celsius on Android
+    # Android 系统中温度以摄氏度十分之一为单位上报
     temp_c = None
     if temp_raw is not None:
         try:
@@ -152,8 +152,8 @@ def get_battery_status() -> dict:
 
     return {
         "capacity": int(capacity_raw) if capacity_raw is not None else _mock_capacity(),
-        "status": _read_sysfs("battery_status") or "Unknown",
-        "health": _read_sysfs("battery_health") or "Unknown",
+        "status": _read_sysfs("battery_status") or "未知",
+        "health": _read_sysfs("battery_health") or "未知",
         "temperature": temp_c if temp_c is not None else _mock_temperature(),
         "voltage_mv": voltage_mv,
         "current_ma": current_ma,
@@ -163,13 +163,13 @@ def get_battery_status() -> dict:
 
 
 def _mock_capacity() -> int:
-    """Return a mock capacity value when sysfs is unavailable (dev/test env)."""
+    """在 sysfs 不可用时（开发/测试环境）返回模拟电量值。"""
     import random
     return random.randint(40, 90)
 
 
 def _mock_temperature() -> float:
-    """Return a mock temperature when sysfs is unavailable."""
+    """在 sysfs 不可用时返回模拟温度值。"""
     import random
     return round(25.0 + random.uniform(0, 15), 1)
 
@@ -177,20 +177,20 @@ def _mock_temperature() -> float:
 def _is_charging_enabled() -> bool:
     val = _read_sysfs("charging_enabled")
     if val is None:
-        return True  # assume enabled when unknown
+        return True  # 未知时默认视为已启用
     return val.strip() not in ("0", "false", "disabled")
 
 
 def set_charging_enabled(enabled: bool) -> bool:
-    """Enable or disable charging."""
+    """启用或禁用充电。"""
     value = "1" if enabled else "0"
     return _write_sysfs("charging_enabled", value)
 
 
 def set_charge_limit(limit_percent: int) -> bool:
-    """Set the maximum charge limit (0-100%)."""
+    """设置最大充电上限（0-100%）。"""
     if not 0 <= limit_percent <= 100:
-        raise ValueError(f"Charge limit must be 0-100, got {limit_percent}")
+        raise ValueError(f"充电上限必须在 0-100 之间，收到: {limit_percent}")
     config = load_config()
     config.setdefault("charging", {})["max_limit"] = limit_percent
     save_config(config)
@@ -198,11 +198,11 @@ def set_charge_limit(limit_percent: int) -> bool:
 
 
 def set_charging_mode(mode: str) -> bool:
-    """Apply a named charging mode (normal/fast/trickle/power_saving/super_saver)."""
+    """应用指定的充电模式（normal/fast/trickle/power_saving/super_saver）。"""
     config = load_config()
     mode_cfg = config.get("modes", {}).get(mode) or MODES.get(mode)
     if mode_cfg is None:
-        raise ValueError(f"Unknown charging mode: {mode}")
+        raise ValueError(f"未知的充电模式: {mode}")
 
     current_ma = mode_cfg.get("max_current_ma")
     ok = True
@@ -216,7 +216,7 @@ def set_charging_mode(mode: str) -> bool:
 
 
 def check_temperature_protection() -> dict:
-    """Check temperature and reduce/stop charging if too hot."""
+    """检查温度，若过热则降低或停止充电。"""
     config = load_config()
     threshold = config.get("charging", {}).get("temperature_threshold", 40)
     critical = config.get("charging", {}).get("temperature_critical", 45)
@@ -232,7 +232,7 @@ def check_temperature_protection() -> dict:
         set_charging_mode("trickle")
         action = "throttled_to_trickle"
     elif not _is_charging_enabled():
-        # Resume if temp has dropped
+        # 温度下降后恢复充电
         set_charging_enabled(True)
         action = "charging_resumed"
 
@@ -245,7 +245,7 @@ def check_temperature_protection() -> dict:
 
 
 def get_all_settings() -> dict:
-    """Return current configuration merged with live battery data."""
+    """返回当前配置与实时电池数据的合并结果。"""
     config = load_config()
     battery = get_battery_status()
     return {
