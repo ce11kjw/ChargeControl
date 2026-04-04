@@ -36,7 +36,7 @@
 ### 访问 Web 界面
 设备启动后，打开浏览器访问：
 ```
-http://<设备IP>:8080
+http://127.0.0.1:8080
 ```
 
 ---
@@ -71,15 +71,15 @@ bash build.sh
 快速示例：
 ```bash
 # 获取电池状态
-curl http://localhost:8080/api/status
+curl http://127.0.0.1:8080/api/status
 
 # 设置充电上限为 80%
-curl -X POST http://localhost:8080/api/charging/limit \
+curl -X POST http://127.0.0.1:8080/api/charging/limit \
      -H 'Content-Type: application/json' \
      -d '{"limit": 80}'
 
 # 切换为涓流模式
-curl -X POST http://localhost:8080/api/charging/mode \
+curl -X POST http://127.0.0.1:8080/api/charging/mode \
      -H 'Content-Type: application/json' \
      -d '{"mode": "trickle"}'
 ```
