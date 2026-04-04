@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
 
 permissions:
   contents: write
@@ -29,7 +35,12 @@ jobs:
       - name: Get version info
         id: info
         run: |
-          VERSION="${GITHUB_REF_NAME}"
+          # Use the manually supplied tag when triggered via workflow_dispatch
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION="${GITHUB_REF_NAME}"
+          fi
           VERSION_CLEAN="${VERSION#v}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "version_clean=${VERSION_CLEAN}" >> "$GITHUB_OUTPUT"
