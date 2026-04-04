@@ -1,6 +1,6 @@
 # ChargeControl API Reference
 
-Base URL: `http://<device-ip>:8080`
+Base URL: `http://127.0.0.1:8080`
 
 ---
 
