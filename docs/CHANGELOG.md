@@ -4,6 +4,26 @@ ChargeControl 的所有重要变更均记录于此。
 
 ---
 
+## [v4.2] – 2026-04-05
+
+### Changed
+- fix: extract inline Python heredoc to scripts/update_changelog.py to fix YAML syntax error
+- Initial plan
+- feat: add workflow_dispatch to build.yml for manual triggering
+- Initial plan
+- fix: auto-create git tag on workflow_dispatch in release.yml
+- Initial plan
+- fix: remove unused imports and add v*.* tag trigger for release workflow
+- Initial plan
+- translate docs and module.prop to Simplified Chinese
+- chore: update CHANGELOG.md with missing versions and automate updates in release.yml
+- Initial plan
+- Initial plan
+- chore: update update.json to v4.1 [skip ci]
+- Initial plan
+
+---
+
 ## [v4.1] – 2026-04-05
 
 ### Changed
