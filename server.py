@@ -3,7 +3,6 @@
 提供 REST API 并托管 Web 界面。
 """
 
-import json
 import logging
 import os
 import threading
