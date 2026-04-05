@@ -4,6 +4,16 @@ ChargeControl 的所有重要变更均记录于此。
 
 ---
 
+## [v4.5] – 2026-04-05
+
+### Changed
+- fix: remove server.py reference from flake8 lint step
+- Initial plan
+- feat: remove Flask server, add snapshot_daemon.py for KernelSU WebUI mode
+- chore: update CHANGELOG.md and update.json to v4.3 [skip ci]
+
+---
+
 ## [v4.3] – 2026-04-05
 
 ### Changed
