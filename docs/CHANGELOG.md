@@ -4,6 +4,16 @@ ChargeControl 的所有重要变更均记录于此。
 
 ---
 
+## [v4.3] – 2026-04-05
+
+### Changed
+- fix: merge conflicting .sidebar rules in mobile media query
+- Initial plan
+- chore: update CHANGELOG.md and update.json to v4.2 [skip ci]
+- chore: update CHANGELOG.md and update.json to v4.2 [skip ci]
+
+---
+
 ## [v4.2] – 2026-04-05
 
 ### Changed
