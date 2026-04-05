@@ -33,6 +33,15 @@ jobs:
       - name: Install dependencies
         run: pip install flask flask-cors
 
+      - name: Create tag for workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          VERSION="${{ github.event.inputs.release_tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${VERSION}" || echo "Tag already exists"
+          git push origin "${VERSION}" || echo "Tag already pushed"
+
       - name: Get version info
         id: info
         run: |
