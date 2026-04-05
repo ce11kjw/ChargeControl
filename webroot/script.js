@@ -68,7 +68,7 @@ async function loadConfig() {
 // Bug 4 修复：改用 base64 编码写入，避免 JSON 中的 shell 特殊字符导致写入失败
 async function saveConfig(cfg) {
   const json = JSON.stringify(cfg, null, 2);
-  const b64 = btoa(unescape(encodeURIComponent(json)));
+  const b64 = btoa(Array.from(new TextEncoder().encode(json), b => String.fromCharCode(b)).join(''));
   const { errno } = await exec(`echo '${b64}' | base64 -d > "${CONFIG_PATH}"`);
   return errno === 0;
 }
