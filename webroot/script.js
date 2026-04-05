@@ -3,7 +3,8 @@
    KernelSU 原生 WebUI 版本，通过 exec() 直接执行 shell 命令。
    ========================================================== */
 
-import { exec } from 'kernelsu';
+// Bug 1 修复：使用动态 import + try/catch fallback，避免非 KernelSU 环境下直接崩溃
+let exec;
 
 // 兼容 CanvasRenderingContext2D.roundRect（Chrome < 99 及旧版 WebView）
 if (!CanvasRenderingContext2D.prototype.roundRect) {
@@ -40,6 +41,15 @@ const MODES = {
   super_saver:  { max_current_ma: 300,  description: '超低功率充电，最大保护电池' },
 };
 
+// Bug 3 修复：将 MODE_META 提前到常量区，确保 updateMode 调用时已定义
+const MODE_META = {
+  normal:       { icon: '🔋', label: '普通' },
+  fast:         { icon: '⚡', label: '快充' },
+  trickle:      { icon: '💧', label: '涓流' },
+  power_saving: { icon: '🌿', label: '省电' },
+  super_saver:  { icon: '🌱', label: '超级省电' },
+};
+
 /* ── sysfs 辅助 ────────────────────────────────────────────── */
 
 async function readSysfs(path) {
@@ -55,9 +65,11 @@ async function loadConfig() {
   try { return JSON.parse(stdout); } catch { return {}; }
 }
 
+// Bug 4 修复：改用 base64 编码写入，避免 JSON 中的 shell 特殊字符导致写入失败
 async function saveConfig(cfg) {
-  const json = JSON.stringify(cfg, null, 2).replace(/'/g, "'\\''");
-  const { errno } = await exec(`printf '%s' '${json}' > "${CONFIG_PATH}"`);
+  const json = JSON.stringify(cfg, null, 2);
+  const b64 = btoa(Array.from(new TextEncoder().encode(json), b => String.fromCharCode(b)).join(''));
+  const { errno } = await exec(`echo '${b64}' | base64 -d > "${CONFIG_PATH}"`);
   return errno === 0;
 }
 
@@ -272,30 +284,6 @@ function initTheme() {
   $('themeToggle').textContent = saved === 'dark' ? '☀️' : '🌙';
 }
 
-$('themeToggle').addEventListener('click', () => {
-  const html = document.documentElement;
-  const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-  html.setAttribute('data-theme', next);
-  $('themeToggle').textContent = next === 'dark' ? '☀️' : '🌙';
-  localStorage.setItem('cc-theme', next);
-});
-
-/* ── 侧边栏 / 标签页导航 ─────────────────────────────── */
-
-document.querySelectorAll('.sidebar-link').forEach(link => {
-  link.addEventListener('click', e => {
-    e.preventDefault();
-    const tab = link.dataset.tab;
-    document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    link.classList.add('active');
-    $('tab-' + tab).classList.add('active');
-    if (tab === 'stats') loadStats('daily');
-    if (tab === 'config') loadConfigEditor();
-    if (tab === 'modes') loadModes();
-  });
-});
-
 /* ── 仪表盘 ────────────────────────────────────────────── */
 
 function updateDashboard(battery) {
@@ -462,66 +450,7 @@ async function refreshHealthCard() {
   } catch { /* ignore */ }
 }
 
-$('refreshChart').addEventListener('click', refreshTempChart);
 
-/* ── 控制标签页 ──────────────────────────────────────────── */
-
-$('chargingToggle').addEventListener('change', async e => {
-  try {
-    const ok = await setChargingEnabled(e.target.checked);
-    showToast(ok ? '✅ 充电已' + (e.target.checked ? '启用' : '禁用') : '❌ 操作失败');
-  } catch { showToast('❌ 切换充电状态出错'); }
-});
-
-$('chargeLimitSlider').addEventListener('input', e => {
-  setText('chargeLimitValue', e.target.value + '%');
-});
-
-$('applyLimitBtn').addEventListener('click', async () => {
-  const limit = parseInt($('chargeLimitSlider').value);
-  try {
-    const ok = await setChargeLimit(limit);
-    showToast(ok ? `✅ 上限已设为 ${limit}%` : '❌ 操作失败');
-  } catch { showToast('❌ 设置上限出错'); }
-});
-
-$('tempThresholdSlider').addEventListener('input', e => {
-  setText('tempThresholdValue', e.target.value + '°C');
-});
-
-$('tempCriticalSlider').addEventListener('input', e => {
-  setText('tempCriticalValue', e.target.value + '°C');
-});
-
-$('applyTempBtn').addEventListener('click', async () => {
-  const threshold = parseInt($('tempThresholdSlider').value);
-  const critical  = parseInt($('tempCriticalSlider').value);
-  try {
-    const cfg = await loadConfig();
-    cfg.charging = cfg.charging || {};
-    cfg.charging.temperature_threshold = threshold;
-    cfg.charging.temperature_critical  = critical;
-    const ok = await saveConfig(cfg);
-    showToast(ok ? '✅ 温度阈值已更新' : '❌ 操作失败');
-  } catch { showToast('❌ 更新温度阈值出错'); }
-});
-
-$('tempCheckBtn').addEventListener('click', async () => {
-  try {
-    const res = await checkTemperatureProtection();
-    showResult('tempCheckResult', res, false);
-  } catch (e) { showResult('tempCheckResult', e.message, true); }
-});
-
-/* ── 模式标签页 ────────────────────────────────────────────── */
-
-const MODE_META = {
-  normal:       { icon: '🔋', label: '普通' },
-  fast:         { icon: '⚡', label: '快充' },
-  trickle:      { icon: '💧', label: '涓流' },
-  power_saving: { icon: '🌿', label: '省电' },
-  super_saver:  { icon: '🌱', label: '超级省电' },
-};
 
 async function loadModes() {
   try {
@@ -561,15 +490,6 @@ async function loadModes() {
 /* ── 统计标签页 ───────────────────────────────────────────── */
 
 let currentPeriod = 'daily';
-
-document.querySelectorAll('[data-period]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('[data-period]').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    currentPeriod = btn.dataset.period;
-    loadStats(currentPeriod);
-  });
-});
 
 const PERIOD_COLS = {
   daily:   ['day', 'sessions', 'avg_efficiency', 'total_duration_s', 'max_temp'],
@@ -659,35 +579,6 @@ function drawBarChart(canvasId, labels, dataset, color = '#4f8ef7') {
   });
 }
 
-/* ── 导出 ───────────────────────────────────────────────── */
-
-$('exportCsv').addEventListener('click', async () => {
-  try {
-    const rows = await queryDb('SELECT * FROM charging_sessions ORDER BY start_time');
-    if (!rows.length) { showToast('暂无数据'); return; }
-    const keys = Object.keys(rows[0]);
-    const csv  = [keys.join(',')]
-      .concat(rows.map(r => keys.map(k => JSON.stringify(r[k] ?? '')).join(',')))
-      .join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'charging_data.csv';
-    a.click();
-  } catch (e) { showToast('❌ 导出失败: ' + e.message); }
-});
-
-$('exportJson').addEventListener('click', async () => {
-  try {
-    const data = await queryDb('SELECT * FROM charging_sessions ORDER BY start_time');
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'charging_data.json';
-    a.click();
-  } catch (e) { showToast('❌ 导出失败: ' + e.message); }
-});
-
 /* ── 配置编辑器 ────────────────────────────────────────── */
 
 async function loadConfigEditor() {
@@ -696,17 +587,6 @@ async function loadConfigEditor() {
     $('configEditor').value = JSON.stringify(cfg, null, 2);
   } catch (e) { $('configEditor').value = '// 加载配置出错: ' + e.message; }
 }
-
-$('loadConfigBtn').addEventListener('click', loadConfigEditor);
-
-$('saveConfigBtn').addEventListener('click', async () => {
-  try {
-    const cfg = JSON.parse($('configEditor').value);
-    const ok  = await saveConfig(cfg);
-    showResult('configResult', ok ? '配置保存成功！' : '保存失败。', !ok);
-    showToast(ok ? '✅ 配置已保存' : '❌ 保存失败');
-  } catch (e) { showResult('configResult', 'JSON 解析错误: ' + e.message, true); }
-});
 
 /* ── 预设 ──────────────────────────────────────────────── */
 
@@ -717,31 +597,178 @@ const PRESETS = {
   save:   { mode: 'trickle', max_limit: 60,  temperature_threshold: 36, temperature_critical: 42 },
 };
 
-document.querySelectorAll('.preset-btn').forEach(btn => {
-  btn.addEventListener('click', async () => {
-    const p = PRESETS[btn.dataset.preset];
-    if (!p) return;
+// Bug 1 + Bug 2 修复：所有事件绑定和初始化逻辑包裹在顶层 async IIFE 中，
+// 确保动态 import 完成后再绑定事件，并加 ?. 可选链防止 null 报错崩溃。
+(async () => {
+  // Bug 1：动态 import kernelsu，失败时使用 mock 回退
+  try {
+    const ksu = await import('kernelsu');
+    exec = ksu.exec;
+  } catch {
+    exec = async (cmd) => {
+      console.warn('[mock exec]', cmd);
+      return { errno: 1, stdout: '' };
+    };
+  }
+
+  /* ── 主题切换 ─────────────────────────────────────────── */
+
+  $('themeToggle')?.addEventListener('click', () => {
+    const html = document.documentElement;
+    const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    $('themeToggle').textContent = next === 'dark' ? '☀️' : '🌙';
+    localStorage.setItem('cc-theme', next);
+  });
+
+  /* ── 侧边栏 / 标签页导航 ─────────────────────────────── */
+
+  document.querySelectorAll('.sidebar-link').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const tab = link.dataset.tab;
+      document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      link.classList.add('active');
+      $('tab-' + tab)?.classList.add('active');
+      if (tab === 'stats') loadStats('daily');
+      if (tab === 'config') loadConfigEditor();
+      if (tab === 'modes') loadModes();
+    });
+  });
+
+  /* ── 控制标签页 ──────────────────────────────────────────── */
+
+  $('refreshChart')?.addEventListener('click', refreshTempChart);
+
+  $('chargingToggle')?.addEventListener('change', async e => {
+    try {
+      const ok = await setChargingEnabled(e.target.checked);
+      showToast(ok ? '✅ 充电已' + (e.target.checked ? '启用' : '禁用') : '❌ 操作失败');
+    } catch { showToast('❌ 切换充电状态出错'); }
+  });
+
+  $('chargeLimitSlider')?.addEventListener('input', e => {
+    setText('chargeLimitValue', e.target.value + '%');
+  });
+
+  $('applyLimitBtn')?.addEventListener('click', async () => {
+    const limit = parseInt($('chargeLimitSlider').value);
+    try {
+      const ok = await setChargeLimit(limit);
+      showToast(ok ? `✅ 上限已设为 ${limit}%` : '❌ 操作失败');
+    } catch { showToast('❌ 设置上限出错'); }
+  });
+
+  $('tempThresholdSlider')?.addEventListener('input', e => {
+    setText('tempThresholdValue', e.target.value + '°C');
+  });
+
+  $('tempCriticalSlider')?.addEventListener('input', e => {
+    setText('tempCriticalValue', e.target.value + '°C');
+  });
+
+  $('applyTempBtn')?.addEventListener('click', async () => {
+    const threshold = parseInt($('tempThresholdSlider').value);
+    const critical  = parseInt($('tempCriticalSlider').value);
     try {
       const cfg = await loadConfig();
-      cfg.charging = { ...cfg.charging, ...p };
+      cfg.charging = cfg.charging || {};
+      cfg.charging.temperature_threshold = threshold;
+      cfg.charging.temperature_critical  = critical;
       const ok = await saveConfig(cfg);
-      if (ok) {
-        await setChargingMode(p.mode);
-        await setChargeLimit(p.max_limit);
-        showToast('✅ 已应用预设: ' + btn.dataset.preset);
-        loadConfigEditor();
-      }
-    } catch (e) { showToast('❌ ' + e.message); }
+      showToast(ok ? '✅ 温度阈值已更新' : '❌ 操作失败');
+    } catch { showToast('❌ 更新温度阈值出错'); }
   });
-});
 
-/* ── 初始化与轮询 ───────────────────────────────────────── */
+  $('tempCheckBtn')?.addEventListener('click', async () => {
+    try {
+      const res = await checkTemperatureProtection();
+      showResult('tempCheckResult', res, false);
+    } catch (e) { showResult('tempCheckResult', e.message, true); }
+  });
 
-initTheme();
-refreshStatus();
-refreshTempChart();
-refreshHealthCard();
+  /* ── 统计标签页 ──────────────────────────────────────────── */
 
-setInterval(refreshStatus, 10000);
-setInterval(refreshTempChart, 30000);
-setInterval(refreshHealthCard, 60000);
+  document.querySelectorAll('[data-period]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-period]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentPeriod = btn.dataset.period;
+      loadStats(currentPeriod);
+    });
+  });
+
+  /* ── 导出 ───────────────────────────────────────────────── */
+
+  $('exportCsv')?.addEventListener('click', async () => {
+    try {
+      const rows = await queryDb('SELECT * FROM charging_sessions ORDER BY start_time');
+      if (!rows.length) { showToast('暂无数据'); return; }
+      const keys = Object.keys(rows[0]);
+      const csv  = [keys.join(',')]
+        .concat(rows.map(r => keys.map(k => JSON.stringify(r[k] ?? '')).join(',')))
+        .join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'charging_data.csv';
+      a.click();
+    } catch (e) { showToast('❌ 导出失败: ' + e.message); }
+  });
+
+  $('exportJson')?.addEventListener('click', async () => {
+    try {
+      const data = await queryDb('SELECT * FROM charging_sessions ORDER BY start_time');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'charging_data.json';
+      a.click();
+    } catch (e) { showToast('❌ 导出失败: ' + e.message); }
+  });
+
+  /* ── 配置编辑器 ─────────────────────────────────────────── */
+
+  $('loadConfigBtn')?.addEventListener('click', loadConfigEditor);
+
+  $('saveConfigBtn')?.addEventListener('click', async () => {
+    try {
+      const cfg = JSON.parse($('configEditor').value);
+      const ok  = await saveConfig(cfg);
+      showResult('configResult', ok ? '配置保存成功！' : '保存失败。', !ok);
+      showToast(ok ? '✅ 配置已保存' : '❌ 保存失败');
+    } catch (e) { showResult('configResult', 'JSON 解析错误: ' + e.message, true); }
+  });
+
+  /* ── 预设 ──────────────────────────────────────────────── */
+
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const p = PRESETS[btn.dataset.preset];
+      if (!p) return;
+      try {
+        const cfg = await loadConfig();
+        cfg.charging = { ...cfg.charging, ...p };
+        const ok = await saveConfig(cfg);
+        if (ok) {
+          await setChargingMode(p.mode);
+          await setChargeLimit(p.max_limit);
+          showToast('✅ 已应用预设: ' + btn.dataset.preset);
+          loadConfigEditor();
+        }
+      } catch (e) { showToast('❌ ' + e.message); }
+    });
+  });
+
+  /* ── 初始化与轮询 ───────────────────────────────────────── */
+
+  initTheme();
+  refreshStatus();
+  refreshTempChart();
+  refreshHealthCard();
+
+  setInterval(refreshStatus, 10000);
+  setInterval(refreshTempChart, 30000);
+  setInterval(refreshHealthCard, 60000);
+})();
