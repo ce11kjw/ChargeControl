@@ -3,5 +3,5 @@ name=ChargeControl
 version=v1.0.1
 versionCode=101
 author=ce11kjw
-description=Advanced KernelSU charging control module with Web UI, statistics, and multi-mode support
+description=支持 Web UI、统计分析与多模式充电的高级 KernelSU 充电控制模块
 updateJson=https://raw.githubusercontent.com/ce11kjw/ChargeControl/main/update.json

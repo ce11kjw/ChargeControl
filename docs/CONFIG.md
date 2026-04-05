@@ -1,11 +1,11 @@
-# ChargeControl Configuration Guide
+# ChargeControl 配置指南
 
-The module reads and writes `config.json` located in the module directory
-(`/data/adb/modules/ChargeControl/config.json`).
+本模块读写位于模块目录下的 `config.json` 文件
+（`/data/adb/modules/ChargeControl/config.json`）。
 
 ---
 
-## Full Schema
+## 完整 Schema
 
 ```json
 {
@@ -48,23 +48,23 @@ The module reads and writes `config.json` located in the module directory
 
 ---
 
-## Key Fields
+## 关键字段
 
-| Field | Type | Default | Description |
+| 字段 | 类型 | 默认值 | 说明 |
 |-------|------|---------|-------------|
-| `charging.max_limit` | int | `80` | Stop charging at this % |
-| `charging.min_limit` | int | `20` | Resume charging at this % |
-| `charging.mode` | string | `"normal"` | Active charging mode |
-| `charging.temperature_threshold` | int | `40` | Throttle to trickle above this °C |
-| `charging.temperature_critical` | int | `45` | Stop charging above this °C |
-| `server.port` | int | `8080` | Web UI port |
-| `stats.retention_days` | int | `90` | Days of history to keep in the DB |
+| `charging.max_limit` | int | `80` | 达到此百分比时停止充电 |
+| `charging.min_limit` | int | `20` | 低于此百分比时恢复充电 |
+| `charging.mode` | string | `"normal"` | 当前充电模式 |
+| `charging.temperature_threshold` | int | `40` | 超过此温度（°C）时降速至涓流充电 |
+| `charging.temperature_critical` | int | `45` | 超过此温度（°C）时停止充电 |
+| `server.port` | int | `8080` | Web UI 端口 |
+| `stats.retention_days` | int | `90` | 数据库中保留的历史天数 |
 
 ---
 
-## Schedule Rules
+## 计划规则
 
-Schedule rules allow automatic mode switching based on time of day.
+计划规则允许根据一天中的时间自动切换充电模式。
 
 ```json
 "schedule": {
@@ -76,17 +76,17 @@ Schedule rules allow automatic mode switching based on time of day.
 }
 ```
 
-> **Note:** Schedule enforcement requires the service to be running.
+> **注意：** 计划规则的执行需要服务处于运行状态。
 
 ---
 
-## Quick Presets
+## 快速预设
 
-| Preset | Mode | Max Limit | Threshold | Critical |
+| 预设 | 模式 | 最大限制 | 温度阈值 | 临界温度 |
 |--------|------|-----------|-----------|----------|
 | Night | Trickle | 80% | 38°C | 43°C |
 | Work | Normal | 90% | 40°C | 45°C |
 | Travel | Fast | 100% | 42°C | 47°C |
 | Save | Trickle | 60% | 36°C | 42°C |
 
-Presets can be applied from the **Settings** tab in the Web UI.
+预设可在 Web UI 的**设置**选项卡中应用。
