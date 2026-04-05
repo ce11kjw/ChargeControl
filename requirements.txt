@@ -1,2 +1,2 @@
-flask
-flask-cors
+# KernelSU WebUI 模式不依赖任何第三方包。
+# 所有功能通过 exec() 直接与系统交互（见 webroot/script.js）。

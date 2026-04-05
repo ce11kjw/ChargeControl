@@ -1,11 +1,12 @@
 #!/system/bin/sh
 # ChargeControl – service.sh
 # Runs after the Android system has fully booted.
-# Starts the Python web server via launcher.py in the background.
+# Starts the snapshot daemon via launcher.py in the background.
+# The KernelSU WebUI (webroot/) handles all user interaction directly via exec().
 
 MODDIR="${0%/*}"
 LOG="$MODDIR/module.log"
-PIDFILE="$MODDIR/server.pid"
+PIDFILE="$MODDIR/daemon.pid"
 LOCKDIR="$MODDIR/.service.lock"
 
 # Maximum seconds to wait for a Python interpreter to become available.
@@ -24,11 +25,11 @@ fi
 # Always release the lock on exit, regardless of how the script terminates.
 trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT
 
-# If the server process recorded in server.pid is still alive, do not restart it.
+# If the snapshot daemon recorded in daemon.pid is still alive, do not restart it.
 if [ -f "$PIDFILE" ]; then
     OLD_PID="$(cat "$PIDFILE" 2>/dev/null)"
     if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
-        log "INFO: Server already running with PID $OLD_PID. Exiting."
+        log "INFO: Snapshot daemon already running with PID $OLD_PID. Exiting."
         exit 0
     fi
 fi
@@ -76,9 +77,9 @@ fi
 
 log "INFO: Using Python interpreter: $PYTHON ($($PYTHON --version 2>&1))"
 
-# Start the server via launcher.py (handles dependency checks automatically).
+# Start the snapshot daemon via launcher.py.
 cd "$MODDIR" || exit 1
-log "Starting ChargeControl server via launcher.py (PID will be written to server.pid)"
+log "Starting ChargeControl snapshot daemon via launcher.py (PID will be written to daemon.pid)"
 nohup "$PYTHON" launcher.py >> "$LOG" 2>&1 &
 echo $! > "$PIDFILE"
-log "Server started with PID $(cat "$PIDFILE")"
+log "Snapshot daemon started with PID $(cat "$PIDFILE")"
