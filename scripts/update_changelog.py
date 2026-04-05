@@ -1,4 +1,5 @@
-import re, os
+import re
+import os
 
 version = os.environ.get('VERSION', '')
 date = os.environ.get('DATE', '')
