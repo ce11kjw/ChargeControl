@@ -1,15 +1,15 @@
-# ChargeControl API Reference
+# ChargeControl API 参考文档
 
-Base URL: `http://127.0.0.1:8080`
+基础 URL：`http://127.0.0.1:8080`
 
 ---
 
-## Battery & Status
+## 电池与状态
 
 ### `GET /api/status`
-Returns live battery readings.
+返回实时电池读数。
 
-**Response**
+**响应**
 ```json
 {
   "capacity": 75,
@@ -24,42 +24,42 @@ Returns live battery readings.
 ```
 
 ### `GET /api/settings`
-Returns live battery data merged with the current configuration.
+返回实时电池数据与当前配置的合并结果。
 
 ---
 
-## Charging Control
+## 充电控制
 
 ### `POST /api/charging/enable`
-Enable or disable charging.
+启用或禁用充电。
 
-**Body**
+**请求体**
 ```json
 { "enabled": true }
 ```
 
 ### `POST /api/charging/limit`
-Set the maximum charge percentage (0–100).
+设置最大充电百分比（0–100）。
 
-**Body**
+**请求体**
 ```json
 { "limit": 80 }
 ```
 
 ### `POST /api/charging/mode`
-Set the active charging mode.
+设置当前充电模式。
 
-**Body**
+**请求体**
 ```json
 { "mode": "normal" }
 ```
 
-Valid modes: `normal`, `fast`, `trickle`, `power_saving`, `super_saver`
+有效模式：`normal`, `fast`, `trickle`, `power_saving`, `super_saver`
 
 ### `POST /api/charging/temperature-check`
-Run temperature protection logic immediately.
+立即执行温度保护逻辑。
 
-**Response**
+**响应**
 ```json
 {
   "temperature": 38.0,
@@ -69,75 +69,75 @@ Run temperature protection logic immediately.
 }
 ```
 
-Possible `action` values: `none`, `throttled_to_trickle`, `charging_stopped`, `charging_resumed`
+`action` 可取值：`none`, `throttled_to_trickle`, `charging_stopped`, `charging_resumed`
 
 ---
 
-## Configuration
+## 配置
 
 ### `GET /api/config`
-Returns the full `config.json` content.
+返回完整的 `config.json` 内容。
 
 ### `POST /api/config`
-Replace the full configuration with the supplied JSON object.
+用提供的 JSON 对象替换完整配置。
 
 ---
 
-## Modes
+## 模式
 
 ### `GET /api/modes`
-Returns all configured charging modes and their parameters.
+返回所有已配置的充电模式及其参数。
 
 ---
 
-## Statistics
+## 统计
 
 ### `GET /api/stats/daily?days=7`
-Per-day stats for the last N days.
+最近 N 天的每日统计数据。
 
 ### `GET /api/stats/weekly`
-Per-week stats for the last 12 weeks.
+最近 12 周的每周统计数据。
 
 ### `GET /api/stats/monthly`
-Per-month stats for the last 12 months.
+最近 12 个月的每月统计数据。
 
 ### `GET /api/stats/snapshots?limit=60`
-Most recent battery snapshots (up to `limit`).
+最近的电池快照（最多 `limit` 条）。
 
 ### `GET /api/stats/health`
-Battery health score and temperature statistics.
+电池健康评分及温度统计信息。
 
 ---
 
-## Data Export
+## 数据导出
 
 ### `GET /api/export/csv`
-Download all charging sessions as a CSV file.
+以 CSV 文件形式下载所有充电会话记录。
 
 ### `GET /api/export/json`
-Download all charging sessions as JSON.
+以 JSON 格式下载所有充电会话记录。
 
 ---
 
-## Sessions
+## 会话
 
 ### `POST /api/sessions/start`
-Mark the beginning of a charging session.
+标记充电会话的开始。
 
-**Body**
+**请求体**
 ```json
 { "level": 40, "mode": "normal" }
 ```
 
-**Response**
+**响应**
 ```json
 { "session_id": 5 }
 ```
 
 ### `POST /api/sessions/end`
-Mark the end of a charging session.
+标记充电会话的结束。
 
-**Body**
+**请求体**
 ```json
 { "session_id": 5, "level": 80, "max_temp": 36.2 }
 ```
