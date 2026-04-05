@@ -380,7 +380,6 @@ tr:hover td { background: var(--surface2); }
 
 /* ── 响应式 ─────────────────────────────────────────── */
 @media (max-width: 640px) {
-  .sidebar { display: none; }
   .content { padding: 1rem; }
   .card-value { font-size: 1.3rem; }
 
@@ -388,19 +387,29 @@ tr:hover td { background: var(--surface2); }
   .layout { flex-direction: column; height: auto; }
   .content { height: calc(100vh - 52px - 56px); overflow-y: auto; }
 
+  .sidebar {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    padding: 0;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+  }
+
   .sidebar-nav {
     display: flex;
     flex-direction: row;
     justify-content: space-around;
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
     background: var(--surface);
     border-top: 1px solid var(--border);
     padding: .5rem;
     z-index: 100;
   }
 
-  .sidebar { display: block; width: 100%; height: auto; border-right: none; border-top: 1px solid var(--border); padding: 0; position: fixed; bottom: 0; left: 0; right: 0; }
   .sidebar-link { font-size: .65rem; text-align: center; padding: .4rem .3rem; }
 }
 
