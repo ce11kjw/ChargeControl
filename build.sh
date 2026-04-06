@@ -27,29 +27,38 @@ info "Version: $VERSION (code: $VERSION_CODE)"
 info "Checking tools..."
 command -v zip  >/dev/null 2>&1 || err "zip is not installed"
 ok "zip found"
-command -v make >/dev/null 2>&1 || err "make is not installed (needed to compile charge_control)"
-ok "make found"
 
 # ── Compile charge_control binary ────────────────────────
-info "Compiling charge_control binary (make)..."
-if ! make; then
-    err "Compilation failed. Fix the errors above, then re-run build.sh."
-fi
-if [ ! -f "charge_control" ]; then
-    err "make succeeded but charge_control binary not found. Check the Makefile TARGET."
+# Set SKIP_COMPILE=1 to skip (e.g. when CI has already cross-compiled the binary)
+if [ "${SKIP_COMPILE}" = "1" ]; then
+    info "SKIP_COMPILE=1 – skipping compilation, using pre-built binary."
+    if [ ! -f "charge_control" ]; then
+        err "SKIP_COMPILE=1 but charge_control binary not found! Did the cross-compile step succeed?"
+    fi
+    ok "Pre-built charge_control found"
+else
+    command -v make >/dev/null 2>&1 || err "make is not installed (needed to compile charge_control)"
+ok "make found"
+    info "Compiling charge_control binary (make)..."
+    if ! make; then
+        err "Compilation failed. Fix the errors above, then re-run build.sh."
+    fi
+    if [ ! -f "charge_control" ]; then
+        err "make succeeded but charge_control binary not found. Check the Makefile TARGET."
+    fi
 fi
 chmod 0755 charge_control
 ok "charge_control compiled and marked executable"
 
 # ── Required module files ─────────────────────────────────
 info "Validating module structure..."
-REQUIRED=(module.prop service.sh post-fs-data.sh uninstall.sh \
-          config.json Makefile \
-          src/main.c src/charge_control.c src/charge_control.h \
-          src/stats.c src/stats.h \
-          src/snapshot_daemon.c src/snapshot_daemon.h \
-          src/config.c src/config.h \
-          src/cJSON.c src/cJSON.h \
+REQUIRED=(module.prop service.sh post-fs-data.sh uninstall.sh \ 
+          config.json Makefile \ 
+          src/main.c src/charge_control.c src/charge_control.h \ 
+          src/stats.c src/stats.h \ 
+          src/snapshot_daemon.c src/snapshot_daemon.h \ 
+          src/config.c src/config.h \ 
+          src/cJSON.c src/cJSON.h \ 
           webroot/index.html webroot/styles.css webroot/script.js)
 
 for f in "${REQUIRED[@]}"; do
