@@ -65,8 +65,8 @@ jobs:
           print('All smoke tests passed')
           "
 
-  build-zip:
-    name: Build Module ZIP
+  build-android:
+    name: Build Android Binary (aarch64, API 35)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -74,13 +74,52 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - name: Install C build dependencies
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK r27c
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends gcc make libsqlite3-dev
+          echo "y" | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;27.2.12479018"
+          echo "NDK_PATH=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+
+      - name: Build charge_control (aarch64, API 35)
+        run: make NDK="$NDK_PATH" API=35
+
+      - name: Verify binary is Android ELF aarch64
+        run: |
+          file charge_control | grep -E 'ELF 64-bit.*aarch64' || \
+            { echo "ERROR: Not an aarch64 ELF binary"; exit 1; }
+          echo "Binary OK ✓"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: charge_control-android-aarch64-api35
+          path: charge_control
+          retention-days: 30
+
+  build-zip:
+    name: Build Module ZIP
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: [build-android]
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK r27c
+        run: |
+          echo "y" | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;27.2.12479018"
+          echo "NDK_PATH=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+
+      - name: Build charge_control (aarch64, API 35)
+        run: make NDK="$NDK_PATH" API=35
 
       - name: Build ZIP
-        run: bash build.sh
+        run: SKIP_COMPILE=1 bash build.sh
 
       - name: Verify ZIP contains charge_control binary
         run: |
