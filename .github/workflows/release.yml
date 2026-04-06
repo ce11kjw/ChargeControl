@@ -62,8 +62,7 @@ jobs:
             -o charge_control \
             src/main.c src/charge_control.c src/stats.c \
             src/snapshot_daemon.c src/config.c src/cJSON.c \
-            src/sqlite3.c \
-            -lpthread -lm
+            src/sqlite3.c
           chmod 0755 charge_control
           file charge_control
           file charge_control | grep -q "aarch64" || (echo "ERROR: not an ARM64 binary! File output: $(file charge_control)" && exit 1)
