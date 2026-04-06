@@ -1,33 +1,27 @@
-CC      ?= gcc
-CFLAGS  = -Wall -Wextra -O2 -std=c11 -D_GNU_SOURCE
-LDFLAGS = -lsqlite3 -lpthread -lm
+NDK          ?= $(ANDROID_NDK_HOME)
+API          ?= 35
+TARGET_TRIPLE := aarch64-linux-android$(API)
+TOOLCHAIN    := $(NDK)/toolchains/llvm/prebuilt/linux-x86_64
 
-# Auto-detect SQLite3 include/lib paths via pkg-config (works on macOS Homebrew + Linux)
-SQLITE_CFLAGS := $(shell pkg-config --cflags sqlite3 2>/dev/null)
-SQLITE_LIBS   := $(shell pkg-config --libs   sqlite3 2>/dev/null)
-ifneq ($(SQLITE_CFLAGS),)
-    CFLAGS  += $(SQLITE_CFLAGS)
-    LDFLAGS += $(SQLITE_LIBS)
-else
-    # Fallback: common Homebrew prefixes on macOS
-    UNAME_S := $(shell uname -s)
-    ifeq ($(UNAME_S),Darwin)
-        HOMEBREW_PREFIX := $(shell brew --prefix sqlite3 2>/dev/null)
-        ifneq ($(HOMEBREW_PREFIX),)
-            CFLAGS  += -I$(HOMEBREW_PREFIX)/include
-            LDFLAGS += -L$(HOMEBREW_PREFIX)/lib
-        endif
-    endif
-endif
+CC    := $(TOOLCHAIN)/bin/$(TARGET_TRIPLE)-clang
+STRIP := $(TOOLCHAIN)/bin/llvm-strip
 
-SRC     = src/main.c src/charge_control.c src/stats.c \
-          src/snapshot_daemon.c src/config.c src/cJSON.c
-TARGET  = charge_control
+SYSROOT  := $(TOOLCHAIN)/sysroot
+CFLAGS   = -Wall -Wextra -O2 -std=c11 -D_GNU_SOURCE \
+           --sysroot=$(SYSROOT) \
+           -fPIE -fstack-protector-strong
+LDFLAGS  = -pie --sysroot=$(SYSROOT) \
+           -lsqlite3 -lpthread -lm
+
+SRC    = src/main.c src/charge_control.c src/stats.c \
+         src/snapshot_daemon.c src/config.c src/cJSON.c
+TARGET = charge_control
 
 all: $(TARGET)
 
 $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	$(STRIP) $@
 
 clean:
 	rm -f $(TARGET)
