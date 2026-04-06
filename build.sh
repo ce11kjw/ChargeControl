@@ -1,6 +1,7 @@
 #!/bin/bash
 # ChargeControl – build.sh
-# Validates module files and creates the installable KernelSU ZIP.
+# Compiles the charge_control binary, validates module files, and creates
+# the installable Magisk/KernelSU ZIP.
 
 set -e
 
@@ -26,6 +27,19 @@ info "Version: $VERSION (code: $VERSION_CODE)"
 info "Checking tools..."
 command -v zip  >/dev/null 2>&1 || err "zip is not installed"
 ok "zip found"
+command -v make >/dev/null 2>&1 || err "make is not installed (needed to compile charge_control)"
+ok "make found"
+
+# ── Compile charge_control binary ────────────────────────
+info "Compiling charge_control binary (make)..."
+if ! make; then
+    err "Compilation failed. Fix the errors above, then re-run build.sh."
+fi
+if [ ! -f "charge_control" ]; then
+    err "make succeeded but charge_control binary not found. Check the Makefile TARGET."
+fi
+chmod 0755 charge_control
+ok "charge_control compiled and marked executable"
 
 # ── Required module files ─────────────────────────────────
 info "Validating module structure..."
@@ -82,6 +96,10 @@ for f in "${INCLUDE[@]}"; do
     fi
 done
 
+# Include the compiled charge_control binary (required by service.sh)
+zip -q "$ZIP_PATH" charge_control
+ok "Added charge_control"
+
 # Include C source files
 if [ -d "src" ]; then
     zip -qr "$ZIP_PATH" src/
@@ -99,6 +117,13 @@ if [ -d "docs" ]; then
     zip -qr "$ZIP_PATH" docs/
     ok "Added docs/"
 fi
+
+# ── Verify ZIP contains the binary ───────────────────────
+info "Verifying ZIP contents..."
+if ! unzip -l "$ZIP_PATH" | grep -q 'charge_control$'; then
+    err "charge_control is missing from $ZIP_PATH – packaging error."
+fi
+ok "charge_control present in ZIP"
 
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════${NC}"

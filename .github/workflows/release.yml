@@ -33,6 +33,11 @@ jobs:
       - name: Install dependencies
         run: pip install flask flask-cors
 
+      - name: Install C build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc make libsqlite3-dev
+
       - name: Create tag for workflow_dispatch
         if: github.event_name == 'workflow_dispatch'
         run: |
