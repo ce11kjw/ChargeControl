@@ -4,6 +4,17 @@ ChargeControl 的所有重要变更均记录于此。
 
 ---
 
+## [v4.7] – 2026-04-06
+
+### Changed
+- feat: add datetime timestamps to logs, WebUI, and exports
+- fix: build.sh auto-compiles charge_control and includes binary in module ZIP
+- Initial plan
+- Initial plan
+- chore: update CHANGELOG.md and update.json to v4.6 [skip ci]
+
+---
+
 ## [v4.6] – 2026-04-06
 
 ### Changed
