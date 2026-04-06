@@ -11,7 +11,7 @@ CFLAGS   = -Wall -Wextra -O2 -std=c11 -D_GNU_SOURCE \
            --sysroot=$(SYSROOT) \
            -fPIE -fstack-protector-strong
 LDFLAGS  = -pie --sysroot=$(SYSROOT) \
-           -lpthread -lm
+           -lm
 
 SRC    = src/main.c src/charge_control.c src/stats.c \
          src/snapshot_daemon.c src/config.c src/cJSON.c \
