@@ -66,7 +66,7 @@ jobs:
             -lpthread -lm
           chmod 0755 charge_control
           file charge_control
-          file charge_control | grep -q "aarch64" || (echo "ERROR: not an ARM64 binary!" && exit 1)
+          file charge_control | grep -q "aarch64" || (echo "ERROR: not an ARM64 binary! File output: $(file charge_control)" && exit 1)
           echo "charge_control compiled successfully as ARM64 ELF"
 
       - name: Create tag for workflow_dispatch
