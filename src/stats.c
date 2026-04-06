@@ -651,7 +651,6 @@ int stats_prune_old_data(int retention_days)
     time_t t;
     struct tm tm_utc;
     int deleted = 0;
-    char *err = NULL;
     sqlite3_stmt *stmt = NULL;
     int rc;
 
@@ -682,7 +681,6 @@ int stats_prune_old_data(int retention_days)
         sqlite3_finalize(stmt);
     }
 
-    (void)err;
     pthread_mutex_unlock(&db_mutex);
     return deleted;
 }

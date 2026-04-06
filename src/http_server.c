@@ -216,11 +216,10 @@ static int parse_request(int fd, http_request_t *req)
         *sp2 = ' ';
     }
 
-    /* Parse Content-Length header */
-    cl_ptr = strcasestr(buf, "\r\nContent-Length:");
-    if (!cl_ptr) cl_ptr = strcasestr(buf, "\r\ncontent-length:");
+    /* Parse Content-Length header (case-insensitive) */
+    cl_ptr = strcasestr(buf, "\r\ncontent-length:");
     if (cl_ptr) {
-        cl_ptr += strlen("\r\nContent-Length:");
+        cl_ptr += strlen("\r\ncontent-length:");
         while (*cl_ptr == ' ') cl_ptr++;
         req->content_length = atoi(cl_ptr);
     }

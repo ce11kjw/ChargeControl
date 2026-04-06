@@ -1,7 +1,7 @@
 #ifndef HTTP_SERVER_H
 #define HTTP_SERVER_H
 
-#include "../cjson/cJSON.h"
+#include "cjson/cJSON.h"
 
 typedef struct {
     int   port;           /* listening port (default 8080) */

@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include "../cjson/cJSON.h"
+#include "cjson/cJSON.h"
 
 /* Load JSON config from file. Caller must cJSON_Delete() the result. Returns NULL on error. */
 cJSON *config_load(const char *path);

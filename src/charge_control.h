@@ -1,7 +1,7 @@
 #ifndef CHARGE_CONTROL_H
 #define CHARGE_CONTROL_H
 
-#include "../cjson/cJSON.h"
+#include "cjson/cJSON.h"
 
 typedef struct {
     int   capacity;      /* -1 if unavailable */
