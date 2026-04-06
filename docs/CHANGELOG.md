@@ -4,6 +4,16 @@ ChargeControl 的所有重要变更均记录于此。
 
 ---
 
+## [v4.8.5] – 2026-04-06
+
+### Changed
+- refactor(script.js): replace exec/kernelsu with fetch HTTP API calls
+- Initial plan
+- Update service.sh with new content
+- chore: update CHANGELOG.md and update.json to v5.8 [skip ci]
+
+---
+
 ## [v5.8] – 2026-04-06
 
 ### Changed
