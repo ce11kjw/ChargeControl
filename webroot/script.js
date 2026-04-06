@@ -261,9 +261,15 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
+function nowStr() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 function showToast(msg, duration = 3000) {
   const toast = $('toast');
-  toast.textContent = msg;
+  toast.textContent = `[${nowStr()}] ${msg}`;
   toast.classList.remove('hidden');
   clearTimeout(toast._timer);
   toast._timer = setTimeout(() => toast.classList.add('hidden'), duration);
@@ -271,7 +277,9 @@ function showToast(msg, duration = 3000) {
 
 function showResult(id, data, isError = false) {
   const el = $(id);
-  el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  const ts = nowStr();
+  const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  el.textContent = `[${ts}]\n${content}`;
   el.className = 'result-box ' + (isError ? 'error' : 'success');
   el.classList.remove('hidden');
 }
@@ -706,26 +714,31 @@ const PRESETS = {
       const rows = await queryDb('SELECT * FROM charging_sessions ORDER BY start_time');
       if (!rows.length) { showToast('暂无数据'); return; }
       const keys = Object.keys(rows[0]);
-      const csv  = [keys.join(',')]
+      const ts = nowStr().replace(' ', '_').replace(/:/g, '');
+      const csv  = [`# exported: ${nowStr()}`, keys.join(',')]
         .concat(rows.map(r => keys.map(k => JSON.stringify(r[k] ?? '')).join(',')))
         .join('\n');
       const blob = new Blob([csv], { type: 'text/csv' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'charging_data.csv';
+      a.download = `charging_data_${ts}.csv`;
       a.click();
-    } catch (e) { showToast('❌ 导出失败: ' + e.message); }
+      showToast('导出 CSV 成功');
+    } catch (e) { showToast('导出失败: ' + e.message); }
   });
 
   $('exportJson')?.addEventListener('click', async () => {
     try {
       const data = await queryDb('SELECT * FROM charging_sessions ORDER BY start_time');
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const ts = nowStr().replace(' ', '_').replace(/:/g, '');
+      const payload = { export_timestamp: nowStr(), sessions: data };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'charging_data.json';
+      a.download = `charging_data_${ts}.json`;
       a.click();
-    } catch (e) { showToast('❌ 导出失败: ' + e.message); }
+      showToast('导出 JSON 成功');
+    } catch (e) { showToast('导出失败: ' + e.message); }
   });
 
   /* ── 配置编辑器 ─────────────────────────────────────────── */
