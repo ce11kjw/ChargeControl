@@ -1,10 +1,7 @@
 /* ==========================================================
    充电控制 – 前端脚本
-   KernelSU 原生 WebUI 版本，通过 exec() 直接执行 shell 命令。
+   通过 fetch 调用 C 后端 HTTP API（http://127.0.0.1:8080）。
    ========================================================== */
-
-// Bug 1 修复：使用动态 import + try/catch fallback，避免非 KernelSU 环境下直接崩溃
-let exec;
 
 // 兼容 CanvasRenderingContext2D.roundRect（Chrome < 99 及旧版 WebView）
 if (!CanvasRenderingContext2D.prototype.roundRect) {
@@ -25,11 +22,9 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
   };
 }
 
-/* ── 路径常量 ────────────────────────────────────────────── */
+/* ── API 基地址 ──────────────────────────────────────────── */
 
-const MOD_DIR     = '/data/adb/modules/ChargeControl';
-const CONFIG_PATH = `${MOD_DIR}/config.json`;
-const DB_PATH     = `${MOD_DIR}/chargecontrol.db`;
+const API_BASE = 'http://127.0.0.1:8080';
 
 /* ── 充电模式定义 ─────────────────────────────────────────── */
 
@@ -50,206 +45,91 @@ const MODE_META = {
   super_saver:  { icon: '🌱', label: '超级省电' },
 };
 
-/* ── sysfs 辅助 ────────────────────────────────────────────── */
-
-async function readSysfs(path) {
-  const { errno, stdout } = await exec(`cat "${path}" 2>/dev/null`);
-  return errno === 0 ? stdout.trim() : null;
-}
-
 /* ── 配置文件读写 ─────────────────────────────────────────── */
 
 async function loadConfig() {
-  const { errno, stdout } = await exec(`cat "${CONFIG_PATH}"`);
-  if (errno !== 0) return {};
-  try { return JSON.parse(stdout); } catch { return {}; }
+  try {
+    const res = await fetch(`${API_BASE}/api/settings`);
+    if (!res.ok) return {};
+    const data = await res.json();
+    return data.config || {};
+  } catch { return {}; }
 }
 
-// Bug 4 修复：改用 base64 编码写入，避免 JSON 中的 shell 特殊字符导致写入失败
 async function saveConfig(cfg) {
-  const json = JSON.stringify(cfg, null, 2);
-  const b64 = btoa(Array.from(new TextEncoder().encode(json), b => String.fromCharCode(b)).join(''));
-  const { errno } = await exec(`echo '${b64}' | base64 -d > "${CONFIG_PATH}"`);
-  return errno === 0;
+  try {
+    const res = await fetch(`${API_BASE}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    });
+    return res.ok;
+  } catch { return false; }
 }
 
-/* ── 电池状态读取（替换 GET /api/settings） ─────────────────── */
+/* ── 电池状态读取 ─────────────────────────────────────────── */
 
 async function getBatteryStatus() {
-  const capacityPaths = [
-    '/sys/class/power_supply/battery/capacity',
-    '/sys/class/power_supply/BAT0/capacity',
-  ];
-  const statusPaths = [
-    '/sys/class/power_supply/battery/status',
-    '/sys/class/power_supply/BAT0/status',
-  ];
-  const tempPaths = [
-    '/sys/class/power_supply/battery/temp',
-    '/sys/class/power_supply/BAT0/temp',
-  ];
-  const voltagePaths = [
-    '/sys/class/power_supply/battery/voltage_now',
-    '/sys/class/power_supply/BAT0/voltage_now',
-  ];
-  const currentPaths = [
-    '/sys/class/power_supply/battery/current_now',
-    '/sys/class/power_supply/BAT0/current_now',
-  ];
-  const chargingEnabledPaths = [
-    '/sys/class/power_supply/battery/charging_enabled',
-    '/sys/kernel/debug/charger/charging_enable',
-    '/proc/driver/mmi_battery/charging',
-  ];
-
-  async function readFirst(paths) {
-    for (const p of paths) {
-      const val = await readSysfs(p);
-      if (val !== null) return val;
-    }
-    return null;
-  }
-
-  const capacityRaw = await readFirst(capacityPaths);
-  const statusRaw   = await readFirst(statusPaths);
-  const tempRaw     = await readFirst(tempPaths);
-  const voltageRaw  = await readFirst(voltagePaths);
-  const currentRaw  = await readFirst(currentPaths);
-  const chargingRaw = await readFirst(chargingEnabledPaths);
-
-  let temperature = null;
-  if (tempRaw !== null) {
-    const val = parseInt(tempRaw, 10);
-    if (!isNaN(val)) {
-      temperature = Math.abs(val) > 100 ? val / 10 : val;
-    }
-  }
-
-  let voltage_mv = null;
-  if (voltageRaw !== null) {
-    const uv = parseInt(voltageRaw, 10);
-    if (!isNaN(uv)) voltage_mv = uv / 1000;
-  }
-
-  let current_ma = null;
-  if (currentRaw !== null) {
-    const ua = parseInt(currentRaw, 10);
-    if (!isNaN(ua)) current_ma = ua / 1000;
-  }
-
-  let charging_enabled = true;
-  if (chargingRaw !== null) {
-    charging_enabled = !['0', 'false', 'disabled'].includes(chargingRaw.trim());
-  }
-
-  return {
-    capacity:         capacityRaw !== null ? parseInt(capacityRaw, 10) : null,
-    status:           statusRaw ?? '未知',
-    temperature,
-    voltage_mv,
-    current_ma,
-    charging_enabled,
-    timestamp:        new Date().toISOString(),
-  };
+  const res = await fetch(`${API_BASE}/api/battery`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
 }
 
-/* ── 设置充电开关（替换 POST /api/charging/enable） ─────────── */
+/* ── 设置充电开关 ─────────────────────────────────────────── */
 
 async function setChargingEnabled(enabled) {
-  const val = enabled ? '1' : '0';
-  const paths = [
-    '/sys/class/power_supply/battery/charging_enabled',
-    '/sys/kernel/debug/charger/charging_enable',
-    '/proc/driver/mmi_battery/charging',
-  ];
-  for (const p of paths) {
-    const { errno } = await exec(`echo ${val} > "${p}" 2>/dev/null`);
-    if (errno === 0) return true;
-  }
-  return false;
+  try {
+    const res = await fetch(`${API_BASE}/api/charging/enable`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    return res.ok;
+  } catch { return false; }
 }
 
-/* ── 设置充电上限（替换 POST /api/charging/limit） ──────────── */
+/* ── 设置充电上限 ─────────────────────────────────────────── */
 
 async function setChargeLimit(limit) {
-  const paths = [
-    '/sys/class/power_supply/battery/charge_control_limit',
-    '/sys/devices/platform/soc/soc:qti_battery_charger/charge_limit',
-  ];
-  let ok = false;
-  for (const p of paths) {
-    const { errno } = await exec(`echo ${limit} > "${p}" 2>/dev/null`);
-    if (errno === 0) { ok = true; break; }
-  }
-  const cfg = await loadConfig();
-  cfg.charging = cfg.charging || {};
-  cfg.charging.max_limit = limit;
-  await saveConfig(cfg);
-  return ok;
+  try {
+    const res = await fetch(`${API_BASE}/api/charging/limit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit }),
+    });
+    if (!res.ok) return false;
+    const cfg = await loadConfig();
+    cfg.charging = cfg.charging || {};
+    cfg.charging.max_limit = limit;
+    await saveConfig(cfg);
+    return true;
+  } catch { return false; }
 }
 
-/* ── 设置充电模式（替换 POST /api/charging/mode） ───────────── */
+/* ── 设置充电模式 ─────────────────────────────────────────── */
 
 async function setChargingMode(mode) {
-  const cfg = await loadConfig();
-  const modeCfg = (cfg.modes || {})[mode] || MODES[mode];
-  if (!modeCfg) return false;
-  const ma = modeCfg.max_current_ma;
-  if (ma) {
-    const ua = ma * 1000;
-    const inputPaths = [
-      '/sys/class/power_supply/battery/input_current_limit',
-      '/sys/class/power_supply/usb/input_current_limit',
-    ];
-    const chargePaths = [
-      '/sys/class/power_supply/battery/constant_charge_current',
-      '/sys/class/power_supply/battery/constant_charge_current_max',
-    ];
-    for (const p of inputPaths) {
-      const { errno } = await exec(`echo ${ua} > "${p}" 2>/dev/null`);
-      if (errno === 0) break;
-    }
-    for (const p of chargePaths) {
-      const { errno } = await exec(`echo ${ua} > "${p}" 2>/dev/null`);
-      if (errno === 0) break;
-    }
-  }
-  cfg.charging = cfg.charging || {};
-  cfg.charging.mode = mode;
-  await saveConfig(cfg);
-  return true;
+  try {
+    const res = await fetch(`${API_BASE}/api/charging/mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    if (!res.ok) return false;
+    const cfg = await loadConfig();
+    cfg.charging = cfg.charging || {};
+    cfg.charging.mode = mode;
+    await saveConfig(cfg);
+    return true;
+  } catch { return false; }
 }
 
-/* ── 温度保护（替换 POST /api/charging/temperature-check） ───── */
+/* ── 温度保护检测 ─────────────────────────────────────────── */
 
 async function checkTemperatureProtection() {
-  const cfg = await loadConfig();
-  const threshold = (cfg.charging || {}).temperature_threshold ?? 40;
-  const critical  = (cfg.charging || {}).temperature_critical  ?? 45;
-  const battery   = await getBatteryStatus();
-  const temp      = battery.temperature ?? 0;
-
-  let action = 'none';
-  if (temp >= critical) {
-    await setChargingEnabled(false);
-    action = 'charging_stopped';
-  } else if (temp >= threshold) {
-    await setChargingMode('trickle');
-    action = 'throttled_to_trickle';
-  } else if (!battery.charging_enabled) {
-    await setChargingEnabled(true);
-    action = 'charging_resumed';
-  }
-
-  return { temperature: temp, threshold, critical, action };
-}
-
-/* ── SQLite 查询辅助（替换 /api/stats/*） ────────────────────── */
-
-async function queryDb(sql) {
-  const { errno, stdout } = await exec(`sqlite3 -json "${DB_PATH}" "${sql}" 2>/dev/null`);
-  if (errno !== 0 || !stdout.trim()) return [];
-  try { return JSON.parse(stdout); } catch { return []; }
+  const res = await fetch(`${API_BASE}/api/charging/temperature-check`, { method: 'POST' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
 }
 
 /* ── 工具函数 ──────────────────────────────────────────────── */
@@ -314,7 +194,11 @@ function updateMode(config) {
 
 async function refreshStatus() {
   try {
-    const [battery, cfg] = await Promise.all([getBatteryStatus(), loadConfig()]);
+    const res = await fetch(`${API_BASE}/api/settings`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const battery = data.battery || {};
+    const cfg     = data.config  || {};
     updateDashboard(battery);
     updateMode(cfg);
 
@@ -423,28 +307,23 @@ function drawLineChart(canvasId, labels, dataset, color = '#4f8ef7', label = '')
 
 async function refreshTempChart() {
   try {
-    const snaps = await queryDb(
-      'SELECT * FROM battery_snapshots ORDER BY timestamp DESC LIMIT 60'
-    );
-    const ordered = snaps.slice().reverse();
-    const labels = ordered.map(s => {
+    const res = await fetch(`${API_BASE}/api/stats/snapshots`);
+    if (!res.ok) return;
+    const snaps = await res.json();
+    const labels = snaps.map(s => {
       const d = new Date(s.timestamp);
       return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
     });
-    const temps = ordered.map(s => s.temperature ?? 0);
+    const temps = snaps.map(s => s.temperature ?? 0);
     drawLineChart('tempChart', labels, temps, '#f59e0b', '温度 °C');
   } catch { /* ignore */ }
 }
 
 async function refreshHealthCard() {
   try {
-    const rows = await queryDb(
-      'SELECT AVG(temperature) AS avg_temp, MAX(temperature) AS max_temp, COUNT(*) AS total_snapshots FROM battery_snapshots'
-    );
-    const sessRows = await queryDb(
-      "SELECT COUNT(*) AS cnt FROM charging_sessions WHERE end_time IS NOT NULL"
-    );
-    const r = rows[0] || {};
+    const res = await fetch(`${API_BASE}/api/stats/health`);
+    if (!res.ok) return;
+    const r = await res.json();
     const avg_temp = r.avg_temp ?? 0;
     const max_temp = r.max_temp ?? 0;
     let health_score = 100;
@@ -454,7 +333,7 @@ async function refreshHealthCard() {
 
     setText('healthScore', health_score + '%');
     setText('healthDetail',
-      `平均温度: ${(+avg_temp).toFixed(1)}°C  |  最高温度: ${(+max_temp).toFixed(1)}°C  |  充电次数: ${(sessRows[0] || {}).cnt ?? 0}`);
+      `平均温度: ${(+avg_temp).toFixed(1)}°C  |  最高温度: ${(+max_temp).toFixed(1)}°C  |  充电次数: ${r.total_sessions ?? 0}`);
   } catch { /* ignore */ }
 }
 
@@ -512,25 +391,11 @@ function fmtDuration(s) {
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
-function isoSince(ms) {
-  return new Date(Date.now() - ms).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-}
-
 async function loadStats(period) {
   try {
-    let sql;
-    if (period === 'daily') {
-      const since = isoSince(7 * 24 * 3600 * 1000);
-      sql = `SELECT DATE(start_time) AS day, COUNT(*) AS sessions, AVG(efficiency) AS avg_efficiency, SUM(duration_s) AS total_duration_s, MAX(max_temp) AS max_temp FROM charging_sessions WHERE start_time >= '${since}' AND end_time IS NOT NULL GROUP BY DATE(start_time) ORDER BY day ASC`;
-    } else if (period === 'weekly') {
-      const since = isoSince(12 * 7 * 24 * 3600 * 1000);
-      sql = `SELECT STRFTIME('%Y-W%W', start_time) AS week, COUNT(*) AS sessions, AVG(efficiency) AS avg_efficiency, SUM(duration_s) AS total_duration_s, MAX(max_temp) AS max_temp FROM charging_sessions WHERE start_time >= '${since}' AND end_time IS NOT NULL GROUP BY week ORDER BY week ASC`;
-    } else {
-      const since = isoSince(365 * 24 * 3600 * 1000);
-      sql = `SELECT STRFTIME('%Y-%m', start_time) AS month, COUNT(*) AS sessions, AVG(efficiency) AS avg_efficiency, SUM(duration_s) AS total_duration_s, MAX(max_temp) AS max_temp FROM charging_sessions WHERE start_time >= '${since}' AND end_time IS NOT NULL GROUP BY month ORDER BY month ASC`;
-    }
-
-    const rows = await queryDb(sql);
+    const res = await fetch(`${API_BASE}/api/stats/${period}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = await res.json();
     const cols = PERIOD_COLS[period];
 
     const head = $('statsTableHead');
@@ -605,20 +470,8 @@ const PRESETS = {
   save:   { mode: 'trickle', max_limit: 60,  temperature_threshold: 36, temperature_critical: 42 },
 };
 
-// Bug 1 + Bug 2 修复：所有事件绑定和初始化逻辑包裹在顶层 async IIFE 中，
-// 确保动态 import 完成后再绑定事件，并加 ?. 可选链防止 null 报错崩溃。
+// 所有事件绑定和初始化逻辑包裹在顶层 async IIFE 中。
 (async () => {
-  // Bug 1：动态 import kernelsu，失败时使用 mock 回退
-  try {
-    const ksu = await import('kernelsu');
-    exec = ksu.exec;
-  } catch {
-    exec = async (cmd) => {
-      console.warn('[mock exec]', cmd);
-      return { errno: 1, stdout: '' };
-    };
-  }
-
   /* ── 主题切换 ─────────────────────────────────────────── */
 
   $('themeToggle')?.addEventListener('click', () => {
@@ -709,36 +562,12 @@ const PRESETS = {
 
   /* ── 导出 ───────────────────────────────────────────────── */
 
-  $('exportCsv')?.addEventListener('click', async () => {
-    try {
-      const rows = await queryDb('SELECT * FROM charging_sessions ORDER BY start_time');
-      if (!rows.length) { showToast('暂无数据'); return; }
-      const keys = Object.keys(rows[0]);
-      const ts = nowStr().replace(' ', '_').replace(/:/g, '');
-      const csv  = [`# exported: ${nowStr()}`, keys.join(',')]
-        .concat(rows.map(r => keys.map(k => JSON.stringify(r[k] ?? '')).join(',')))
-        .join('\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `charging_data_${ts}.csv`;
-      a.click();
-      showToast('导出 CSV 成功');
-    } catch (e) { showToast('导出失败: ' + e.message); }
+  $('exportCsv')?.addEventListener('click', () => {
+    window.location.href = `${API_BASE}/api/export/csv`;
   });
 
-  $('exportJson')?.addEventListener('click', async () => {
-    try {
-      const data = await queryDb('SELECT * FROM charging_sessions ORDER BY start_time');
-      const ts = nowStr().replace(' ', '_').replace(/:/g, '');
-      const payload = { export_timestamp: nowStr(), sessions: data };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `charging_data_${ts}.json`;
-      a.click();
-      showToast('导出 JSON 成功');
-    } catch (e) { showToast('导出失败: ' + e.message); }
+  $('exportJson')?.addEventListener('click', () => {
+    window.location.href = `${API_BASE}/api/export/json`;
   });
 
   /* ── 配置编辑器 ─────────────────────────────────────────── */
