@@ -2,6 +2,9 @@
 out/
 *.zip
 
+# C build output
+charge_control
+
 # Python
 __pycache__/
 *.pyc

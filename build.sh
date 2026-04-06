@@ -30,8 +30,13 @@ ok "zip found"
 # ── Required module files ─────────────────────────────────
 info "Validating module structure..."
 REQUIRED=(module.prop service.sh post-fs-data.sh uninstall.sh \
-          server.py charge_control.py stats.py config.json \
-          webroot/index.html webroot/styles.css webroot/script.js start_server.sh launcher.py)
+          config.json Makefile \
+          src/main.c src/charge_control.c src/charge_control.h \
+          src/stats.c src/stats.h \
+          src/snapshot_daemon.c src/snapshot_daemon.h \
+          src/config.c src/config.h \
+          src/cJSON.c src/cJSON.h \
+          webroot/index.html webroot/styles.css webroot/script.js)
 
 for f in "${REQUIRED[@]}"; do
     if [ -f "$f" ]; then
@@ -53,7 +58,7 @@ ZIP_PATH="$OUTPUT_DIR/$ZIP_NAME"
 
 # ── Set executable permissions ────────────────────────────
 info "Setting permissions..."
-chmod +x service.sh post-fs-data.sh uninstall.sh start_server.sh build.sh 2>/dev/null || true
+chmod +x service.sh post-fs-data.sh uninstall.sh build.sh 2>/dev/null || true
 ok "Permissions set"
 
 # ── Package module ────────────────────────────────────────
@@ -65,12 +70,8 @@ INCLUDE=(
     post-fs-data.sh
     uninstall.sh
     common.prop
-    server.py
-    charge_control.py
-    stats.py
     config.json
-    start_server.sh
-    launcher.py
+    Makefile
     README.md
 )
 
@@ -80,6 +81,12 @@ for f in "${INCLUDE[@]}"; do
         ok "Added $f"
     fi
 done
+
+# Include C source files
+if [ -d "src" ]; then
+    zip -qr "$ZIP_PATH" src/
+    ok "Added src/"
+fi
 
 # Also include webroot/ if present
 if [ -d "webroot" ]; then
