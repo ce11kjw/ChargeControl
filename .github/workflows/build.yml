@@ -74,8 +74,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
 
+      - name: Install C build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc make libsqlite3-dev
+
       - name: Build ZIP
         run: bash build.sh
+
+      - name: Verify ZIP contains charge_control binary
+        run: |
+          ZIP=$(ls out/ChargeControl_*.zip | head -1)
+          echo "Checking $ZIP …"
+          unzip -l "$ZIP" | grep 'charge_control$' || { echo 'ERROR: charge_control binary missing from ZIP'; exit 1; }
+          echo "charge_control found in ZIP ✓"
 
       - name: Get version
         id: version

@@ -55,11 +55,61 @@ http://127.0.0.1:8080
 
 ## 从源码构建
 
+> **为什么必须先 `make`？**  
+> `service.sh` 在开机时会执行模块目录下的 `charge_control` 二进制文件。  
+> 该文件由 C 源码编译而来，**不在 Git 仓库中**（属于构建产物），因此打包前必须先编译。
+
+### 环境要求（构建机/Linux/macOS）
+
+| 工具 | 说明 |
+|------|------|
+| `gcc` 或交叉编译器 | 编译 C 源码 |
+| `make` | 驱动编译流程 |
+| `libsqlite3-dev` | SQLite 头文件与静态库 |
+| `zip` | 打包 ZIP |
+
+Ubuntu / Debian 一键安装：
 ```bash
+sudo apt-get install gcc make libsqlite3-dev zip
+```
+
+### 构建步骤
+
+```bash
+# 1. 克隆仓库
 git clone https://github.com/ce11kjw/ChargeControl.git
 cd ChargeControl
+
+# 2. 编译 C 后端（生成 ./charge_control）
+make
+
+# 3. 打包模块 ZIP（build.sh 会自动调用 make，并验证产物）
+bash build.sh
+
+# 输出: out/ChargeControl_vX.X.X.zip
+```
+
+或一步完成（build.sh 内部会执行 make）：
+```bash
 bash build.sh
 # 输出: out/ChargeControl_vX.X.X.zip
+```
+
+### 验证产物
+
+```bash
+unzip -l out/ChargeControl_*.zip | grep charge_control
+# 应输出：  xxxxxxx  charge_control
+```
+
+如果列表中没有 `charge_control`，请先检查 `make` 是否成功，再重新运行 `bash build.sh`。
+
+### 交叉编译（Android ARM64）
+
+```bash
+# 使用 NDK 或 Android 工具链中的编译器（只需指定 CC 即可）
+make CC=aarch64-linux-android-gcc
+bash build.sh
 ```
 
 ---
