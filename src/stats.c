@@ -1,7 +1,7 @@
 #include "stats.h"
 #include "cJSON.h"
 
-#include <sqlite3.h>
+#include "sqlite3.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,7 +13,6 @@
 #define MAX_EFFICIENCY_THRESHOLD 200.0
 
 /* ── globals ─────────────────────────────────────────────── */
-
 pthread_mutex_t g_db_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static char s_db_path[600] = "";
@@ -105,22 +104,22 @@ int stats_init_db(const char *db_path)
         "CREATE TABLE IF NOT EXISTS charging_sessions ("
         "  id          INTEGER PRIMARY KEY AUTOINCREMENT,"
         "  start_time  TEXT NOT NULL,"
-        "  end_time    TEXT,"
+        "  end_time    TEXT,"  
         "  start_level INTEGER NOT NULL,"
-        "  end_level   INTEGER,"
+        "  end_level   INTEGER,"  
         "  mode        TEXT NOT NULL DEFAULT 'normal',"
-        "  max_temp    REAL,"
-        "  duration_s  INTEGER,"
+        "  max_temp    REAL,"  
+        "  duration_s  INTEGER,"  
         "  efficiency  REAL"
         ");"
         "CREATE TABLE IF NOT EXISTS battery_snapshots ("
         "  id          INTEGER PRIMARY KEY AUTOINCREMENT,"
         "  timestamp   TEXT NOT NULL,"
-        "  capacity    INTEGER,"
-        "  temperature REAL,"
-        "  voltage_mv  REAL,"
-        "  current_ma  REAL,"
-        "  status      TEXT,"
+        "  capacity    INTEGER,"  
+        "  temperature REAL,"  
+        "  voltage_mv  REAL,"  
+        "  current_ma  REAL,"  
+        "  status      TEXT,"  
         "  mode        TEXT"
         ");";
 
