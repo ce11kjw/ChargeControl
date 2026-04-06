@@ -33,10 +33,41 @@ jobs:
       - name: Install dependencies
         run: pip install flask flask-cors
 
-      - name: Install C build dependencies
+      - name: Install build tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends gcc make libsqlite3-dev
+          sudo apt-get install -y --no-install-recommends make unzip wget zip file
+
+      - name: Download Android NDK
+        run: |
+          NDK_VERSION=r27c
+          wget -q "https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip" -O /tmp/ndk.zip
+          unzip -q /tmp/ndk.zip -d /opt
+          echo "ANDROID_NDK=/opt/android-ndk-${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Download SQLite amalgamation
+        run: |
+          wget -q "https://www.sqlite.org/2024/sqlite-amalgamation-3460000.zip" -O /tmp/sqlite.zip
+          unzip -q /tmp/sqlite.zip -d /tmp/sqlite
+          SQLITE_SRC=$(ls -d /tmp/sqlite/sqlite-amalgamation-*)
+          cp "$SQLITE_SRC/sqlite3.c" "$SQLITE_SRC/sqlite3.h" src/
+          echo "SQLite amalgamation copied to src/"
+
+      - name: Cross-compile charge_control for ARM64 Android
+        run: |
+          API=35
+          CC="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang"
+          "$CC" -O2 -std=c11 -D_GNU_SOURCE \
+            -DSQLITE_THREADSAFE=1 \
+            -o charge_control \
+            src/main.c src/charge_control.c src/stats.c \
+            src/snapshot_daemon.c src/config.c src/cJSON.c \
+            src/sqlite3.c \
+            -lpthread -lm
+          chmod 0755 charge_control
+          file charge_control
+          file charge_control | grep -q "aarch64" || (echo "ERROR: not an ARM64 binary!" && exit 1)
+          echo "charge_control compiled successfully as ARM64 ELF"
 
       - name: Create tag for workflow_dispatch
         if: github.event_name == 'workflow_dispatch'
@@ -71,7 +102,9 @@ jobs:
           sed -i "s/^versionCode=.*/versionCode=${CODE}/" module.prop
           cat module.prop
 
-      - name: Build ZIP
+      - name: Package ZIP
+        env:
+          SKIP_COMPILE: "1"
         run: bash build.sh
 
       - name: Generate changelog
