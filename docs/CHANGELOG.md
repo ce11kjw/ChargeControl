@@ -4,6 +4,29 @@ ChargeControl 的所有重要变更均记录于此。
 
 ---
 
+## [v5.8] – 2026-04-06
+
+### Changed
+- fix: remove -lpthread -lm from Android NDK cross-compile step
+- Initial plan
+- Remove -lpthread from LDFLAGS (merged into libc in Android NDK API 21+)
+- Initial plan
+- fix: use quoted include for local sqlite3.h
+- Fix Android build: download SQLite amalgamation instead of linking system library
+- Initial plan
+- build: switch workflow to Android NDK r27c cross-compilation
+- Initial plan
+- build: switch to Android NDK cross-compile (aarch64, API=35)
+- fix: resolve sqlite3.h include error on macOS/Clang via pkg-config
+- ci: improve ARM64 verification error message with file output details
+- ci: add NDK cross-compilation steps to release workflow, add SKIP_COMPILE support in build.sh
+- Initial plan
+- Update build.sh with new content
+- Update post-fs-data.sh with new initialization script
+- chore: update CHANGELOG.md and update.json to v4.7 [skip ci]
+
+---
+
 ## [v4.7] – 2026-04-06
 
 ### Changed
