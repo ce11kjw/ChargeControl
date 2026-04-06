@@ -38,7 +38,7 @@ if [ "${SKIP_COMPILE}" = "1" ]; then
     ok "Pre-built charge_control found"
 else
     command -v make >/dev/null 2>&1 || err "make is not installed (needed to compile charge_control)"
-ok "make found"
+    ok "make found"
     info "Compiling charge_control binary (make)..."
     if ! make; then
         err "Compilation failed. Fix the errors above, then re-run build.sh."
