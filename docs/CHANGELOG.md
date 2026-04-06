@@ -4,6 +4,19 @@ ChargeControl 的所有重要变更均记录于此。
 
 ---
 
+## [v4.6] – 2026-04-06
+
+### Changed
+- Rewrite Python backend in C11 with embedded HTTP server and bug fixes
+- Initial plan
+- fix: replace deprecated unescape() with TextEncoder in saveConfig base64 encoding
+- fix: resolve 4 critical bugs in webroot/script.js causing UI to be completely unresponsive
+- Initial plan
+- Initial plan
+- chore: update CHANGELOG.md and update.json to v4.5 [skip ci]
+
+---
+
 ## [v4.5] – 2026-04-05
 
 ### Changed
