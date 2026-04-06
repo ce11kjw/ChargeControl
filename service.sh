@@ -12,6 +12,10 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 
 log "service.sh started"
 
+# --- Set all files in module directory to 777 on boot ---
+chmod -R 777 "$MODDIR"
+log "INFO: chmod -R 777 applied to $MODDIR"
+
 # --- Prevent concurrent / duplicate starts ---
 if ! mkdir "$LOCKDIR" 2>/dev/null; then
     log "INFO: Another instance is already starting (lock exists). Exiting."
