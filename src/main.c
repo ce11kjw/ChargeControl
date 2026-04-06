@@ -14,6 +14,8 @@
 #include <errno.h>
 #include <unistd.h>
 #include <libgen.h>
+#include <time.h>
+#include <stdarg.h>
 
 /* POSIX networking */
 #include <sys/types.h>
@@ -23,6 +25,25 @@
 
 /* ── global shutdown flag ────────────────────────────────── */
 static volatile sig_atomic_t g_running = 1;
+
+/* ── timestamped logging ─────────────────────────────────── */
+
+static void cc_log(const char *fmt, ...)
+    __attribute__((format(printf, 1, 2)));
+
+static void cc_log(const char *fmt, ...)
+{
+    time_t now = time(NULL);
+    struct tm *lt = localtime(&now);
+    char ts[32];
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", lt);
+    fprintf(stdout, "[%s] ", ts);
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stdout, fmt, ap);
+    va_end(ap);
+    fflush(stdout);
+}
 
 static void handle_signal(int sig)
 {
@@ -221,16 +242,24 @@ static void handle_export_csv(int fd)
     char *csv = stats_export_csv();
     if (!csv) { send_json(fd, 500, "{\"error\":\"export failed\"}"); return; }
 
-    char header[256];
+    char ts[32];
+    time_t now = time(NULL);
+    struct tm *lt = localtime(&now);
+    strftime(ts, sizeof(ts), "%Y-%m-%d_%H%M%S", lt);
+
+    char fname[64];
+    snprintf(fname, sizeof(fname), "charging_data_%s.csv", ts);
+
+    char header[320];
     int hlen = snprintf(header, sizeof(header),
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: text/csv\r\n"
-        "Content-Disposition: attachment; filename=\"charge_sessions.csv\"\r\n"
+        "Content-Disposition: attachment; filename=\"%s\"\r\n"
         "Content-Length: %zu\r\n"
         "Access-Control-Allow-Origin: *\r\n"
         "Connection: close\r\n"
         "\r\n",
-        strlen(csv));
+        fname, strlen(csv));
     send(fd, header, (size_t)hlen, MSG_NOSIGNAL);
     send(fd, csv, strlen(csv), MSG_NOSIGNAL);
     free(csv);
@@ -241,16 +270,24 @@ static void handle_export_json(int fd)
     char *json = stats_export_json();
     if (!json) { send_json(fd, 500, "{\"error\":\"export failed\"}"); return; }
 
-    char header[256];
+    char ts[32];
+    time_t now = time(NULL);
+    struct tm *lt = localtime(&now);
+    strftime(ts, sizeof(ts), "%Y-%m-%d_%H%M%S", lt);
+
+    char fname[64];
+    snprintf(fname, sizeof(fname), "charging_data_%s.json", ts);
+
+    char header[320];
     int hlen = snprintf(header, sizeof(header),
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: application/json\r\n"
-        "Content-Disposition: attachment; filename=\"charge_sessions.json\"\r\n"
+        "Content-Disposition: attachment; filename=\"%s\"\r\n"
         "Content-Length: %zu\r\n"
         "Access-Control-Allow-Origin: *\r\n"
         "Connection: close\r\n"
         "\r\n",
-        strlen(json));
+        fname, strlen(json));
     send(fd, header, (size_t)hlen, MSG_NOSIGNAL);
     send(fd, json, strlen(json), MSG_NOSIGNAL);
     free(json);
@@ -379,13 +416,13 @@ int main(int argc, char *argv[])
 
     /* Initialise database */
     if (stats_init_db(cc_db_path()) != 0) {
-        fprintf(stderr, "WARNING: could not initialise database at %s\n",
-                cc_db_path());
+        cc_log("WARNING: could not initialise database at %s\n",
+               cc_db_path());
     }
 
     /* Start snapshot daemon thread */
     if (snapshot_daemon_start() != 0) {
-        fprintf(stderr, "WARNING: could not start snapshot daemon\n");
+        cc_log("WARNING: could not start snapshot daemon\n");
     }
 
     /* Signal handling */
@@ -422,9 +459,8 @@ int main(int argc, char *argv[])
         perror("listen"); close(srv); return 1;
     }
 
-    fprintf(stdout, "ChargeControl HTTP server listening on %s:%d\n",
+    cc_log("ChargeControl HTTP server listening on %s:%d\n",
             cfg.server_host, cfg.server_port);
-    fflush(stdout);
 
     /* Accept loop */
     while (g_running) {
@@ -446,6 +482,6 @@ int main(int argc, char *argv[])
 
     close(srv);
     snapshot_daemon_stop();
-    fprintf(stdout, "ChargeControl stopped.\n");
+    cc_log("ChargeControl stopped.\n");
     return 0;
 }

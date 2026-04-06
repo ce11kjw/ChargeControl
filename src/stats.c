@@ -491,6 +491,13 @@ char *stats_export_csv(void)
     char   *buf = NULL;
     size_t  len = 0, cap = 0;
 
+    /* Prepend export timestamp as a comment line */
+    char exported_ts[32];
+    time_t now = time(NULL);
+    struct tm *lt = localtime(&now);
+    strftime(exported_ts, sizeof(exported_ts), "%Y-%m-%d %H:%M:%S", lt);
+    buf = buf_append(buf, &len, &cap, "# exported: %s\n", exported_ts);
+
     buf = buf_append(buf, &len, &cap,
         "id,start_time,end_time,start_level,end_level,"
         "mode,max_temp,duration_s,efficiency\n");
@@ -525,9 +532,26 @@ char *stats_export_csv(void)
 
 char *stats_export_json(void)
 {
+    char ts[32];
+    time_t now = time(NULL);
+    struct tm *lt = localtime(&now);
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", lt);
+
     const char *sql =
         "SELECT * FROM charging_sessions ORDER BY start_time";
-    return query_to_json_array(sql, NULL);
+    char *arr = query_to_json_array(sql, NULL);
+    if (!arr) return NULL;
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "export_timestamp", ts);
+    cJSON *arr_obj = cJSON_Parse(arr);
+    free(arr);
+    if (!arr_obj) arr_obj = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "sessions", arr_obj);
+
+    char *s = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return s;
 }
 
 int stats_prune_old_data(int retention_days)
