@@ -1,175 +1,182 @@
-# 充电控制 ⚡
+# 🔋 ChargeControl
 
-> 基于 KernelSU 的 Android 电池充电控制高级模块，提供现代化 Web 界面、多充电模式、实时统计及自动化 CI/CD。
+> 基于 KernelSU 的高级电池充电控制模块，提供科技感 Web UI、实时数据推送、多充电模式与完整统计分析。
 
-[![构建与测试](https://github.com/ce11kjw/ChargeControl/actions/workflows/build.yml/badge.svg)](https://github.com/ce11kjw/ChargeControl/actions/workflows/build.yml)
+[![Build & Release](https://github.com/ce11kjw/ChargeControl/actions/workflows/build.yml/badge.svg)](https://github.com/ce11kjw/ChargeControl/actions)
+[![Version](https://img.shields.io/badge/version-v4.8.5-blue.svg)](https://github.com/ce11kjw/ChargeControl/releases)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
 
-## 功能特性
+## ✨ 功能特性
 
-| 功能 | 说明 |
+### 🔮 科技感 UI
+- 深色主题 + 玻璃拟态设计
+- 粒子背景动画
+- 扫描线效果
+- 响应式布局（手机/平板/电脑）
+- 亮色/暗色主题切换
+
+### ⚡ 实时数据推送
+- SSE（Server-Sent Events）实时推送
+- 数据变化立即更新，无变化不推送
+- 页面不可见时自动断开，节省电量
+
+### 🎬 智能帧率系统
+- 0~165fps 动态调整
+- 用户操作时：0fps → 设备最高帧率
+- 用户停止后：最高帧率 → 0fps
+- 完美适配高刷屏幕
+
+### 🔋 电池信息显示
+- **核心数据**：电量、状态、温度、电压、电流、功率、健康度
+- **电芯信息**：设计容量、当前容量、循环次数、制造商、电池技术
+- **芯片信息**：芯片型号、CPU核心数、CPU频率、芯片温度
+- **充电器信息**：充电器类型、快充协议、最大功率
+- **历史数据**：今日充电次数、耗电、平均功耗、电池损耗
+
+### 🌡️ 温度监控
+- 电池温度
+- CPU 温度
+- GPU 温度
+- 主板温度
+
+### ⚡ 多充电模式
+| 模式 | 说明 | 功率 |
+|------|------|------|
+| 🚀 涡轮加速 | 最大速度充电 | 65W |
+| 🤖 智能模式 | AI 自动调节 | 自适应 |
+| 🔋 标准充电 | 日常使用 | 20W |
+| 💧 涓流充电 | 保护电池 | 5W |
+| 🛡️ 电池保护 | 最大程度保护 | 3W |
+
+### 📊 数据统计
+- 充电曲线图表
+- 温度趋势图
+- 每日/每周/每月统计
+- CSV/JSON 数据导出
+
+### 🔧 智能功能
+- 充电上限设置（0-100%）
+- 温度保护（自动降速/停止）
+- 定时充电
+- 充电完成通知
+
+---
+
+## 📱 兼容性
+
+### Root 方案
+| 方案 | 状态 |
 |------|------|
-| 🌐 **Web 仪表盘** | 支持暗色/亮色主题的现代响应式界面 |
-| ⚡ **多充电模式** | 普通、快充、涓流、省电、超级省电 |
-| 📊 **统计分析** | 每日/每周/每月图表，支持 CSV 和 JSON 导出 |
-| 🌡️ **温度保护** | 过热时自动降速或停止充电 |
-| 🎯 **充电上限** | 设置最大充电百分比（如充到 80% 停止） |
-| 🔧 **配置编辑器** | 在浏览器中编辑所有设置 |
-| 📦 **KernelSU 原生** | 包含标准 `module.prop`、`service.sh`、`uninstall.sh` |
-| 🤖 **CI/CD** | GitHub Actions：自动构建 ZIP 并自动发布 |
+| KernelSU (KSU) | ✅ 完美支持 |
+| Magisk | ✅ 完美支持 |
+| APatch | ✅ 完美支持 |
+| SuperSU | ✅ 完美支持 |
+
+### 芯片平台
+| 平台 | 状态 |
+|------|------|
+| 高通 Snapdragon | ✅ 完美支持 |
+| 联发科 MediaTek | ✅ 完美支持 |
+| 三星 Exynos | ✅ 完美支持 |
+| 华为麒麟 | ✅ 完美支持 |
+| Google Tensor | ✅ 完美支持 |
+| 紫光展锐 | ✅ 完美支持 |
+
+### ROM 系统
+| ROM | 状态 |
+|-----|------|
+| 原生 Android/AOSP | ✅ 完美支持 |
+| MIUI / HyperOS | ✅ 完美支持 |
+| ColorOS | ✅ 完美支持 |
+| OriginOS | ✅ 完美支持 |
+| OneUI | ✅ 完美支持 |
+| LineageOS | ✅ 完美支持 |
 
 ---
 
-## 安装说明
+## 📦 安装说明
 
-### 环境要求
-- 已安装 **KernelSU** 的 Android 设备
-- 设备上可用 Python 3（或通过 Termux）
+### 前提条件
+- 已安装 **KernelSU** 或其他 Root 方案
+- Android 8.0+
 
 ### 安装步骤
-1. 从 [Releases](https://github.com/ce11kjw/ChargeControl/releases) 下载最新 ZIP
+1. 从 [Releases](https://github.com/ce11kjw/ChargeControl/releases) 下载最新版本
 2. 打开 **KernelSU 管理器** → **模块** → **从存储安装**
-3. 选择 `ChargeControl_vX.X.X.zip`
+3. 选择下载的 `ChargeControl_v*.zip` 文件
 4. 重启设备
 
-### 访问 Web 界面
-设备启动后，打开浏览器访问：
-```
-http://127.0.0.1:8080
-```
+### 访问 Web UI
+浏览器访问：`http://127.0.0.1:8080`
 
 ---
 
-## 充电模式
+## 🔨 从源码编译
 
-| 模式 | 电流 | 电压 | 使用场景 |
-|------|------|------|----------|
-| **普通** | 2000 mA | 4350 mV | 日常使用 |
-| **快充** | 4000 mA | 4400 mV | 快速充电 |
-| **涓流** | 500 mA | 4200 mV | 过夜充电，延长电池寿命 |
-| **省电** | 1000 mA | 4300 mV | 均衡模式 |
-| **超级省电** | 300 mA | 4100 mV | 最大程度保护电池健康 |
+### 环境要求
+- Linux/macOS
+- Android NDK
+- GCC 或 Clang
 
----
-
-## 从源码构建
-
-> **为什么必须先 `make`？**  
-> `service.sh` 在开机时会执行模块目录下的 `charge_control` 二进制文件。  
-> 该文件由 C 源码编译而来，**不在 Git 仓库中**（属于构建产物），因此打包前必须先编译。
-
-### 环境要求（构建机/Linux/macOS）
-
-| 工具 | 说明 |
-|------|------|
-| `gcc` 或交叉编译器 | 编译 C 源码 |
-| `make` | 驱动编译流程 |
-| `libsqlite3-dev` | SQLite 头文件与静态库 |
-| `zip` | 打包 ZIP |
-
-Ubuntu / Debian 一键安装：
+### 编译步骤
 ```bash
-sudo apt-get install gcc make libsqlite3-dev zip
-```
-
-### 构建步骤
-
-```bash
-# 1. 克隆仓库
+# 克隆仓库
 git clone https://github.com/ce11kjw/ChargeControl.git
 cd ChargeControl
 
-# 2. 编译 C 后端（生成 ./charge_control）
-make
+# 编译 C 代码（交叉编译 ARM64）
+make CC=aarch64-linux-android33-clang
 
-# 3. 打包模块 ZIP（build.sh 会自动调用 make，并验证产物）
+# 打包 ZIP
 bash build.sh
 
-# 输出: out/ChargeControl_vX.X.X.zip
-```
-
-或一步完成（build.sh 内部会执行 make）：
-```bash
-bash build.sh
-# 输出: out/ChargeControl_vX.X.X.zip
-```
-
-### 验证产物
-
-```bash
-unzip -l out/ChargeControl_*.zip | grep charge_control
-# 应输出：  xxxxxxx  charge_control
-```
-
-如果列表中没有 `charge_control`，请先检查 `make` 是否成功，再重新运行 `bash build.sh`。
-
-### 交叉编译（Android ARM64）
-
-```bash
-# 使用 NDK 或 Android 工具链中的编译器（只需指定 CC 即可）
-make CC=aarch64-linux-android-gcc
-bash build.sh
+# 输出: out/ChargeControl_v*.zip
 ```
 
 ---
 
-## API 接口
+## 📊 数据读取
 
-服务器在 8080 端口提供 REST API。完整参考请查看 [`docs/API.md`](docs/API.md)。
+### 自动发现
+模块启动时会自动扫描 `/sys/class/power_supply/` 目录，动态发现所有电池设备。
 
-快速示例：
-```bash
-# 获取电池状态
-curl http://127.0.0.1:8080/api/status
+### 双电芯支持
+自动识别双电芯设备，分别显示每个电芯的状态。
 
-# 设置充电上限为 80%
-curl -X POST http://127.0.0.1:8080/api/charging/limit \
-     -H 'Content-Type: application/json' \
-     -d '{"limit": 80}'
-
-# 切换为涓流模式
-curl -X POST http://127.0.0.1:8080/api/charging/mode \
-     -H 'Content-Type: application/json' \
-     -d '{"mode": "trickle"}'
-```
+### 严格数据验证
+- 读取成功的数据：显示在 UI
+- 读取失败的数据：隐藏 UI + 记录日志
+- 格式异常的数据：隐藏 UI + 记录原因
 
 ---
 
-## 配置
+## 📝 更新日志
 
-编辑 `config.json` 或使用 Web 界面中的**设置**标签页。  
-完整配置格式请查看 [`docs/CONFIG.md`](docs/CONFIG.md)。
-
----
-
-## 故障排查
-
-**服务器无法启动？**
-```bash
-adb shell su -c "cat /data/adb/modules/ChargeControl/module.log"
-```
-
-**检查运行中的进程：**
-```bash
-adb shell su -c "ps | grep python"
-```
-
-**重启服务器：**
-```bash
-adb shell su -c "kill \$(cat /data/adb/modules/ChargeControl/server.pid)"
-adb shell su -c "cd /data/adb/modules/ChargeControl && nohup python3 server.py &"
-```
+### v4.8.5 (2024-07-29)
+- ✨ 全新科技感 UI 设计
+- ⚡ SSE 实时数据推送
+- 🎬 智能帧率系统 (0~165fps)
+- 🔋 动态电池路径发现
+- 📱 双电芯支持
+- 🌡️ 多温度监控
+- 📊 完整数据验证
+- 🛡️ 读取失败日志记录
 
 ---
 
-## 更新日志
+## 📄 许可证
 
-请查看 [`docs/CHANGELOG.md`](docs/CHANGELOG.md)。
+MIT License - 详见 [LICENSE](LICENSE)
 
 ---
 
-## 许可证
+## 🙏 致谢
 
-MIT 许可证 – 详情请查看 [LICENSE](LICENSE)。
+- [KernelSU](https://kernelsu.org/) - 内核级 Root 方案
+- [cJSON](https://github.com/DaveGamble/cJSON) - JSON 解析库
 
+---
+
+**⭐ 如果这个项目对您有帮助，请给个 Star 支持一下！**

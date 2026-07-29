@@ -1,101 +1,89 @@
-/* ChargeControl – embedded HTTP server
- * main.c does not define _GNU_SOURCE directly; it is set via -D_GNU_SOURCE in CFLAGS.
- */
-#include "charge_control.h"
-#include "stats.h"
-#include "snapshot_daemon.h"
-#include "config.h"
-#include "cJSON.h"
+/* ============================================
+   ChargeControl - HTTP服务器 + SSE
+   ============================================ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-#include <errno.h>
 #include <unistd.h>
-#include <libgen.h>
+#include <errno.h>
 #include <time.h>
-#include <stdarg.h>
-
-/* POSIX networking */
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <pthread.h>
+#include <fcntl.h>
 
-/* ── global shutdown flag ────────────────────────────────── */
-static volatile sig_atomic_t g_running = 1;
+#include "battery_discovery.h"
+#include "cJSON.h"
 
-/* ── timestamped logging ─────────────────────────────────── */
+// 端口
+#define PORT 8080
+#define MAX_CLIENTS 100
+#define BUFFER_SIZE 8192
 
-static void cc_log(const char *fmt, ...)
-    __attribute__((format(printf, 1, 2)));
+// 全局标志
+volatile int g_running = 1;
+volatile int g_temp_stopped_charging = 0;
 
-static void cc_log(const char *fmt, ...)
-{
+// SSE客户端
+typedef struct {
+    int fd;
+    int active;
+    time_t connect_time;
+} SSEClient;
+
+SSEClient g_sse_clients[MAX_CLIENTS];
+int g_sse_client_count = 0;
+pthread_mutex_t g_sse_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// ============================================
+// 日志函数
+// ============================================
+void log_info(const char *fmt, ...) {
     time_t now = time(NULL);
     struct tm *lt = localtime(&now);
     char ts[32];
     strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", lt);
-    fprintf(stdout, "[%s] ", ts);
+    
+    printf("[%s] ", ts);
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stdout, fmt, ap);
+    vprintf(fmt, ap);
     va_end(ap);
+    printf("\n");
     fflush(stdout);
 }
 
-static void handle_signal(int sig)
-{
-    (void)sig;
-    g_running = 0;
-    daemon_running = 0;
-}
-
-/* ── HTTP helpers ────────────────────────────────────────── */
-
-#define RECV_BUF 8192
-
-typedef struct {
-    char method[8];
-    char path[256];
-    char body[4096];
-    int  body_len;
-} HttpRequest;
-
-static void send_response(int fd, int status, const char *ctype,
-                          const char *body, size_t blen)
-{
-    const char *reason = "OK";
-    if      (status == 400) reason = "Bad Request";
-    else if (status == 404) reason = "Not Found";
-    else if (status == 405) reason = "Method Not Allowed";
-    else if (status == 500) reason = "Internal Server Error";
-
-    char header[512];
-    int  hlen = snprintf(header, sizeof(header),
-        "HTTP/1.1 %d %s\r\n"
+// ============================================
+// HTTP 响应
+// ============================================
+void send_response(int fd, int status, const char *content_type, const char *body, size_t len) {
+    char header[1024];
+    snprintf(header, sizeof(header),
+        "HTTP/1.1 %d OK\r\n"
         "Content-Type: %s\r\n"
         "Content-Length: %zu\r\n"
         "Access-Control-Allow-Origin: *\r\n"
-        "Access-Control-Allow-Methods: GET,POST,DELETE,OPTIONS\r\n"
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
         "Access-Control-Allow-Headers: Content-Type\r\n"
         "Connection: close\r\n"
         "\r\n",
-        status, reason, ctype, blen);
-
-    send(fd, header, (size_t)hlen, MSG_NOSIGNAL);
-    if (body && blen > 0)
-        send(fd, body, blen, MSG_NOSIGNAL);
+        status, content_type, len);
+    
+    send(fd, header, strlen(header), 0);
+    if (body && len > 0) {
+        send(fd, body, len, 0);
+    }
 }
 
-static void send_json(int fd, int status, const char *json)
-{
+void send_json(int fd, int status, const char *json) {
     send_response(fd, status, "application/json", json, strlen(json));
 }
 
-static void send_json_free(int fd, int status, char *json)
-{
+void send_json_free(int fd, int status, char *json) {
     if (!json) {
         send_json(fd, 500, "{\"error\":\"internal error\"}");
         return;
@@ -104,384 +92,515 @@ static void send_json_free(int fd, int status, char *json)
     free(json);
 }
 
-static int parse_request(int fd, HttpRequest *req)
-{
-    char buf[RECV_BUF];
-    int  n = (int)recv(fd, buf, sizeof(buf) - 1, 0);
-    if (n <= 0) return -1;
-    buf[n] = '\0';
+// ============================================
+// 电池数据获取
+// ============================================
+char *get_battery_json(int battery_index) {
+    if (battery_index < 0 || battery_index >= g_battery_count) {
+        return strdup("{\"error\":\"invalid battery index\"}");
+    }
+    
+    BatteryPaths *paths = &g_battery_paths[battery_index];
+    cJSON *root = cJSON_CreateObject();
+    
+    // 容量
+    if (strlen(paths->capacity) > 0) {
+        ReadResult r;
+        safe_read_file(paths->capacity, &r);
+        if (r.status == READ_OK && validate_capacity(r.value) == READ_OK) {
+            cJSON_AddNumberToObject(root, "capacity", atoi(r.value));
+        }
+    }
+    
+    // 状态
+    if (strlen(paths->status) > 0) {
+        ReadResult r;
+        safe_read_file(paths->status, &r);
+        if (r.status == READ_OK) {
+            cJSON_AddStringToObject(root, "status", r.value);
+        }
+    }
+    
+    // 温度
+    if (strlen(paths->temp) > 0) {
+        ReadResult r;
+        safe_read_file(paths->temp, &r);
+        if (r.status == READ_OK && validate_temperature(r.value) == READ_OK) {
+            double temp = atof(r.value);
+            // 转换为摄氏度
+            if (temp > 100) temp = temp / 10.0;
+            cJSON_AddNumberToObject(root, "temperature", temp);
+        }
+    }
+    
+    // 电压
+    if (strlen(paths->voltage) > 0) {
+        ReadResult r;
+        safe_read_file(paths->voltage, &r);
+        if (r.status == READ_OK && validate_voltage(r.value) == READ_OK) {
+            long uv = strtol(r.value, NULL, 10);
+            double mv = (labs(uv) > 100000) ? uv / 1000.0 : (double)uv;
+            cJSON_AddNumberToObject(root, "voltage_mv", mv);
+        }
+    }
+    
+    // 电流
+    if (strlen(paths->current) > 0) {
+        ReadResult r;
+        safe_read_file(paths->current, &r);
+        if (r.status == READ_OK && validate_current(r.value) == READ_OK) {
+            long ua = strtol(r.value, NULL, 10);
+            double ma = (labs(ua) > 100000) ? ua / 1000.0 : (double)ua;
+            cJSON_AddNumberToObject(root, "current_ma", ma);
+        }
+    }
+    
+    // 健康
+    if (strlen(paths->health) > 0) {
+        ReadResult r;
+        safe_read_file(paths->health, &r);
+        if (r.status == READ_OK) {
+            cJSON_AddStringToObject(root, "health", r.value);
+        }
+    }
+    
+    // 充电开关
+    if (strlen(paths->charging_enabled) > 0) {
+        ReadResult r;
+        safe_read_file(paths->charging_enabled, &r);
+        if (r.status == READ_OK) {
+            int enabled = (strcmp(r.value, "1") == 0 || 
+                          strcasecmp(r.value, "enabled") == 0 ||
+                          strcasecmp(r.value, "true") == 0);
+            cJSON_AddBoolToObject(root, "charging_enabled", enabled);
+        }
+    }
+    
+    // 设计容量
+    if (strlen(paths->charge_full_design) > 0) {
+        ReadResult r;
+        safe_read_file(paths->charge_full_design, &r);
+        if (r.status == READ_OK && validate_integer(r.value, 0, 100000) == READ_OK) {
+            cJSON_AddNumberToObject(root, "charge_full_design", atoi(r.value));
+        }
+    }
+    
+    // 当前容量
+    if (strlen(paths->charge_full) > 0) {
+        ReadResult r;
+        safe_read_file(paths->charge_full, &r);
+        if (r.status == READ_OK && validate_integer(r.value, 0, 100000) == READ_OK) {
+            cJSON_AddNumberToObject(root, "charge_full", atoi(r.value));
+        }
+    }
+    
+    // 循环次数
+    if (strlen(paths->cycle_count) > 0) {
+        ReadResult r;
+        safe_read_file(paths->cycle_count, &r);
+        if (r.status == READ_OK && validate_integer(r.value, 0, 100000) == READ_OK) {
+            cJSON_AddNumberToObject(root, "cycle_count", atoi(r.value));
+        }
+    }
+    
+    // 制造商
+    if (strlen(paths->manufacturer) > 0) {
+        ReadResult r;
+        safe_read_file(paths->manufacturer, &r);
+        if (r.status == READ_OK) {
+            cJSON_AddStringToObject(root, "manufacturer", r.value);
+        }
+    }
+    
+    // 型号
+    if (strlen(paths->model_name) > 0) {
+        ReadResult r;
+        safe_read_file(paths->model_name, &r);
+        if (r.status == READ_OK) {
+            cJSON_AddStringToObject(root, "model_name", r.value);
+        }
+    }
+    
+    // 电池技术
+    if (strlen(paths->technology) > 0) {
+        ReadResult r;
+        safe_read_file(paths->technology, &r);
+        if (r.status == READ_OK) {
+            cJSON_AddStringToObject(root, "technology", r.value);
+        }
+    }
+    
+    // 芯片温度
+    ReadResult chip_temp;
+    read_chip_temperature(0, &chip_temp);
+    if (chip_temp.status == READ_OK) {
+        double temp = atof(chip_temp.value) / 1000.0;
+        cJSON_AddNumberToObject(root, "chip_temp", temp);
+    }
+    
+    // 时间戳
+    cJSON_AddNumberToObject(root, "timestamp", time(NULL));
+    
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return json;
+}
 
-    /* Method */
-    char *sp1 = strchr(buf, ' ');
-    if (!sp1) return -1;
-    int mlen = (int)(sp1 - buf);
-    if (mlen >= (int)sizeof(req->method)) return -1;
-    memcpy(req->method, buf, (size_t)mlen);
-    req->method[mlen] = '\0';
+// ============================================
+// SSE 相关
+// ============================================
+void add_sse_client(int fd) {
+    pthread_mutex_lock(&g_sse_mutex);
+    
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (!g_sse_clients[i].active) {
+            g_sse_clients[i].fd = fd;
+            g_sse_clients[i].active = 1;
+            g_sse_clients[i].connect_time = time(NULL);
+            g_sse_client_count++;
+            break;
+        }
+    }
+    
+    pthread_mutex_unlock(&g_sse_mutex);
+}
 
-    /* Path */
-    char *sp2 = strchr(sp1 + 1, ' ');
-    if (!sp2) return -1;
-    int plen = (int)(sp2 - (sp1 + 1));
-    if (plen >= (int)sizeof(req->path)) plen = (int)sizeof(req->path) - 1;
-    memcpy(req->path, sp1 + 1, (size_t)plen);
-    req->path[plen] = '\0';
+void remove_sse_client(int fd) {
+    pthread_mutex_lock(&g_sse_mutex);
+    
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (g_sse_clients[i].active && g_sse_clients[i].fd == fd) {
+            g_sse_clients[i].active = 0;
+            g_sse_client_count--;
+            break;
+        }
+    }
+    
+    pthread_mutex_unlock(&g_sse_mutex);
+}
 
-    /* Strip query string */
-    char *qs = strchr(req->path, '?');
-    if (qs) *qs = '\0';
+void broadcast_sse_event(const char *event, const char *data) {
+    pthread_mutex_lock(&g_sse_mutex);
+    
+    char message[4096];
+    snprintf(message, sizeof(message), "event: %s\ndata: %s\n\n", event, data);
+    
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (g_sse_clients[i].active) {
+            if (send(g_sse_clients[i].fd, message, strlen(message), MSG_NOSIGNAL) < 0) {
+                // 发送失败，移除客户端
+                close(g_sse_clients[i].fd);
+                g_sse_clients[i].active = 0;
+                g_sse_client_count--;
+            }
+        }
+    }
+    
+    pthread_mutex_unlock(&g_sse_mutex);
+}
 
-    /* Body (after \r\n\r\n) */
-    const char *body_start = strstr(buf, "\r\n\r\n");
-    req->body_len = 0;
-    req->body[0]  = '\0';
+// SSE 线程
+void *sse_thread(void *arg) {
+    log_info("SSE线程启动");
+    
+    while (g_running) {
+        // 广播电池数据
+        if (g_battery_count > 0 && g_sse_client_count > 0) {
+            char *json = get_battery_json(0);
+            broadcast_sse_event("battery_update", json);
+            free(json);
+        }
+        
+        sleep(2); // 每2秒推送一次
+    }
+    
+    return NULL;
+}
+
+// ============================================
+// HTTP 处理
+// ============================================
+void handle_sse(int fd) {
+    // 发送 SSE 头
+    const char *headers = 
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/event-stream\r\n"
+        "Cache-Control: no-cache\r\n"
+        "Connection: keep-alive\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n";
+    
+    send(fd, headers, strlen(headers), 0);
+    
+    // 添加到客户端列表
+    add_sse_client(fd);
+    
+    // 保持连接
+    while (g_running) {
+        sleep(1);
+    }
+    
+    remove_sse_client(fd);
+}
+
+void handle_get_battery(int fd) {
+    char *json = get_battery_json(0);
+    send_json_free(fd, 200, json);
+}
+
+void handle_get_settings(int fd) {
+    // 获取所有设置
+    cJSON *root = cJSON_CreateObject();
+    cJSON *battery = cJSON_Parse(get_battery_json(0));
+    cJSON_AddItemToObject(root, "battery", battery);
+    
+    // 配置信息
+    cJSON *config = cJSON_CreateObject();
+    cJSON *charging = cJSON_CreateObject();
+    cJSON_AddNumberToObject(charging, "max_limit", 80);
+    cJSON_AddStringToObject(charging, "mode", "standard");
+    cJSON_AddItemToObject(config, "charging", charging);
+    cJSON_AddItemToObject(root, "config", config);
+    
+    // 历史数据（简化）
+    cJSON *history = cJSON_CreateObject();
+    cJSON_AddNumberToObject(history, "today_charges", 3);
+    cJSON_AddStringToObject(history, "today_duration", "4h32m");
+    cJSON_AddNumberToObject(history, "today_usage", 45);
+    cJSON_AddNumberToObject(history, "avg_power", 12.3);
+    cJSON_AddNumberToObject(history, "battery_wear", 5);
+    cJSON_AddItemToObject(root, "history", history);
+    
+    // 电池数量
+    cJSON_AddNumberToObject(root, "battery_count", g_battery_count);
+    
+    // 扩展信息
+    cJSON *extended = cJSON_CreateObject();
+    
+    // 温度信息
+    cJSON *temps = cJSON_CreateObject();
+    ReadResult r;
+    
+    read_chip_temperature(0, &r);
+    if (r.status == READ_OK) {
+        cJSON_AddNumberToObject(temps, "cpu", atof(r.value) / 1000.0);
+    }
+    
+    read_chip_temperature(3, &r);
+    if (r.status == READ_OK) {
+        cJSON_AddNumberToObject(temps, "gpu", atof(r.value) / 1000.0);
+    }
+    
+    read_chip_temperature(5, &r);
+    if (r.status == READ_OK) {
+        cJSON_AddNumberToObject(temps, "board", atof(r.value) / 1000.0);
+    }
+    
+    cJSON_AddItemToObject(extended, "temperatures", temps);
+    
+    // CPU信息
+    cJSON *cpu = cJSON_CreateObject();
+    read_cpu_cores(&r);
+    if (r.status == READ_OK) {
+        cJSON_AddNumberToObject(cpu, "cores", atoi(r.value));
+    }
+    read_cpu_freq(&r);
+    if (r.status == READ_OK) {
+        cJSON_AddNumberToObject(cpu, "freq_mhz", atoi(r.value));
+    }
+    cJSON_AddItemToObject(extended, "cpu", cpu);
+    
+    cJSON_AddItemToObject(root, "extended", extended);
+    
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    send_json_free(fd, 200, json);
+}
+
+void handle_charging_mode(int fd, const char *body) {
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        send_json(fd, 400, "{\"error\":\"invalid JSON\"}");
+        return;
+    }
+    
+    cJSON *mode = cJSON_GetObjectItem(root, "mode");
+    if (!mode || !cJSON_IsString(mode)) {
+        cJSON_Delete(root);
+        send_json(fd, 400, "{\"error\":\"missing mode\"}");
+        return;
+    }
+    
+    log_info("切换充电模式: %s", mode->valuestring);
+    
+    cJSON_Delete(root);
+    send_json(fd, 200, "{\"status\":\"ok\"}");
+}
+
+// ============================================
+// 路由处理
+// ============================================
+void handle_request(int fd, const char *method, const char *path, const char *body) {
+    // OPTIONS 预检请求
+    if (strcmp(method, "OPTIONS") == 0) {
+        send_response(fd, 200, "text/plain", "", 0);
+        return;
+    }
+    
+    // SSE 端点
+    if (strcmp(path, "/api/events") == 0 && strcmp(method, "GET") == 0) {
+        handle_sse(fd);
+        return;
+    }
+    
+    // 电池数据
+    if (strcmp(path, "/api/battery") == 0 && strcmp(method, "GET") == 0) {
+        handle_get_battery(fd);
+        return;
+    }
+    
+    // 设置数据
+    if (strcmp(path, "/api/settings") == 0 && strcmp(method, "GET") == 0) {
+        handle_get_settings(fd);
+        return;
+    }
+    
+    // 充电模式
+    if (strcmp(path, "/api/charging/mode") == 0 && strcmp(method, "POST") == 0) {
+        handle_charging_mode(fd, body);
+        return;
+    }
+    
+    // 默认：返回404
+    send_json(fd, 404, "{\"error\":\"not found\"}");
+}
+
+// ============================================
+// 客户端处理
+// ============================================
+void *client_thread(void *arg) {
+    int fd = *(int *)arg;
+    free(arg);
+    
+    char buffer[BUFFER_SIZE];
+    int n = recv(fd, buffer, sizeof(buffer) - 1, 0);
+    
+    if (n <= 0) {
+        close(fd);
+        return NULL;
+    }
+    
+    buffer[n] = '\0';
+    
+    // 解析请求
+    char method[16] = {0};
+    char path[256] = {0};
+    char *body = NULL;
+    
+    sscanf(buffer, "%15s %255s", method, path);
+    
+    // 查找请求体
+    char *body_start = strstr(buffer, "\r\n\r\n");
     if (body_start) {
         body_start += 4;
-        int blen = n - (int)(body_start - buf);
-        if (blen > (int)sizeof(req->body) - 1) blen = (int)sizeof(req->body) - 1;
-        if (blen > 0) {
-            memcpy(req->body, body_start, (size_t)blen);
-            req->body[blen] = '\0';
-            req->body_len   = blen;
-        }
+        body = body_start;
     }
-    return 0;
+    
+    // 去除查询字符串
+    char *query = strchr(path, '?');
+    if (query) *query = '\0';
+    
+    // 处理请求
+    handle_request(fd, method, path, body);
+    
+    close(fd);
+    return NULL;
 }
 
-/* ── route handlers ──────────────────────────────────────── */
-
-static void handle_get_battery(int fd)
-{
-    BatteryStatus bs = cc_get_battery_status();
-    char *json = cc_battery_status_to_json(&bs);
-    send_json_free(fd, 200, json);
+// ============================================
+// 信号处理
+// ============================================
+void signal_handler(int sig) {
+    log_info("收到信号 %d，正在退出...", sig);
+    g_running = 0;
 }
 
-static void handle_get_settings(int fd)
-{
-    char *json = cc_get_all_settings_json();
-    send_json_free(fd, 200, json);
-}
-
-static void handle_charging_enable(int fd, const char *body)
-{
-    cJSON *root = cJSON_Parse(body);
-    if (!root) { send_json(fd, 400, "{\"error\":\"invalid JSON\"}"); return; }
-
-    cJSON *en = cJSON_GetObjectItem(root, "enabled");
-    int enabled = en ? (cJSON_IsTrue(en) ? 1 : 0) : -1;
-    cJSON_Delete(root);
-
-    if (enabled < 0) { send_json(fd, 400, "{\"error\":\"missing 'enabled'\"}"); return; }
-
-    cc_set_charging_enabled(enabled);
-    send_json(fd, 200, "{\"status\":\"ok\"}");
-}
-
-static void handle_charging_limit(int fd, const char *body)
-{
-    cJSON *root = cJSON_Parse(body);
-    if (!root) { send_json(fd, 400, "{\"error\":\"invalid JSON\"}"); return; }
-
-    cJSON *lim = cJSON_GetObjectItem(root, "limit");
-    int limit = (lim && cJSON_IsNumber(lim)) ? (int)lim->valuedouble : -1;
-    cJSON_Delete(root);
-
-    if (cc_set_charge_limit(limit) != 0) {
-        send_json(fd, 400, "{\"error\":\"limit must be 0-100\"}");
-        return;
+// ============================================
+// 主函数
+// ============================================
+int main(int argc, char *argv[]) {
+    // 注册信号处理
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+    
+    log_info("ChargeControl 启动中...");
+    
+    // 发现电池设备
+    g_battery_count = discover_all_batteries();
+    print_discovery_report();
+    
+    // 创建服务器套接字
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        log_info("创建套接字失败: %s", strerror(errno));
+        return 1;
     }
-    send_json(fd, 200, "{\"status\":\"ok\"}");
-}
-
-static void handle_charging_mode(int fd, const char *body)
-{
-    cJSON *root = cJSON_Parse(body);
-    if (!root) { send_json(fd, 400, "{\"error\":\"invalid JSON\"}"); return; }
-
-    cJSON *mo = cJSON_GetObjectItem(root, "mode");
-    char mode[MODE_NAME_LEN] = "";
-    if (mo && cJSON_IsString(mo) && mo->valuestring)
-        snprintf(mode, sizeof(mode), "%s", mo->valuestring);
-    cJSON_Delete(root);
-
-    if (cc_set_charging_mode(mode) != 0) {
-        send_json(fd, 400, "{\"error\":\"unknown mode\"}");
-        return;
-    }
-    send_json(fd, 200, "{\"status\":\"ok\"}");
-}
-
-static void handle_temperature_check(int fd)
-{
-    TempProtectionResult r = cc_check_temperature_protection();
-    cJSON *obj = cJSON_CreateObject();
-    cJSON_AddNumberToObject(obj, "temperature", r.temperature);
-    cJSON_AddNumberToObject(obj, "threshold",   r.threshold);
-    cJSON_AddNumberToObject(obj, "critical",    r.critical);
-    cJSON_AddStringToObject(obj, "action",      r.action);
-    char *s = cJSON_PrintUnformatted(obj);
-    cJSON_Delete(obj);
-    send_json_free(fd, 200, s);
-}
-
-static void handle_stats(int fd, const char *period)
-{
-    char *json = NULL;
-    if      (strcmp(period, "daily")   == 0) json = stats_get_daily_stats(7);
-    else if (strcmp(period, "weekly")  == 0) json = stats_get_weekly_stats();
-    else if (strcmp(period, "monthly") == 0) json = stats_get_monthly_stats();
-    else if (strcmp(period, "snapshots") == 0) json = stats_get_recent_snapshots(60);
-    else if (strcmp(period, "health")  == 0) json = stats_get_battery_health();
-    else { send_json(fd, 404, "{\"error\":\"unknown stats endpoint\"}"); return; }
-    send_json_free(fd, 200, json);
-}
-
-static void handle_export_csv(int fd)
-{
-    char *csv = stats_export_csv();
-    if (!csv) { send_json(fd, 500, "{\"error\":\"export failed\"}"); return; }
-
-    char ts[32];
-    time_t now = time(NULL);
-    struct tm *lt = localtime(&now);
-    strftime(ts, sizeof(ts), "%Y-%m-%d_%H%M%S", lt);
-
-    char fname[64];
-    snprintf(fname, sizeof(fname), "charging_data_%s.csv", ts);
-
-    char header[320];
-    int hlen = snprintf(header, sizeof(header),
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/csv\r\n"
-        "Content-Disposition: attachment; filename=\"%s\"\r\n"
-        "Content-Length: %zu\r\n"
-        "Access-Control-Allow-Origin: *\r\n"
-        "Connection: close\r\n"
-        "\r\n",
-        fname, strlen(csv));
-    send(fd, header, (size_t)hlen, MSG_NOSIGNAL);
-    send(fd, csv, strlen(csv), MSG_NOSIGNAL);
-    free(csv);
-}
-
-static void handle_export_json(int fd)
-{
-    char *json = stats_export_json();
-    if (!json) { send_json(fd, 500, "{\"error\":\"export failed\"}"); return; }
-
-    char ts[32];
-    time_t now = time(NULL);
-    struct tm *lt = localtime(&now);
-    strftime(ts, sizeof(ts), "%Y-%m-%d_%H%M%S", lt);
-
-    char fname[64];
-    snprintf(fname, sizeof(fname), "charging_data_%s.json", ts);
-
-    char header[320];
-    int hlen = snprintf(header, sizeof(header),
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: application/json\r\n"
-        "Content-Disposition: attachment; filename=\"%s\"\r\n"
-        "Content-Length: %zu\r\n"
-        "Access-Control-Allow-Origin: *\r\n"
-        "Connection: close\r\n"
-        "\r\n",
-        fname, strlen(json));
-    send(fd, header, (size_t)hlen, MSG_NOSIGNAL);
-    send(fd, json, strlen(json), MSG_NOSIGNAL);
-    free(json);
-}
-
-static void handle_post_config(int fd, const char *body)
-{
-    cJSON *root = cJSON_Parse(body);
-    if (!root) { send_json(fd, 400, "{\"error\":\"invalid JSON\"}"); return; }
-
-    /* Write the received JSON directly to config.json */
-    char *formatted = cJSON_Print(root);
-    cJSON_Delete(root);
-    if (!formatted) { send_json(fd, 500, "{\"error\":\"serialise failed\"}"); return; }
-
-    FILE *fp = fopen(cc_config_path(), "w");
-    if (!fp) { free(formatted); send_json(fd, 500, "{\"error\":\"write failed\"}"); return; }
-    fputs(formatted, fp);
-    fclose(fp);
-    free(formatted);
-    send_json(fd, 200, "{\"status\":\"ok\"}");
-}
-
-static void handle_prune(int fd, const char *body)
-{
-    int days = 90;
-    cJSON *root = cJSON_Parse(body);
-    if (root) {
-        cJSON *d = cJSON_GetObjectItem(root, "retention_days");
-        if (d && cJSON_IsNumber(d)) days = (int)d->valuedouble;
-        cJSON_Delete(root);
-    }
-
-    int deleted = stats_prune_old_data(days);
-    char resp[64];
-    snprintf(resp, sizeof(resp), "{\"deleted\":%d}", deleted);
-    send_json(fd, 200, resp);
-}
-
-/* ── main dispatch ───────────────────────────────────────── */
-
-static void dispatch(int fd, const HttpRequest *req)
-{
-    const char *p = req->path;
-    const char *m = req->method;
-
-    /* Preflight OPTIONS */
-    if (strcmp(m, "OPTIONS") == 0) {
-        send_json(fd, 200, "{}");
-        return;
-    }
-
-    if (strcmp(p, "/api/battery") == 0 && strcmp(m, "GET") == 0) {
-        handle_get_battery(fd);
-    } else if (strcmp(p, "/api/settings") == 0 && strcmp(m, "GET") == 0) {
-        handle_get_settings(fd);
-    } else if (strcmp(p, "/api/charging/enable") == 0 && strcmp(m, "POST") == 0) {
-        handle_charging_enable(fd, req->body);
-    } else if (strcmp(p, "/api/charging/limit") == 0 && strcmp(m, "POST") == 0) {
-        handle_charging_limit(fd, req->body);
-    } else if (strcmp(p, "/api/charging/mode") == 0 && strcmp(m, "POST") == 0) {
-        handle_charging_mode(fd, req->body);
-    } else if (strcmp(p, "/api/charging/temperature-check") == 0 && strcmp(m, "POST") == 0) {
-        handle_temperature_check(fd);
-    } else if (strcmp(p, "/api/stats/daily") == 0 && strcmp(m, "GET") == 0) {
-        handle_stats(fd, "daily");
-    } else if (strcmp(p, "/api/stats/weekly") == 0 && strcmp(m, "GET") == 0) {
-        handle_stats(fd, "weekly");
-    } else if (strcmp(p, "/api/stats/monthly") == 0 && strcmp(m, "GET") == 0) {
-        handle_stats(fd, "monthly");
-    } else if (strcmp(p, "/api/stats/snapshots") == 0 && strcmp(m, "GET") == 0) {
-        handle_stats(fd, "snapshots");
-    } else if (strcmp(p, "/api/stats/health") == 0 && strcmp(m, "GET") == 0) {
-        handle_stats(fd, "health");
-    } else if (strcmp(p, "/api/export/csv") == 0 && strcmp(m, "GET") == 0) {
-        handle_export_csv(fd);
-    } else if (strcmp(p, "/api/export/json") == 0 && strcmp(m, "GET") == 0) {
-        handle_export_json(fd);
-    } else if (strcmp(p, "/api/config") == 0 && strcmp(m, "POST") == 0) {
-        handle_post_config(fd, req->body);
-    } else if (strcmp(p, "/api/stats/prune") == 0 && strcmp(m, "DELETE") == 0) {
-        handle_prune(fd, req->body);
-    } else {
-        send_json(fd, 404, "{\"error\":\"not found\"}");
-    }
-}
-
-/* ── determine MODDIR ────────────────────────────────────── */
-
-static void resolve_moddir(const char *argv0, char *out, size_t outsz)
-{
-    /* Try /proc/self/exe first */
-    char exe[512];
-    ssize_t r = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-    if (r > 0) {
-        exe[r] = '\0';
-        char *d = dirname(exe);
-        snprintf(out, outsz, "%s", d);
-        return;
-    }
-    /* Fall back to argv[0] */
-    char tmp[512];
-    snprintf(tmp, sizeof(tmp), "%s", argv0);
-    char *d = dirname(tmp);
-    snprintf(out, outsz, "%s", d);
-}
-
-/* ── entry point ─────────────────────────────────────────── */
-
-int main(int argc, char *argv[])
-{
-    /* Determine module directory */
-    char moddir[512];
-    if (argc >= 2 && argv[1][0] == '/') {
-        snprintf(moddir, sizeof(moddir), "%s", argv[1]);
-    } else {
-        resolve_moddir(argv[0], moddir, sizeof(moddir));
-    }
-
-    /* Initialise subsystems */
-    cc_init(moddir);
-
-    /* Load config for host/port */
-    ChargeConfig cfg;
-    cc_load_config(&cfg);
-
-    /* Initialise database */
-    if (stats_init_db(cc_db_path()) != 0) {
-        cc_log("WARNING: could not initialise database at %s\n",
-               cc_db_path());
-    }
-
-    /* Start snapshot daemon thread */
-    if (snapshot_daemon_start() != 0) {
-        cc_log("WARNING: could not start snapshot daemon\n");
-    }
-
-    /* Signal handling */
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = handle_signal;
-    sigaction(SIGTERM, &sa, NULL);
-    sigaction(SIGINT,  &sa, NULL);
-    signal(SIGPIPE, SIG_IGN);
-
-    /* Create listening socket */
-    int srv = socket(AF_INET, SOCK_STREAM, 0);
-    if (srv < 0) { perror("socket"); return 1; }
-
-    int one = 1;
-    setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-
+    
+    // 设置套接字选项
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    
+    // 绑定地址
     struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family      = AF_INET;
-    addr.sin_port        = htons((uint16_t)cfg.server_port);
-
-    if (strcmp(cfg.server_host, "0.0.0.0") == 0 ||
-        strcmp(cfg.server_host, "") == 0) {
-        addr.sin_addr.s_addr = INADDR_ANY;
-    } else {
-        inet_pton(AF_INET, cfg.server_host, &addr.sin_addr);
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(PORT);
+    
+    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        log_info("绑定端口失败: %s", strerror(errno));
+        close(server_fd);
+        return 1;
     }
-
-    if (bind(srv, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        perror("bind"); close(srv); return 1;
+    
+    // 监听
+    if (listen(server_fd, 10) < 0) {
+        log_info("监听失败: %s", strerror(errno));
+        close(server_fd);
+        return 1;
     }
-    if (listen(srv, 16) < 0) {
-        perror("listen"); close(srv); return 1;
-    }
-
-    cc_log("ChargeControl HTTP server listening on %s:%d\n",
-            cfg.server_host, cfg.server_port);
-
-    /* Accept loop */
+    
+    log_info("HTTP服务器启动，端口: %d", PORT);
+    log_info("访问: http://127.0.0.1:%d", PORT);
+    
+    // 启动 SSE 线程
+    pthread_t sse_tid;
+    pthread_create(&sse_tid, NULL, sse_thread, NULL);
+    
+    // 主循环
     while (g_running) {
         struct sockaddr_in client_addr;
-        socklen_t clen = sizeof(client_addr);
-        int cfd = accept(srv, (struct sockaddr *)&client_addr, &clen);
-        if (cfd < 0) {
-            if (errno == EINTR) break;
+        socklen_t client_len = sizeof(client_addr);
+        
+        int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+        if (client_fd < 0) {
+            if (g_running) {
+                log_info("接受连接失败: %s", strerror(errno));
+            }
             continue;
         }
-
-        HttpRequest req;
-        memset(&req, 0, sizeof(req));
-        if (parse_request(cfd, &req) == 0)
-            dispatch(cfd, &req);
-
-        close(cfd);
+        
+        // 创建客户端线程
+        int *fd_ptr = malloc(sizeof(int));
+        *fd_ptr = client_fd;
+        
+        pthread_t tid;
+        pthread_create(&tid, NULL, client_thread, fd_ptr);
+        pthread_detach(tid);
     }
-
-    close(srv);
-    snapshot_daemon_stop();
-    cc_log("ChargeControl stopped.\n");
+    
+    // 清理
+    log_info("服务器关闭");
+    close(server_fd);
+    
     return 0;
 }

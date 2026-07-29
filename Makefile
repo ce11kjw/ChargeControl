@@ -1,3 +1,6 @@
+# ChargeControl Makefile
+
+# 交叉编译器（Android ARM64）
 NDK          ?= $(ANDROID_NDK_HOME)
 API          ?= 35
 TARGET_TRIPLE := aarch64-linux-android$(API)
@@ -13,9 +16,8 @@ CFLAGS   = -Wall -Wextra -O2 -std=c11 -D_GNU_SOURCE \
 LDFLAGS  = -pie --sysroot=$(SYSROOT) \
            -lm
 
-SRC    = src/main.c src/charge_control.c src/stats.c \
-         src/snapshot_daemon.c src/config.c src/cJSON.c \
-         src/sqlite3.c
+# 源文件
+SRC = src/main.c src/battery_discovery.c src/cJSON.c
 TARGET = charge_control
 
 all: $(TARGET)
@@ -23,8 +25,10 @@ all: $(TARGET)
 $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 	$(STRIP) $@
+	@echo "✅ 编译完成: $(TARGET)"
 
 clean:
 	rm -f $(TARGET)
+	@echo "✅ 清理完成"
 
 .PHONY: all clean
