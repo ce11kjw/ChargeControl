@@ -1,0 +1,14 @@
+CC = gcc
+CFLAGS = -Wall -Wextra -O2 -std=c11 -D_GNU_SOURCE -fPIE -fstack-protector-strong
+LDFLAGS = -lm -lpthread
+SRC = src/main.c src/charge_control.c src/config.c src/cJSON.c src/stats.c src/snapshot_daemon.c src/sqlite3.c
+TARGET = charge_control
+
+all: $(TARGET)
+
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "✅ 编译完成"
+
+clean:
+	rm -f $(TARGET)

@@ -1,6 +1,6 @@
 {
-  "version": "v4.8.5",
-  "versionCode": 40805,
-  "zipUrl": "https://github.com/ce11kjw/ChargeControl/releases/download/v4.8.5/ChargeControl_v4.8.5.zip",
-  "changelog": "https://github.com/ce11kjw/ChargeControl/releases/tag/v4.8.5"
+  "version": "v4.10.2",
+  "versionCode": 4102,
+  "zipUrl": "https://github.com/ce11kjw/ChargeControl/releases/download/v4.10.2/ChargeControl_v4.10.2.zip",
+  "changelog": "## ChargeControl v4.10.2\n\n### 修复\n- 修复UI标签页切换\n- 使用正确的电池读取逻辑\n- 支持多种电池路径\n\n### 功能\n- 充电模式切换（240W/120W/60W/20W/10W）\n- 实时数据监控\n- SSE实时推送\n- 端口: 8080"
 }

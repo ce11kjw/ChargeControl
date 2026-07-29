@@ -232,11 +232,7 @@ static void handle_stats(int fd, const char *period)
     else if (strcmp(period, "weekly")  == 0) json = stats_get_weekly_stats();
     else if (strcmp(period, "monthly") == 0) json = stats_get_monthly_stats();
     else if (strcmp(period, "snapshots") == 0) json = stats_get_recent_snapshots(60);
-    else if (strcmp(period, "health")  == 0) {
-        char health[64];
-        stats_get_battery_health(health, sizeof(health));
-        json = strdup(health);
-    }
+    else if (strcmp(period, "health")  == 0) json = stats_get_battery_health();
     else { send_json(fd, 404, "{\"error\":\"unknown stats endpoint\"}"); return; }
     send_json_free(fd, 200, json);
 }
