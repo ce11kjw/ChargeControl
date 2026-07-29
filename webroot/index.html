@@ -3,284 +3,354 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ChargeControl - 充电控制</title>
+    <title>ChargeControl</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <!-- 网格背景 -->
     <div class="cyber-grid"></div>
-    
-    <!-- 粒子画布 -->
     <canvas id="particles"></canvas>
     
-    <!-- 主容器 -->
     <div class="app-container">
-        <!-- 头部 -->
+        <!-- 顶部状态栏 -->
         <header class="app-header">
-            <h1 class="app-title">🔋 ChargeControl</h1>
-            <div class="header-controls">
-                <button class="icon-btn" id="themeToggle" title="切换主题">🌙</button>
-                <button class="icon-btn" id="refreshBtn" title="刷新">⟳</button>
+            <div class="header-left">
+                <span class="app-title">⚡ ChargeControl</span>
+                <span class="version-badge">v4.9.8</span>
+            </div>
+            <div class="header-right">
+                <span class="connection-status" id="connectionStatus">● 连接中</span>
+                <button class="icon-btn" id="themeToggle">🌙</button>
             </div>
         </header>
         
-        <!-- 电池核心展示 -->
-        <div class="glass-card battery-core scanline">
-            <div class="battery-visual">
-                <div class="battery-terminal"></div>
-                <div class="battery-shell">
-                    <div class="battery-liquid" id="batteryLiquid">
-                        <div class="liquid-wave"></div>
+        <!-- 标签页内容 -->
+        <div class="tab-content" id="tabContent">
+            <!-- 首页 -->
+            <div class="tab-panel active" id="tab-home">
+                <!-- 电量状态卡片 -->
+                <div class="status-card glass-card">
+                    <div class="status-header">
+                        <div class="status-left">
+                            <div class="status-icon">🔋</div>
+                            <div class="status-info">
+                                <div class="status-title">电池状态</div>
+                                <div class="status-subtitle" id="chargeStatus">充电中</div>
+                            </div>
+                        </div>
+                        <div class="status-right">
+                            <div class="status-percent" id="batteryPercent">85<span>%</span></div>
+                        </div>
+                    </div>
+                    <div class="status-bar">
+                        <div class="status-bar-fill" id="batteryBar" style="width: 85%"></div>
+                    </div>
+                    <div class="status-meta">
+                        <div class="meta-item">
+                            <span class="meta-icon">⚡</span>
+                            <span class="meta-label">功率</span>
+                            <span class="meta-value" id="chargePower">10.5W</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-icon">🌡️</span>
+                            <span class="meta-label">温度</span>
+                            <span class="meta-value" id="batteryTemp">32°C</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-icon">❤️</span>
+                            <span class="meta-label">健康</span>
+                            <span class="meta-value" id="healthStatus">良好</span>
+                        </div>
                     </div>
                 </div>
-                <div class="battery-percent">
-                    <span class="percent-value" id="batteryPercent">--</span>
-                    <span class="percent-symbol">%</span>
+                
+                <!-- 实时数据 -->
+                <div class="data-grid">
+                    <div class="data-card glass-card">
+                        <div class="data-header">
+                            <span class="data-icon">⚡</span>
+                            <span class="data-title">电压</span>
+                        </div>
+                        <div class="data-value" id="voltage">4.200</div>
+                        <div class="data-unit">V</div>
+                        <div class="data-bar">
+                            <div class="data-bar-fill" id="voltageBar" style="width: 84%"></div>
+                        </div>
+                    </div>
+                    <div class="data-card glass-card">
+                        <div class="data-header">
+                            <span class="data-icon">🔌</span>
+                            <span class="data-title">电流</span>
+                        </div>
+                        <div class="data-value" id="current">2500</div>
+                        <div class="data-unit">mA</div>
+                        <div class="data-bar">
+                            <div class="data-bar-fill" id="currentBar" style="width: 50%"></div>
+                        </div>
+                    </div>
+                    <div class="data-card glass-card">
+                        <div class="data-header">
+                            <span class="data-icon">💻</span>
+                            <span class="data-title">芯片</span>
+                        </div>
+                        <div class="data-value" id="chipTemp">45</div>
+                        <div class="data-unit">°C</div>
+                        <div class="data-bar">
+                            <div class="data-bar-fill" id="chipTempBar" style="width: 75%"></div>
+                        </div>
+                    </div>
+                    <div class="data-card glass-card">
+                        <div class="data-header">
+                            <span class="data-icon">💪</span>
+                            <span class="data-title">功率</span>
+                        </div>
+                        <div class="data-value" id="power">10.5</div>
+                        <div class="data-unit">W</div>
+                        <div class="data-bar">
+                            <div class="data-bar-fill" id="powerBar" style="width: 44%"></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="charging-bolt" id="chargingBolt">
-                    <svg class="bolt-icon" viewBox="0 0 24 24">
-                        <path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z"/>
-                    </svg>
+                
+                <!-- 充电模式 -->
+                <div class="modes-card glass-card">
+                    <div class="card-header">
+                        <span class="card-title">⚡ 充电模式</span>
+                        <span class="current-mode" id="currentMode">涡轮模式</span>
+                    </div>
+                    <div class="modes-grid">
+                        <div class="mode-btn active" data-mode="turbo">
+                            <span class="mode-icon">🚀</span>
+                            <span class="mode-name">涡轮</span>
+                            <span class="mode-power">240W</span>
+                        </div>
+                        <div class="mode-btn" data-mode="fast">
+                            <span class="mode-icon">⚡</span>
+                            <span class="mode-name">快充</span>
+                            <span class="mode-power">120W</span>
+                        </div>
+                        <div class="mode-btn" data-mode="standard">
+                            <span class="mode-icon">🔋</span>
+                            <span class="mode-name">标准</span>
+                            <span class="mode-power">60W</span>
+                        </div>
+                        <div class="mode-btn" data-mode="trickle">
+                            <span class="mode-icon">💧</span>
+                            <span class="mode-name">涓流</span>
+                            <span class="mode-power">20W</span>
+                        </div>
+                        <div class="mode-btn" data-mode="protect">
+                            <span class="mode-icon">🛡️</span>
+                            <span class="mode-name">保护</span>
+                            <span class="mode-power">10W</span>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="battery-status">
-                <div class="status-item">
-                    <span class="status-icon">⚡</span>
-                    <span id="chargePower">-- W</span>
+            
+            <!-- 统计页面 -->
+            <div class="tab-panel" id="tab-stats">
+                <div class="stats-card glass-card">
+                    <div class="card-header">
+                        <span class="card-title">📊 今日统计</span>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-icon">🔋</div>
+                            <div class="stat-value" id="todayCharges">3</div>
+                            <div class="stat-label">充电次数</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-icon">⏱️</div>
+                            <div class="stat-value" id="todayDuration">4h32m</div>
+                            <div class="stat-label">充电时长</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-icon">📉</div>
+                            <div class="stat-value" id="todayUsage">45%</div>
+                            <div class="stat-label">今日耗电</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-icon">⚡</div>
+                            <div class="stat-value" id="avgPower">12.3W</div>
+                            <div class="stat-label">平均功率</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="status-item">
-                    <span class="status-icon">🌡️</span>
-                    <span id="batteryTemp">-- °C</span>
+                
+                <div class="chart-card glass-card">
+                    <div class="card-header">
+                        <span class="card-title">📈 充电曲线</span>
+                        <div class="chart-tabs">
+                            <button class="chart-tab active" data-period="1h">1小时</button>
+                            <button class="chart-tab" data-period="6h">6小时</button>
+                            <button class="chart-tab" data-period="24h">24小时</button>
+                        </div>
+                    </div>
+                    <canvas id="chartCanvas" class="chart-canvas"></canvas>
                 </div>
-                <div class="status-item">
-                    <span class="status-icon" id="statusIcon">●</span>
-                    <span id="chargeStatus">--</span>
+                
+                <div class="battery-health glass-card">
+                    <div class="card-header">
+                        <span class="card-title">🔋 电池健康</span>
+                    </div>
+                    <div class="health-grid">
+                        <div class="health-item">
+                            <div class="health-icon">📦</div>
+                            <div class="health-info">
+                                <div class="health-label">设计容量</div>
+                                <div class="health-value" id="designCapacity">--</div>
+                            </div>
+                        </div>
+                        <div class="health-item">
+                            <div class="health-icon">🔋</div>
+                            <div class="health-info">
+                                <div class="health-label">当前容量</div>
+                                <div class="health-value" id="currentCapacity">--</div>
+                            </div>
+                        </div>
+                        <div class="health-item">
+                            <div class="health-icon">🔄</div>
+                            <div class="health-info">
+                                <div class="health-label">循环次数</div>
+                                <div class="health-value" id="cycleCount">--</div>
+                            </div>
+                        </div>
+                        <div class="health-item">
+                            <div class="health-icon">📉</div>
+                            <div class="health-info">
+                                <div class="health-label">电池损耗</div>
+                                <div class="health-value" id="batteryWear">--</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 设置页面 -->
+            <div class="tab-panel" id="tab-settings">
+                <div class="settings-card glass-card">
+                    <div class="card-header">
+                        <span class="card-title">⚙️ 充电设置</span>
+                    </div>
+                    <div class="settings-list">
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">充电上限</div>
+                                <div class="setting-desc">设置最大充电百分比</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="range" id="chargeLimit" min="20" max="100" value="80" class="slider">
+                                <span class="slider-value" id="chargeLimitValue">80%</span>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">温度警告</div>
+                                <div class="setting-desc">超过此温度时降速充电</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="range" id="tempWarning" min="35" max="50" value="40" class="slider">
+                                <span class="slider-value" id="tempWarningValue">40°C</span>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">温度保护</div>
+                                <div class="setting-desc">超过此温度时停止充电</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="range" id="tempCritical" min="40" max="60" value="45" class="slider">
+                                <span class="slider-value" id="tempCriticalValue">45°C</span>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">通知提醒</div>
+                                <div class="setting-desc">充电完成时通知</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="switch">
+                                    <input type="checkbox" id="notifToggle" checked>
+                                    <span class="slider-switch"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="device-info glass-card">
+                    <div class="card-header">
+                        <span class="card-title">📱 设备信息</span>
+                    </div>
+                    <div class="info-list">
+                        <div class="info-item">
+                            <span class="info-key">制造商</span>
+                            <span class="info-val" id="manufacturer">--</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-key">电池型号</span>
+                            <span class="info-val" id="batteryModel">--</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-key">电池技术</span>
+                            <span class="info-val" id="batteryTech">--</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-key">芯片型号</span>
+                            <span class="info-val" id="chipModel">--</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-key">CPU核心</span>
+                            <span class="info-val" id="cpuCores">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 日志页面 -->
+            <div class="tab-panel" id="tab-logs">
+                <div class="logs-card glass-card">
+                    <div class="card-header">
+                        <span class="card-title">📝 系统日志</span>
+                        <button class="refresh-btn" id="refreshLogs">刷新</button>
+                    </div>
+                    <div class="logs-content" id="logsContent">
+                        <div class="log-item">
+                            <span class="log-time">19:20:01</span>
+                            <span class="log-level info">INFO</span>
+                            <span class="log-msg">系统启动完成</span>
+                        </div>
+                        <div class="log-item">
+                            <span class="log-time">19:20:02</span>
+                            <span class="log-level success">OK</span>
+                            <span class="log-msg">电池数据读取成功</span>
+                        </div>
+                        <div class="log-item">
+                            <span class="log-time">19:20:03</span>
+                            <span class="log-level info">INFO</span>
+                            <span class="log-msg">SSE服务启动</span>
+                        </div>
+                        <div class="log-item">
+                            <span class="log-time">19:20:04</span>
+                            <span class="log-level success">OK</span>
+                            <span class="log-msg">Web UI 就绪: http://127.0.0.1:8080</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="data-status glass-card">
+                    <div class="card-header">
+                        <span class="card-title">📊 数据读取状态</span>
+                    </div>
+                    <div class="status-list" id="statusList">
+                        <!-- 动态生成 -->
+                    </div>
                 </div>
             </div>
         </div>
         
-        <!-- 充电模式选择 -->
-        <div class="glass-card">
-            <div class="card-title">⚡ 充电模式</div>
-            <div class="mode-selector" id="modeSelector">
-                <div class="mode-card" data-mode="turbo">
-                    <div class="mode-icon">🚀</div>
-                    <div class="mode-name">涡轮</div>
-                </div>
-                <div class="mode-card" data-mode="normal">
-                    <div class="mode-icon">🤖</div>
-                    <div class="mode-name">智能</div>
-                </div>
-                <div class="mode-card active" data-mode="standard">
-                    <div class="mode-icon">🔋</div>
-                    <div class="mode-name">标准</div>
-                </div>
-                <div class="mode-card" data-mode="trickle">
-                    <div class="mode-icon">💧</div>
-                    <div class="mode-name">涓流</div>
-                </div>
-                <div class="mode-card" data-mode="protect">
-                    <div class="mode-icon">🛡️</div>
-                    <div class="mode-name">保护</div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 实时数据面板 -->
-        <div class="glass-card">
-            <div class="card-title">📊 实时数据</div>
-            <div class="data-panels">
-                <div class="data-panel">
-                    <div class="panel-header">
-                        <span class="panel-label">电压</span>
-                    </div>
-                    <div class="panel-value">
-                        <span class="value" id="voltage">--</span>
-                        <span class="unit">V</span>
-                    </div>
-                    <div class="panel-bar">
-                        <div class="bar-fill" id="voltageBar" style="width: 0%"></div>
-                    </div>
-                </div>
-                <div class="data-panel">
-                    <div class="panel-header">
-                        <span class="panel-label">电流</span>
-                    </div>
-                    <div class="panel-value">
-                        <span class="value" id="current">--</span>
-                        <span class="unit">mA</span>
-                    </div>
-                    <div class="panel-bar">
-                        <div class="bar-fill" id="currentBar" style="width: 0%"></div>
-                    </div>
-                </div>
-                <div class="data-panel">
-                    <div class="panel-header">
-                        <span class="panel-label">功率</span>
-                    </div>
-                    <div class="panel-value">
-                        <span class="value" id="power">--</span>
-                        <span class="unit">W</span>
-                    </div>
-                    <div class="panel-bar">
-                        <div class="bar-fill" id="powerBar" style="width: 0%"></div>
-                    </div>
-                </div>
-                <div class="data-panel">
-                    <div class="panel-header">
-                        <span class="panel-label">温度</span>
-                    </div>
-                    <div class="panel-value">
-                        <span class="value" id="tempValue">--</span>
-                        <span class="unit">°C</span>
-                    </div>
-                    <div class="panel-bar">
-                        <div class="bar-fill" id="tempBar" style="width: 0%"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 电池信息 -->
-        <div class="glass-card">
-            <div class="card-title">🔋 电池信息</div>
-            <div class="battery-extended">
-                <div class="extended-section">
-                    <div class="section-title">📱 基本信息</div>
-                    <div class="info-row">
-                        <span class="info-label">设计容量</span>
-                        <span class="info-value" id="designCapacity">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">当前容量</span>
-                        <span class="info-value" id="currentCapacity">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">循环次数</span>
-                        <span class="info-value" id="cycleCount">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">电池健康</span>
-                        <span class="info-value" id="healthStatus">--</span>
-                    </div>
-                </div>
-                <div class="extended-section">
-                    <div class="section-title">🏭 电芯信息</div>
-                    <div class="info-row">
-                        <span class="info-label">制造商</span>
-                        <span class="info-value" id="manufacturer">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">电池型号</span>
-                        <span class="info-value" id="modelInfo">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">电池技术</span>
-                        <span class="info-value" id="techType">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">电芯温度</span>
-                        <span class="info-value" id="cellTemp">--</span>
-                    </div>
-                </div>
-                <div class="extended-section">
-                    <div class="section-title">💻 芯片信息</div>
-                    <div class="info-row">
-                        <span class="info-label">芯片型号</span>
-                        <span class="info-value" id="chipModel">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">CPU核心</span>
-                        <span class="info-value" id="cpuCores">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">CPU频率</span>
-                        <span class="info-value" id="cpuFreq">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">芯片温度</span>
-                        <span class="info-value" id="chipTemp">--</span>
-                    </div>
-                </div>
-                <div class="extended-section">
-                    <div class="section-title">🔌 充电器信息</div>
-                    <div class="info-row">
-                        <span class="info-label">充电器类型</span>
-                        <span class="info-value" id="chargerType">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">快充协议</span>
-                        <span class="info-value" id="fastCharge">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">最大功率</span>
-                        <span class="info-value" id="maxPower">--</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">预计充满</span>
-                        <span class="info-value" id="timeLeft">--</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 温度监控 -->
-        <div class="glass-card">
-            <div class="card-title">🌡️ 温度监控</div>
-            <div class="temp-monitor">
-                <div class="temp-card">
-                    <div class="temp-icon">🔋</div>
-                    <div class="temp-value" id="batteryTempValue">--</div>
-                    <div class="temp-label">电池温度</div>
-                </div>
-                <div class="temp-card">
-                    <div class="temp-icon">💻</div>
-                    <div class="temp-value" id="cpuTempValue">--</div>
-                    <div class="temp-label">CPU温度</div>
-                </div>
-                <div class="temp-card">
-                    <div class="temp-icon">🎮</div>
-                    <div class="temp-value" id="gpuTempValue">--</div>
-                    <div class="temp-label">GPU温度</div>
-                </div>
-                <div class="temp-card">
-                    <div class="temp-icon">📱</div>
-                    <div class="temp-value" id="boardTempValue">--</div>
-                    <div class="temp-label">主板温度</div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 历史数据 -->
-        <div class="glass-card">
-            <div class="card-title">📈 历史数据</div>
-            <div class="history-grid">
-                <div class="history-item">
-                    <span class="history-label">今日充电</span>
-                    <span class="history-value" id="todayCharges">--</span>
-                </div>
-                <div class="history-item">
-                    <span class="history-label">今日耗电</span>
-                    <span class="history-value" id="todayUsage">--</span>
-                </div>
-                <div class="history-item">
-                    <span class="history-label">平均功耗</span>
-                    <span class="history-value" id="avgPower">--</span>
-                </div>
-                <div class="history-item">
-                    <span class="history-label">电池损耗</span>
-                    <span class="history-value" id="batteryWear">--</span>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 底部占位 -->
-        <div style="height: 80px;"></div>
-    </div>
-    
-    <!-- 底部导航 -->
-    <nav class="bottom-nav">
-        <div class="nav-items">
+        <!-- 底部导航 -->
+        <nav class="bottom-nav">
             <div class="nav-item active" data-tab="home">
                 <span class="nav-icon">🏠</span>
                 <span class="nav-label">首页</span>
@@ -297,10 +367,9 @@
                 <span class="nav-icon">📝</span>
                 <span class="nav-label">日志</span>
             </div>
-        </div>
-    </nav>
+        </nav>
+    </div>
     
-    <!-- Toast通知 -->
     <div class="toast" id="toast"></div>
     
     <script src="particles.js"></script>

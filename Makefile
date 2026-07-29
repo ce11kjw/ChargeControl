@@ -1,6 +1,5 @@
-# ChargeControl Makefile
+# ChargeControl Makefile - 简化版
 
-# 交叉编译器（Android ARM64）
 NDK          ?= $(ANDROID_NDK_HOME)
 API          ?= 35
 TARGET_TRIPLE := aarch64-linux-android$(API)
@@ -13,11 +12,10 @@ SYSROOT  := $(TOOLCHAIN)/sysroot
 CFLAGS   = -Wall -Wextra -O2 -std=c11 -D_GNU_SOURCE \
            --sysroot=$(SYSROOT) \
            -fPIE -fstack-protector-strong
-LDFLAGS  = -pie --sysroot=$(SYSROOT) \
-           -lm
+LDFLAGS  = -pie --sysroot=$(SYSROOT) -lm
 
-# 源文件
-SRC = src/main.c src/battery_discovery.c src/cJSON.c
+# 源文件（不使用 sqlite3）
+SRC = src/main.c src/charge_control.c src/config.c src/cJSON.c src/stats.c src/snapshot_daemon.c
 TARGET = charge_control
 
 all: $(TARGET)
