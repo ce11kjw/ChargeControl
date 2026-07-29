@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,47 +26,35 @@ jobs:
       
       - name: Setup Android NDK
         run: |
-          # 下载 NDK
           wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip -q android-ndk-r25c-linux.zip -d $HOME
           echo "ANDROID_NDK_HOME=$HOME/android-ndk-r25c" >> $GITHUB_ENV
-          echo "NDK installed at $HOME/android-ndk-r25c"
       
       - name: Auto increment version
         run: |
-          # 读取当前版本
           CURRENT_VERSION=$(grep '^version=' module.prop | cut -d'v' -f2)
           MAJOR=$(echo $CURRENT_VERSION | cut -d'.' -f1)
           MINOR=$(echo $CURRENT_VERSION | cut -d'.' -f2)
           PATCH=$(echo $CURRENT_VERSION | cut -d'.' -f3)
           
-          echo "当前版本: ${MAJOR}.${MINOR}.${PATCH}"
-          
-          # minor+1
           NEW_MINOR=$((MINOR + 1))
           NEW_MAJOR=$MAJOR
           
-          # 如果minor到10，major+1，minor归0
           if [ $NEW_MINOR -ge 10 ]; then
             NEW_MINOR=0
             NEW_MAJOR=$((MAJOR + 1))
           fi
           
-          # patch随机1-10
           NEW_PATCH=$(( (RANDOM % 10) + 1 ))
-          
           NEW_VERSION="${NEW_MAJOR}.${NEW_MINOR}.${NEW_PATCH}"
-          echo "新版本: ${NEW_VERSION}"
           
-          # 更新 module.prop
           sed -i "s/^version=v.*/version=v${NEW_VERSION}/" module.prop
-          
-          # 更新 versionCode
           VERSION_CODE=$((NEW_MAJOR * 100 + NEW_MINOR * 10 + NEW_PATCH))
           sed -i "s/^versionCode=.*/versionCode=${VERSION_CODE}/" module.prop
           
           echo "VERSION=${NEW_VERSION}" >> $GITHUB_ENV
           echo "VERSION_CODE=${VERSION_CODE}" >> $GITHUB_ENV
+          echo "New version: v${NEW_VERSION}"
       
       - name: Build
         run: |
@@ -78,7 +70,7 @@ jobs:
           path: out/*.zip
       
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
           name: "ChargeControl v${{ env.VERSION }}"
@@ -105,8 +97,10 @@ jobs:
           files: out/*.zip
           draft: false
           prerelease: false
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
       
       - name: Push version update
         run: |
