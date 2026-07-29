@@ -1,7 +1,7 @@
 id=ChargeControl
 name=ChargeControl
-version=v4.9.8
-versionCode=498
+version=version=..3
+versionCode=
 author=ce11kjw
 description=支持 Web UI、统计分析与多模式充电的高级 KernelSU 充电控制模块
 updateJson=https://raw.githubusercontent.com/ce11kjw/ChargeControl/main/update.json
