@@ -1,4 +1,4 @@
-/* ChargeControl - 科技感 UI 样式 */
+/* ChargeControl - 科技感 UI */
 
 :root {
     --bg-primary: #0a0a1a;
@@ -10,7 +10,6 @@
     --accent-blue: #00d4ff;
     --accent-green: #00ff88;
     --accent-purple: #bf00ff;
-    --accent-orange: #ff6b35;
     --radius: 16px;
 }
 
@@ -138,6 +137,11 @@ body {
     color: var(--text-secondary);
 }
 
+.current-mode {
+    font-size: 0.8rem;
+    color: var(--accent-blue);
+}
+
 /* 状态卡片 */
 .status-card {
     margin-bottom: 16px;
@@ -194,6 +198,7 @@ body {
     background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
     border-radius: 4px;
     transition: width 0.3s ease;
+    width: 0%;
 }
 
 .status-meta {
@@ -264,31 +269,11 @@ body {
 .data-unit {
     font-size: 0.8rem;
     color: var(--text-secondary);
-    margin-bottom: 8px;
-}
-
-.data-bar {
-    height: 4px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 2px;
-    overflow: hidden;
-}
-
-.data-bar-fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
-    border-radius: 2px;
-    transition: width 0.3s ease;
 }
 
 /* 充电模式 */
 .modes-card {
     margin-bottom: 16px;
-}
-
-.current-mode {
-    font-size: 0.8rem;
-    color: var(--accent-blue);
 }
 
 .modes-grid {
@@ -339,299 +324,6 @@ body {
     color: var(--accent-blue);
 }
 
-/* 统计页面 */
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-}
-
-.stat-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 16px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 12px;
-}
-
-.stat-icon {
-    font-size: 1.5rem;
-    margin-bottom: 8px;
-}
-
-.stat-value {
-    font-size: 1.3rem;
-    font-weight: 700;
-    font-family: monospace;
-}
-
-.stat-label {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-}
-
-/* 图表 */
-.chart-canvas {
-    width: 100%;
-    height: 150px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 12px;
-}
-
-.chart-tabs {
-    display: flex;
-    gap: 4px;
-}
-
-.chart-tab {
-    padding: 4px 8px;
-    font-size: 0.7rem;
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid transparent;
-    border-radius: 8px;
-    color: var(--text-secondary);
-    cursor: pointer;
-}
-
-.chart-tab.active {
-    background: rgba(0, 212, 255, 0.2);
-    border-color: var(--accent-blue);
-    color: var(--accent-blue);
-}
-
-/* 电池健康 */
-.health-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-}
-
-.health-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 12px;
-}
-
-.health-icon {
-    font-size: 1.2rem;
-}
-
-.health-label {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-}
-
-.health-value {
-    font-size: 0.9rem;
-    font-weight: 600;
-}
-
-/* 设置页面 */
-.settings-list {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-.setting-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 12px;
-}
-
-.setting-label {
-    font-size: 0.9rem;
-    font-weight: 600;
-}
-
-.setting-desc {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-}
-
-.setting-control {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.slider {
-    width: 100px;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 2px;
-    outline: none;
-    -webkit-appearance: none;
-}
-
-.slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 16px;
-    height: 16px;
-    background: var(--accent-blue);
-    border-radius: 50%;
-    cursor: pointer;
-}
-
-.slider-value {
-    font-size: 0.8rem;
-    font-family: monospace;
-    min-width: 40px;
-    text-align: right;
-}
-
-/* 开关 */
-.switch {
-    position: relative;
-    width: 44px;
-    height: 24px;
-}
-
-.switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.slider-switch {
-    position: absolute;
-    cursor: pointer;
-    inset: 0;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 12px;
-    transition: 0.3s;
-}
-
-.slider-switch::before {
-    content: '';
-    position: absolute;
-    height: 18px;
-    width: 18px;
-    left: 3px;
-    bottom: 3px;
-    background: white;
-    border-radius: 50%;
-    transition: 0.3s;
-}
-
-.switch input:checked + .slider-switch {
-    background: var(--accent-blue);
-}
-
-.switch input:checked + .slider-switch::before {
-    transform: translateX(20px);
-}
-
-/* 设备信息 */
-.info-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.info-item {
-    display: flex;
-    justify-content: space-between;
-    padding: 12px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 12px;
-}
-
-.info-key {
-    color: var(--text-secondary);
-}
-
-.info-val {
-    font-weight: 600;
-}
-
-/* 日志 */
-.logs-content {
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-.log-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.log-time {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    font-family: monospace;
-}
-
-.log-level {
-    font-size: 0.7rem;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-weight: 600;
-}
-
-.log-level.info {
-    background: rgba(0, 212, 255, 0.2);
-    color: var(--accent-blue);
-}
-
-.log-level.success {
-    background: rgba(0, 255, 136, 0.2);
-    color: var(--accent-green);
-}
-
-.log-level.error {
-    background: rgba(255, 71, 87, 0.2);
-    color: var(--accent-orange);
-}
-
-.log-msg {
-    font-size: 0.8rem;
-}
-
-.status-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.status-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
-}
-
-.status-item.ok .status-icon {
-    color: var(--accent-green);
-}
-
-.status-item.error .status-icon {
-    color: var(--accent-orange);
-}
-
-.status-name {
-    flex: 1;
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-}
-
-.status-val {
-    font-size: 0.8rem;
-    font-family: monospace;
-}
-
 /* 底部导航 */
 .bottom-nav {
     position: fixed;
@@ -643,9 +335,6 @@ body {
     border-top: 1px solid var(--glass-border);
     padding: 8px 0;
     z-index: 100;
-}
-
-.bottom-nav {
     display: flex;
     justify-content: space-around;
     max-width: 600px;
@@ -694,17 +383,4 @@ body {
 
 .toast.show {
     opacity: 1;
-}
-
-/* 响应式 */
-@media (max-width: 400px) {
-    .modes-grid {
-        grid-template-columns: repeat(3, 1fr);
-    }
-    .stats-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-    .health-grid {
-        grid-template-columns: 1fr;
-    }
 }
