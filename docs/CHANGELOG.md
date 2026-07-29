@@ -4,6 +4,14 @@ ChargeControl 的所有重要变更均记录于此。
 
 ---
 
+## [v4.10.1] – 2026-07-29
+
+### Changed
+- chore: auto bump version to version=..5
+- feat: v4.10.0 - 修复UI标签页切换 + 使用旧版电池读取逻辑
+
+---
+
 ## [v4.8.5] – 2026-04-06
 
 ### Changed
