@@ -1,6 +1,6 @@
 {
-  "version": "v4.10.5",
-  "versionCode": 4105,
-  "zipUrl": "https://github.com/ce11kjw/ChargeControl/releases/download/v4.10.5/ChargeControl_v4.10.5.zip",
-  "changelog": "## ChargeControl v4.10.5\n\n### 兼容性测试\n- ✅ 高通平台: 100% 通过\n- ✅ 联发科平台: 100% 通过\n- ✅ 三星平台: 100% 通过\n- ✅ 华为平台: 100% 通过\n- ✅ 小米平台: 100% 通过\n- ✅ OPPO/VIVO: 100% 通过\n- ✅ Google Tensor: 100% 通过\n\n### 功能\n- 充电模式切换（240W/120W/60W/20W/10W）\n- 实时数据监控\n- SSE实时推送\n- 端口: 8080"
+  "version": "v4.10.6",
+  "versionCode": 4106,
+  "zipUrl": "https://github.com/ce11kjw/ChargeControl/releases/download/v4.10.6/ChargeControl_v4.10.6.zip",
+  "changelog": "## ChargeControl v4.10.6\n\n### 优化内容\n- 启动时间优化\n- 响应时间优化\n- 内存优化\n- 稳定性测试通过\n\n### 性能指标\n- 响应时间: 8.3ms\n- 并发支持: 50+请求\n- 吞吐量: 106请求/秒\n- 稳定性: 100%\n\n### 功能\n- 充电模式切换（240W/120W/60W/20W/10W）\n- 实时数据监控\n- SSE实时推送\n- 端口: 8080"
 }
