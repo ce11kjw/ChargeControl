@@ -15,10 +15,18 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Setup NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r25c
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip unzip
+      
+      - name: Setup Android NDK
+        run: |
+          # 下载 NDK
+          wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+          unzip -q android-ndk-r25c-linux.zip -d $HOME
+          echo "ANDROID_NDK_HOME=$HOME/android-ndk-r25c" >> $GITHUB_ENV
+          echo "NDK installed at $HOME/android-ndk-r25c"
       
       - name: Auto increment version
         run: |
@@ -49,7 +57,7 @@ jobs:
           # 更新 module.prop
           sed -i "s/^version=v.*/version=v${NEW_VERSION}/" module.prop
           
-          # 更新 versionCode (major*100 + minor*10 + patch)
+          # 更新 versionCode
           VERSION_CODE=$((NEW_MAJOR * 100 + NEW_MINOR * 10 + NEW_PATCH))
           sed -i "s/^versionCode=.*/versionCode=${VERSION_CODE}/" module.prop
           
@@ -58,7 +66,9 @@ jobs:
       
       - name: Build
         run: |
-          make CC=aarch64-linux-android33-clang
+          export CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang
+          export STRIP=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
+          make CC=$CC
           bash build.sh
       
       - name: Upload artifact
