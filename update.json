@@ -2,5 +2,5 @@
   "version": "v4.10.6",
   "versionCode": 4106,
   "zipUrl": "https://github.com/ce11kjw/ChargeControl/releases/download/v4.10.6/ChargeControl_v4.10.6.zip",
-  "changelog": "## ChargeControl v4.10.6\n\n### 优化内容\n- 启动时间优化\n- 响应时间优化\n- 内存优化\n- 稳定性测试通过\n\n### 性能指标\n- 响应时间: 8.3ms\n- 并发支持: 50+请求\n- 吞吐量: 106请求/秒\n- 稳定性: 100%\n\n### 功能\n- 充电模式切换（240W/120W/60W/20W/10W）\n- 实时数据监控\n- SSE实时推送\n- 端口: 8080"
+  "changelog": "## ChargeControl v4.10.6\n\n### 性能优化\n- 启动时间优化\n- 响应时间优化\n- 内存优化\n- 稳定性测试通过\n\n### 性能指标\n- 响应时间: 8.3ms\n- 并发支持: 50+请求\n- 吞吐量: 106请求/秒\n- 稳定性: 100%"
 }

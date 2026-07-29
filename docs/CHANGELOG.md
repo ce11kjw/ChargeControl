@@ -4,6 +4,15 @@ ChargeControl 的所有重要变更均记录于此。
 
 ---
 
+## [v4.10.5] – 2026-07-29
+
+### Changed
+- chore: auto bump version to version=..3
+- feat: v4.10.5 - 全面兼容性测试通过
+- chore: auto bump version to version=..8
+
+---
+
 ## [v4.10.1] – 2026-07-29
 
 ### Changed
