@@ -1,43 +1,44 @@
 {
-  "version": "1.0.1",
+  "version": "4.9.8",
   "charging": {
-    "max_limit": 80,
+    "max_limit": 100,
     "min_limit": 20,
-    "mode": "normal",
+    "mode": "standard",
     "fast_charge_enabled": true,
     "temperature_threshold": 40,
     "temperature_critical": 45
   },
   "modes": {
-    "normal": {
-      "max_current_ma": 2000,
-      "max_voltage_mv": 4350,
-      "description": "Standard charging mode"
+    "turbo": {
+      "max_current_ma": 12000,
+      "max_voltage_mv": 20000,
+      "description": "涡轮加速 - 240W极速充电"
     },
     "fast": {
-      "max_current_ma": 4000,
-      "max_voltage_mv": 4400,
-      "description": "Fast charging mode"
+      "max_current_ma": 6000,
+      "max_voltage_mv": 20000,
+      "description": "快速充电 - 120W快充"
+    },
+    "standard": {
+      "max_current_ma": 3000,
+      "max_voltage_mv": 20000,
+      "description": "标准充电 - 60W"
     },
     "trickle": {
-      "max_current_ma": 500,
-      "max_voltage_mv": 4200,
-      "description": "Trickle charging for battery longevity"
-    },
-    "power_saving": {
       "max_current_ma": 1000,
-      "max_voltage_mv": 4300,
-      "description": "Power saving mode"
+      "max_voltage_mv": 20000,
+      "description": "涓流充电 - 20W"
     },
-    "super_saver": {
-      "max_current_ma": 300,
-      "max_voltage_mv": 4100,
-      "description": "Super saver mode for maximum battery health"
+    "protect": {
+      "max_current_ma": 500,
+      "max_voltage_mv": 20000,
+      "description": "电池保护 - 10W"
     }
   },
   "schedule": {
     "enabled": false,
-    "rules": []
+    "start_time": "23:00",
+    "end_time": "07:00"
   },
   "notifications": {
     "enabled": true,

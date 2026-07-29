@@ -8,7 +8,7 @@ const API_BASE = window.location.origin;
 
 // 充电模式定义
 const MODES = {
-    turbo:    { icon: '🚀', name: '涡轮加速', power: '65W' },
+    turbo:    { icon: '🚀', name: '涡轮加速', power: '240W' },
     normal:   { icon: '🤖', name: '智能模式', power: 'AI' },
     standard: { icon: '🔋', name: '标准充电', power: '20W' },
     trickle:  { icon: '💧', name: '涓流充电', power: '5W' },
