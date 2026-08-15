@@ -355,6 +355,16 @@ static void handle_client(int fd) {
     if (!strcmp(uri, "/api/status")) { handle_status(fd); return; }
     if (!strcmp(uri, "/api/limit") && !strcmp(method, "POST")) { handle_limit(fd, body); return; }
     if (!strcmp(uri, "/api/full") && !strcmp(method, "POST")) { handle_full(fd); return; }
+    if (!strcmp(uri, "/api/log")) {
+        FILE *lf = fopen(LOGFILE, "r");
+        if (!lf) { send_resp(fd, 200, "text/plain", "暂无日志"); return; }
+        fseek(lf, 0, SEEK_END); long lsz = ftell(lf); rewind(lf);
+        if (lsz > 0 && lsz < 65536) {
+            char *lbuf = malloc(lsz+1); size_t lrd = fread(lbuf, 1, lsz, lf); fclose(lf);
+            lbuf[lrd] = '\0'; send_resp(fd, 200, "text/plain", lbuf); free(lbuf);
+        } else { fclose(lf); send_resp(fd, 200, "text/plain", "日志过大"); }
+        return;
+    }
     if (!strcmp(uri, "/api/export")) { handle_export(fd); return; }
     if (!strcmp(uri, "/api/history")) { char *j = history_json(); send_resp(fd, 200, "application/json", j); free(j); return; }
     serve_file(fd, uri);

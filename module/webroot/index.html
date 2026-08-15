@@ -16,22 +16,22 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
 .tabs { display:flex; background:var(--card); border-radius:12px; padding:4px; margin-bottom:16px; }
 .tab { flex:1; text-align:center; padding:10px; border-radius:8px; font-size:14px; cursor:pointer; color:#94a3b8; transition:.2s; }
 .tab.active { background:var(--accent); color:#0f172a; font-weight:600; }
-.banner { border-radius:12px; padding:14px 16px; margin-bottom:16px; font-size:15px; font-weight:600; display:flex; align-items:center; gap:10px; }
-.banner.charging { background:rgba(74,222,128,.15); color:var(--green); border:1px solid var(--green); }
-.banner.suspended { background:rgba(251,191,36,.15); color:var(--amber); border:1px solid var(--amber); }
-.banner.temp { background:rgba(248,113,113,.15); color:var(--red); border:1px solid var(--red); }
-.banner.manual { background:rgba(96,165,250,.15); color:var(--blue); border:1px solid var(--blue); }
-.banner.disabled { background:rgba(100,116,139,.15); color:var(--gray); border:1px solid var(--gray); }
-.banner.idle { background:rgba(100,116,139,.15); color:#94a3b8; border:1px solid #334155; }
+.banner { border-radius:12px; padding:12px 16px; margin-bottom:16px; font-size:14px; display:flex; align-items:center; gap:10px; justify-content:space-between; }
+.banner.charging { background:rgba(74,222,128,.12); border:1px solid rgba(74,222,128,.3); }
+.banner.suspended { background:rgba(251,191,36,.12); border:1px solid rgba(251,191,36,.3); }
+.banner.temp { background:rgba(248,113,113,.12); border:1px solid rgba(248,113,113,.3); }
+.banner.manual { background:rgba(96,165,250,.12); border:1px solid rgba(96,165,250,.3); }
+.banner.disabled { background:rgba(100,116,139,.12); border:1px solid rgba(100,116,139,.3); }
+.banner.idle { background:rgba(100,116,139,.08); border:1px solid #334155; }
 .big-cap { background:var(--card); border-radius:16px; padding:20px; margin-bottom:16px; }
 .big-cap .val { font-size:44px; font-weight:800; }
-.big-cap .bar { width:100%; height:10px; background:#334155; border-radius:5px; margin-top:10px; overflow:hidden; }
+.big-cap .bar { height:10px; background:#334155; border-radius:5px; margin-top:10px; overflow:hidden; }
 .big-cap .fill { height:100%; border-radius:5px; transition:width .5s; }
-.big-cap .status-line { display:flex; justify-content:space-between; margin-top:10px; font-size:12px; color:#94a3b8; }
+.big-cap .info { display:flex; justify-content:space-between; margin-top:10px; font-size:12px; color:#94a3b8; }
 .cards { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:16px; }
 .card { background:var(--card); border-radius:14px; padding:14px; }
-.card .label { font-size:11px; color:#94a3b8; margin-bottom:4px; }
-.card .value { font-size:22px; font-weight:700; }
+.card .lbl { font-size:11px; color:#94a3b8; margin-bottom:4px; }
+.card .val { font-size:22px; font-weight:700; }
 .card .sub { font-size:11px; color:var(--gray); margin-top:3px; }
 .panel { background:var(--card); border-radius:14px; padding:16px; margin-bottom:16px; }
 .panel h2 { font-size:15px; margin-bottom:12px; }
@@ -40,29 +40,32 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
 .row .lbl { font-size:14px; }
 .row input[type=number] { width:70px; background:#0f172a; border:1px solid #334155; color:#e2e8f0; border-radius:8px; padding:6px 8px; text-align:center; font-size:14px; }
 .btn { background:var(--accent); color:#0f172a; border:none; border-radius:10px; padding:10px 20px; font-size:14px; font-weight:600; width:100%; cursor:pointer; margin-top:12px; }
-.btn.full { background:var(--blue); }
-.btn.export { background:#334155; color:#e2e8f0; }
-.btn:active { opacity:.8; }
+.btn.green { background:var(--green); }
+.btn.gray { background:#334155; color:#e2e8f0; }
+.btn:active { opacity:.7; }
 .toggle { position:relative; width:48px; height:26px; background:#334155; border-radius:13px; cursor:pointer; transition:.3s; }
 .toggle.on { background:var(--green); }
 .toggle::after { content:''; position:absolute; top:3px; left:3px; width:20px; height:20px; background:#fff; border-radius:50%; transition:.3s; }
 .toggle.on::after { transform:translateX(22px); }
-.temp-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
-.temp-item { text-align:center; padding:10px 4px; background:var(--card); border-radius:12px; }
-.temp-item .n { font-size:11px; color:#94a3b8; margin-bottom:4px; }
-.temp-item .v { font-size:17px; font-weight:700; }
-.proto-chip { display:inline-block; background:rgba(34,211,238,.15); color:var(--accent); border:1px solid var(--accent); border-radius:20px; padding:2px 10px; font-size:12px; font-weight:600; }
+.temp-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+.temp-item { display:flex; align-items:center; justify-content:space-between; background:var(--card); border-radius:10px; padding:10px 14px; }
+.temp-item .n { font-size:13px; color:#94a3b8; }
+.temp-item .v { font-size:18px; font-weight:700; }
+.temp-item .dot { width:8px; height:8px; border-radius:50%; margin-right:8px; }
+.proto-chip { display:inline-block; background:rgba(34,211,238,.12); border:1px solid rgba(34,211,238,.4); border-radius:20px; padding:2px 10px; font-size:11px; font-weight:600; }
 #chartWrap { position:relative; height:220px; }
 .collapse-head { display:flex; justify-content:space-between; align-items:center; cursor:pointer; padding:10px 0; }
-.collapse-head .arrow { transition:.3s; }
+.collapse-head .arrow { transition:.3s; font-size:12px; }
 .collapse-head.open .arrow { transform:rotate(180deg); }
 .log-box { background:#0f172a; border:1px solid #334155; border-radius:10px; padding:12px; height:280px; overflow-y:auto; font-family:monospace; font-size:11px; line-height:1.6; color:#94a3b8; white-space:pre-wrap; }
-.temp-bar { display:inline-block; width:24px; height:6px; border-radius:3px; margin-left:4px; vertical-align:middle; }
+.health-box { display:flex; align-items:center; gap:12px; background:var(--card); border-radius:14px; padding:14px; margin-bottom:12px; }
+.health-box .big { font-size:36px; font-weight:800; }
+.health-box .meta { font-size:12px; color:#94a3b8; line-height:1.6; }
 </style>
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.1.0</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.0</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'">📊 仪表盘</div>
@@ -73,49 +76,71 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
   <div x-show="tab==='dash'">
     <div class="banner" :class="bannerClass()" x-show="true">
       <span x-text="bannerText()"></span>
-      <span class="proto-chip" x-text="s.usb_online ? s.proto_name + (s.power_max ? ' ' + s.power_max + 'W' : '') : '未连接'"></span>
+      <span class="proto-chip" x-text="protoLabel()"></span>
     </div>
 
     <div class="big-cap">
       <div class="val" :style="'color:' + capColor()" x-text="s.capacity + '%'"></div>
       <div class="bar"><div class="fill" :style="'width:' + s.capacity + '%;background:' + capColor()"></div></div>
-      <div class="status-line"><span x-text="s.status"></span><span x-text="s.voltage ? (s.voltage/1000).toFixed(2) + 'V' : '—'"></span></div>
+      <div class="info"><span x-text="s.status"></span><span x-text="s.voltage ? (s.voltage/1000).toFixed(2) + 'V' : '—'"></span></div>
     </div>
 
     <div class="cards">
       <div class="card">
-        <div class="label">电池温度</div>
-        <div class="value" :style="'color:' + (s.temp >= s.temp_limit ? 'var(--red)' : 'var(--accent)')" x-text="s.temp + '°C'"></div>
+        <div class="lbl">电池温度</div>
+        <div class="val" :style="'color:' + (s.temp >= s.temp_limit ? 'var(--red)' : 'var(--accent)')" x-text="s.temp + '°C'"></div>
         <div class="sub">上限 <span x-text="s.temp_limit + '°C'"></span></div>
       </div>
       <div class="card">
-        <div class="label">充电电流</div>
-        <div class="value" x-text="Math.abs(s.current) + ' mA'"></div>
-        <div class="sub" x-text="s.current < 0 ? '充电中' : (s.current > 0 ? '放电' : '待机')"></div>
+        <div class="lbl">充电功率</div>
+        <div class="val" x-text="s.charge_power_w ? s.charge_power_w + 'W' : '—'"></div>
+        <div class="sub" x-text="s.charge_power_w && s.est_full_min ? '充满约' + s.est_full_min + '分' : (s.current < 0 ? '充电中' : (s.current > 0 ? '放电' : '待机'))"></div>
       </div>
       <div class="card">
-        <div class="label">循环次数</div>
-        <div class="value" x-text="s.cycle_count >= 0 ? s.cycle_count : '—'"></div>
-        <div class="sub">健康度 <span x-text="s.health > 0 ? s.health + '%' : '—'"></span></div>
+        <div class="lbl">循环次数</div>
+        <div class="val" x-text="s.cycle_count >= 0 ? s.cycle_count : '—'"></div>
+        <div class="sub">健康度 <span x-text="s.health > 0 ? s.health + '%' : '—'"></span> · <span x-text="s.health_rating"></span></div>
       </div>
       <div class="card">
-        <div class="label">充电限制</div>
-        <div class="value" :style="s.limit_enabled ? 'color:var(--green)' : 'color:var(--gray)'" x-text="s.limit_enabled ? '已启用' : '已关闭'"></div>
-        <div class="sub">目标 <span x-text="s.charge_limit + '%'"></span></div>
+        <div class="lbl">充电限制</div>
+        <div class="val" :style="s.limit_enabled ? 'color:var(--green)' : 'color:var(--gray)'" x-text="s.limit_enabled ? '已启用' : '已关闭'"></div>
+        <div class="sub">上限 <span x-text="s.charge_limit + '%'"></span></div>
       </div>
     </div>
 
-    <div class="temp-grid" style="margin-bottom:16px">
-      <div class="temp-item"><div class="n">SoC</div><div class="v" x-text="s.soc_temp > 0 ? s.soc_temp + '°' : '—'"></div></div>
-      <div class="temp-item"><div class="n">GPU</div><div class="v" x-text="s.gpu_temp > 0 ? s.gpu_temp + '°' : '—'"></div></div>
-      <div class="temp-item"><div class="n">充电IC</div><div class="v" x-text="s.chg_temp > 0 ? s.chg_temp + '°' : '—'"></div></div>
-      <div class="temp-item"><div class="n">机身</div><div class="v" x-text="s.case_temp > 0 ? s.case_temp + '°' : '—'"></div></div>
+    <div class="health-box">
+      <div class="big" :style="'color:' + healthColor()" x-text="s.health > 0 ? s.health + '%' : '—'"></div>
+      <div class="meta">
+        <div>电池健康度 · <span x-text="s.health_rating"></span></div>
+        <div x-show="s.charge_full_mah > 0">满充 <span x-text="s.charge_full_mah + 'mAh'"></span> / 设计 <span x-text="s.charge_full_mah && s.health > 0 ? Math.round(s.charge_full_mah * 100 / s.health) + 'mAh' : '—'"></span></div>
+        <div x-show="s.est_cycles_left > 0">预计剩余约 <span x-text="s.est_cycles_left"></span> 次循环 (至60%)</div>
+        <div x-show="s.health > 0 && s.health < 80" style="color:var(--red)">⚠️ 健康度低于80%，建议更换电池</div>
+      </div>
     </div>
 
-    <div class="panel">
+    <div class="temp-grid">
+      <div class="temp-item">
+        <div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.soc_temp)"></span><span class="n">SoC</span></div>
+        <span class="v" :style="'color:' + tempColor(s.soc_temp)" x-text="s.soc_temp > 0 ? s.soc_temp + '°' : '—'"></span>
+      </div>
+      <div class="temp-item">
+        <div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.gpu_temp)"></span><span class="n">GPU</span></div>
+        <span class="v" :style="'color:' + tempColor(s.gpu_temp)" x-text="s.gpu_temp > 0 ? s.gpu_temp + '°' : '—'"></span>
+      </div>
+      <div class="temp-item">
+        <div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.chg_temp)"></span><span class="n">充电IC</span></div>
+        <span class="v" :style="'color:' + tempColor(s.chg_temp)" x-text="s.chg_temp > 0 ? s.chg_temp + '°' : '—'"></span>
+      </div>
+      <div class="temp-item">
+        <div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.case_temp)"></span><span class="n">机身</span></div>
+        <span class="v" :style="'color:' + tempColor(s.case_temp)" x-text="s.case_temp > 0 ? s.case_temp + '°' : '—'"></span>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px">
       <h2>📊 趋势</h2>
       <div id="chartWrap"><canvas id="chart"></canvas></div>
-      <div class="status-line" style="text-align:center;padding-top:8px;font-size:12px;color:#64748b" x-text="lastUpdate"></div>
+      <div class="info" style="justify-content:center;padding-top:8px;font-size:12px" x-text="lastUpdate"></div>
     </div>
   </div>
 
@@ -127,36 +152,23 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
         <div class="toggle" :class="s.limit_enabled ? 'on' : ''" @click="toggleEnabled()"></div>
       </div>
       <div class="collapse-head" :class="showAdvanced ? 'open' : ''" @click="showAdvanced = !showAdvanced">
-        <span style="font-size:13px;color:#94a3b8">高级设置</span>
-        <span class="arrow">▼</span>
+        <span style="font-size:13px;color:#94a3b8">高级设置</span><span class="arrow">▼</span>
       </div>
       <div x-show="showAdvanced">
-        <div class="row">
-          <span class="lbl">充电上限</span>
-          <input type="number" min="20" max="100" x-model.number="s.charge_limit" @change="save()">
-        </div>
-        <div class="row">
-          <span class="lbl">温度上限 (°C)</span>
-          <input type="number" min="30" max="60" x-model.number="s.temp_limit" @change="save()">
-        </div>
-        <div class="row">
-          <span class="lbl">恢复充电 (低于上限%)</span>
-          <input type="number" min="1" max="20" x-model.number="s.resume_delta" @change="save()">
-        </div>
-        <div class="row">
-          <span class="lbl">轮询间隔 (秒)</span>
-          <input type="number" min="1" max="60" x-model.number="s.interval" @change="save()">
-        </div>
+        <div class="row"><span class="lbl">充电上限</span><input type="number" min="20" max="100" x-model.number="s.charge_limit" @change="save()"></div>
+        <div class="row"><span class="lbl">温度上限 (°C)</span><input type="number" min="30" max="60" x-model.number="s.temp_limit" @change="save()"></div>
+        <div class="row"><span class="lbl">恢复充电 (低于上限%)</span><input type="number" min="1" max="20" x-model.number="s.resume_delta" @change="save()"></div>
+        <div class="row"><span class="lbl">轮询间隔 (秒)</span><input type="number" min="1" max="60" x-model.number="s.interval" @change="save()"></div>
         <button class="btn" @click="save()">保存设置</button>
       </div>
     </div>
 
     <div class="panel">
-      <h2>🔋 手动充满一次</h2>
+      <h2>🔋 手动充满</h2>
       <div class="row">
-        <span class="lbl" x-text="s.full_once ? '充到 100% 中 · 剩余 ' + fullRemain() + ' 秒' : '临时跳过充电上限，充到 100%'"></span>
+        <span class="lbl" x-text="'30分钟超时' + (s.full_once && fullRemain() > 0 ? ' · 剩余 ' + fullRemain() + ' 秒' : '')"></span>
       </div>
-      <button class="btn full" @click="fullOnce()" x-text="s.full_once ? '取消手动充满' : '充到 100%'"></button>
+      <button class="btn green" @click="fullOnce()" x-text="s.full_once ? '取消手动充满' : '充到 100%'"></button>
     </div>
   </div>
 
@@ -164,7 +176,8 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
     <div class="panel">
       <h2>📜 运行日志</h2>
       <div class="log-box" x-text="logContent || '暂无日志'"></div>
-      <button class="btn export" @click="exportLog()">⬇️ 导出日志与配置</button>
+      <button class="btn gray" @click="refreshLog()" style="margin-top:8px">🔄 刷新日志</button>
+      <button class="btn gray" @click="exportLog()" style="margin-top:8px">⬇️ 导出全部（配置+日志+历史）</button>
     </div>
   </div>
 </div>
@@ -173,18 +186,11 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
 function app() {
   return {
     API_BASE: 'http://127.0.0.1:8800',
-    tab: 'dash',
-    showAdvanced: false,
-    s: { capacity:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0 },
-    logContent: '',
-    lastUpdate: '',
-    timer: null,
-    chart: null,
+    tab: 'dash', showAdvanced: false,
+    s: { capacity:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, charge_power_w:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0 },
+    logContent: '', lastUpdate: '', timer: null, chart: null, fullTimer: null,
 
-    async fetchJson(url, opts) {
-      try { const r = await fetch(url, opts); return await r.json(); }
-      catch (e) { return null; }
-    },
+    async fetchJson(url, opts) { try { const r = await fetch(url, opts); return await r.json(); } catch (e) { return null; } },
 
     async poll() {
       const d = await this.fetchJson(this.API_BASE + '/api/status');
@@ -201,17 +207,17 @@ function app() {
         this.chart = new Chart(document.getElementById('chart'), {
           type: 'line',
           data: { labels, datasets: [
-            { label: '电量 %', data: caps, borderColor: '#4ade80', tension: .3, yAxisID: 'y', pointRadius: 0, borderWidth: 2 },
-            { label: '温度 °C', data: temps, borderColor: '#fb923c', tension: .3, yAxisID: 'y1', pointRadius: 0, borderWidth: 2 }
+            { label:'电量 %', data:caps, borderColor:'#4ade80', tension:.3, yAxisID:'y', pointRadius:0, borderWidth:2 },
+            { label:'温度 °C', data:temps, borderColor:'#fb923c', tension:.3, yAxisID:'y1', pointRadius:0, borderWidth:2 }
           ]},
           options: {
             responsive: true, maintainAspectRatio: false,
             scales: {
-              y: { position:'left', min:0, max:100, grid:{ color:'#334155' }, ticks:{ color:'#94a3b8' } },
-              y1: { position:'right', min:20, max:60, grid:{ display:false }, ticks:{ color:'#94a3b8' } },
-              x: { ticks: { color:'#94a3b8', maxTicksLimit:6 } }
+              y:{ position:'left', min:0, max:100, grid:{color:'#334155'}, ticks:{color:'#94a3b8'} },
+              y1:{ position:'right', min:20, max:60, grid:{display:false}, ticks:{color:'#94a3b8'} },
+              x:{ ticks:{color:'#94a3b8', maxTicksLimit:6} }
             },
-            plugins: { legend: { labels: { color:'#e2e8f0' } } }
+            plugins:{ legend:{ labels:{ color:'#e2e8f0' } } }
           }
         });
       } else {
@@ -223,42 +229,42 @@ function app() {
     },
 
     async save() {
-      const p = new URLSearchParams({
-        charge_limit: this.s.charge_limit,
-        temp_limit: this.s.temp_limit,
-        resume_delta: this.s.resume_delta,
-        interval: this.s.interval,
-        enabled: this.s.limit_enabled ? 1 : 0
-      });
-      await this.fetchJson(this.API_BASE + '/api/limit', { method:'POST', body:p.toString(), headers:{ 'Content-Type':'application/x-www-form-urlencoded' } });
+      const p = new URLSearchParams({ charge_limit:this.s.charge_limit, temp_limit:this.s.temp_limit, resume_delta:this.s.resume_delta, interval:this.s.interval, enabled:this.s.limit_enabled?1:0 });
+      await this.fetchJson(this.API_BASE + '/api/limit', { method:'POST', body:p.toString(), headers:{'Content-Type':'application/x-www-form-urlencoded'} });
       this.lastUpdate = '已保存 ' + new Date().toLocaleTimeString();
     },
 
-    async toggleEnabled() {
-      this.s.limit_enabled = !this.s.limit_enabled;
-      await this.save();
-    },
+    async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this.save(); },
 
     async fullOnce() {
       if (this.s.full_once) { this.s.full_once = 0; return; }
-      await this.fetchJson(this.API_BASE + '/api/full', { method:'POST' });
-      this.s.full_once = 1;
-      this.lastUpdate = '手动充满已启动';
+      const d = await this.fetchJson(this.API_BASE + '/api/full', { method:'POST' });
+      if (d) this.s.full_once = 1;
     },
 
-    async loadLog() {
-      try {
-        const r = await fetch(this.API_BASE + '/api/export');
-        const text = await r.text();
-        this.logContent = text;
-      } catch (e) { this.logContent = '无法读取日志'; }
+    fullRemain() {
+      if (!this.s.full_until) return 0;
+      const r = Math.max(0, Math.floor((this.s.full_until * 1000 - Date.now()) / 1000));
+      if (r <= 0 && this.s.full_once) { this.s.full_once = 0; }
+      return r;
     },
 
-    async exportLog() {
-      window.open(this.API_BASE + '/api/export', '_blank');
+    async refreshLog() {
+      try { const r = await fetch(this.API_BASE + '/api/log'); this.logContent = await r.text(); }
+      catch(e) { this.logContent = '无法读取日志'; }
     },
 
-    fullRemain() { return 1800; },
+    async exportLog() { window.open(this.API_BASE + '/api/export', '_blank'); },
+
+    protoLabel() {
+      const p = this.s.proto_name; const o = this.s.usb_online;
+      if (!o) return '未连接';
+      let label = p;
+      if (p === 'USB_PD') label = 'PD ' + (this.s.pd_type > 0 ? this.s.pd_type + '.0' : '');
+      else if (p === 'USB_DCP') label = '普通充电';
+      else if (p && p.includes('QC')) label = 'QC 快充';
+      return label + (this.s.power_max ? ' ' + this.s.power_max + 'W' : '');
+    },
 
     bannerClass() {
       const st = this.s.control_state;
@@ -269,27 +275,24 @@ function app() {
       if (st === 'disabled') return 'disabled';
       return 'idle';
     },
-
     bannerText() {
       const st = this.s.control_state;
-      if (st === 'charging') return '⚡ 充电中 · ' + this.s.proto_name + ' ' + (this.s.power_max || '') + 'W';
-      if (st === 'suspended') return '⏸️ 已暂停充电（达到上限 ' + this.s.charge_limit + '%）';
-      if (st === 'temp_protect') return '🌡️ 温度保护中（电池 ' + this.s.temp + '°C ≥ ' + this.s.temp_limit + '°C）';
-      if (st === 'manual_full') return '🔋 手动充满中（跳过限制，30分钟超时）';
-      if (st === 'disabled') return '⚙️ 充电限制已关闭';
+      if (st === 'charging') return '⚡ 充电中';
+      if (st === 'suspended') return '⏸️ 已达上限 ' + this.s.charge_limit + '%';
+      if (st === 'temp_protect') return '🌡️ 温度保护 ' + this.s.temp + '°C';
+      if (st === 'manual_full') return '🔋 手动充满中';
+      if (st === 'disabled') return '⚙️ 限制已关闭';
       return '💤 未充电';
     },
-
-    capColor() {
-      const c = this.s.capacity;
-      return c > 80 ? 'var(--green)' : c > 30 ? 'var(--accent)' : 'var(--orange)';
-    },
+    capColor() { const c = this.s.capacity; return c > 80 ? 'var(--green)' : c > 30 ? 'var(--accent)' : 'var(--orange)'; },
+    healthColor() { const h = this.s.health; return h >= 90 ? 'var(--green)' : h >= 80 ? 'var(--accent)' : h >= 70 ? 'var(--amber)' : 'var(--red)'; },
+    tempColor(t) { if (t <= 0) return 'var(--gray)'; return t < 45 ? 'var(--green)' : t < 55 ? 'var(--orange)' : 'var(--red)'; },
 
     init() {
-      this.poll();
-      this.loadHistory();
+      this.poll(); this.loadHistory();
       this.timer = setInterval(() => this.poll(), 3000);
       setInterval(() => this.loadHistory(), 30000);
+      setInterval(() => { if (this.tab === 'log') this.refreshLog(); }, 10000);
     }
   };
 }
