@@ -4,7 +4,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <errno.h>
 #include <signal.h>
 #include <time.h>
 #include <sys/socket.h>
@@ -292,7 +291,7 @@ static int serve_file(int fd, const char *uri) {
     char *body = malloc(len + 1);
     size_t rd = fread(body, 1, len, f);
     fclose(f);
-    body[rd] = '\0'; (void)len;
+    body[rd] = '\0';
 
     const char *ct = "text/plain";
     if      (strstr(uri, ".html")) ct = "text/html";
@@ -326,7 +325,7 @@ static void handle_client(int fd) {
     if (!strcmp(method, "POST")) {
         char *hp = strstr(buf, "\r\n\r\n");
         if (hp) body = hp + 4;
-        /* 若 body 不完整且长度由 Content-Length 指示，忽略（fetch 通常一次到齐）*/
+        /* body 从 \r\n\r\n 后取，fetch 一次到齐，不处理 Content-Length */
     }
 
     if (!strcmp(uri, "/api/status")) { handle_status(fd); return; }
