@@ -1,6 +1,9 @@
 #!/system/bin/sh
 
-MODPATH=${0%/*}
+# 优先使用安装器注入的 $MODPATH，手动执行时回退到脚本路径
+if [ -z "$MODPATH" ]; then
+  MODPATH=${0%/*}
+fi
 
 if [ "$KSU" = "true" ]; then
   ui_print "- KernelSU 环境"

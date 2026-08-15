@@ -146,50 +146,40 @@ static void push_history(void) {
 static char *history_json(void) {
     FILE *f = fopen(HISTORY, "r");
     if (!f) return strdup("[]");
-    /* 读取全部到内存，保留最后 HIST_MAX 行 */
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (sz <= 0 || sz > 1 << 20) { fclose(f); return strdup("[]"); }
+    rewind(f);
+    if (sz <= 0 || sz > (1 << 20)) { fclose(f); return strdup("[]"); }
     char *buf = malloc(sz + 1);
     size_t rd = fread(buf, 1, sz, f);
     fclose(f);
     buf[rd] = '\0';
 
-    char *lines[HIST_MAX + 1];
-    int count = 0;
-    char *save = NULL;
-    for (char *line = strtok_r(buf, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
-        if (count < HIST_MAX) lines[count] = line;
-        count++;
-    }
-    if (count > HIST_MAX) {
-        int drop = count - HIST_MAX;
-        count = HIST_MAX;
-    }
-    /* 简化：直接截取末尾 */
-    char *p = buf;
+    /* 统计行数，跳过最早的超出部分 */
     int nl = 0;
-    /* count 总行数 */
     for (char *s = buf; *s; s++) if (*s == '\n') nl++;
-    /* 找倒数第 HIST_MAX+1 个换行 */
-    int keep = nl >= HIST_MAX ? HIST_MAX : nl;
-    int skip_nl = nl - keep;
+    int keep = nl > HIST_MAX ? nl - HIST_MAX : 0;
+
+    /* 定位第 keep 个换行之后 */
     char *start = buf;
     int seen = 0;
-    for (char *s = buf; *s && seen < skip_nl; s++) if (*s == '\n') { start = s + 1; seen++; }
-    /* 移除首行尾部的 \n，组装 [ ... ] */
+    for (char *s = buf; *s && seen < keep; s++) {
+        if (*s == '\n') { start = s + 1; seen++; }
+    }
+
+    /* 行间分隔符 \n -> ,  （合法 JSON）*/
+    for (char *p = start; *p; p++) {
+        if (*p == '\n') *p = ',';
+    }
     size_t blen = strlen(start);
-    char *out = malloc(blen + 4);
+    if (blen > 0 && start[blen - 1] == ',') start[blen - 1] = '\0', blen--;
+
+    char *out = malloc(blen + 3);
     out[0] = '[';
     memcpy(out + 1, start, blen);
-    /* 去掉最后一个换行 */
-    size_t olen = blen;
-    if (olen > 0 && out[olen] == '\n') out[olen] = '\0', olen--;
-    out[olen + 1] = ']';
-    out[olen + 2] = '\0';
+    out[blen + 1] = ']';
+    out[blen + 2] = '\0';
     free(buf);
-    (void)lines; (void)count;
     return out;
 }
 
