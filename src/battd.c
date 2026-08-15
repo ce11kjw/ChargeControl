@@ -202,6 +202,7 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
         "Content-Length: %zu\r\n"
         "Connection: close\r\n"
         "Cache-Control: no-store\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
         "\r\n",
         code, code == 200 ? "OK" : "Not Found", ctype, body ? strlen(body) : 0);
     write(fd, head, n);
@@ -284,7 +285,7 @@ static int serve_file(int fd, const char *uri) {
 
     char head[512];
     int n = snprintf(head, sizeof(head),
-        "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
         ct, rd);
     write(fd, head, n);
     write(fd, body, rd);

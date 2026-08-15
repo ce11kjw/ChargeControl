@@ -98,6 +98,8 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
 <script>
 function app() {
   return {
+    API_BASE: 'http://127.0.0.1:8800',
+
     s: { capacity: 0, temp: 0, voltage: 0, current: 0, status: 'Unknown', limit_enabled: false, charge_limit: 80, temp_limit: 45, resume_delta: 5 },
     lastUpdate: '',
     chart: null,
@@ -112,12 +114,12 @@ function app() {
     },
 
     async poll() {
-      const d = await this.fetchJson('/api/status');
+      const d = await this.fetchJson(this.API_BASE + '/api/status');
       if (d) { this.s = Object.assign(this.s, d); this.lastUpdate = '更新于 ' + new Date().toLocaleTimeString(); }
     },
 
     async loadHistory() {
-      const h = await this.fetchJson('/api/history');
+      const h = await this.fetchJson(this.API_BASE + '/api/history');
       if (!h || !Array.isArray(h) || !h.length) return;
       const labels = h.map(x => new Date(x.t * 1000).toLocaleTimeString());
       const caps = h.map(x => x.c);
@@ -159,7 +161,7 @@ function app() {
         resume_delta: this.s.resume_delta,
         enabled: this.s.limit_enabled ? 1 : 0
       });
-      await this.fetchJson('/api/limit', { method: 'POST', body: p.toString(), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+      await this.fetchJson(this.API_BASE + '/api/limit', { method: 'POST', body: p.toString(), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
       this.lastUpdate = '已保存 ' + new Date().toLocaleTimeString();
     },
 
