@@ -243,21 +243,45 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
 }
 
 static void handle_status(int fd) {
-    char body[1024];
+    char body[2048];
+    int charge_full = read_int(SYSFS "/charge_full") / 1000;
+    int charge_power = 0;
+    if (bat_volt > 0 && bat_curr < 0)
+        charge_power = (bat_volt * (-bat_curr)) / 1000;
+    int est_full_min = 0;
+    if (charge_power > 0 && charge_limit > bat_capacity && charge_full > 0) {
+        int remain = ((charge_limit - bat_capacity) * charge_full) / 100;
+        est_full_min = (remain * 60) / (-bat_curr > 0 ? -bat_curr : 1);
+    }
+    const char *health_rating = "未知";
+    if (health >= 90) health_rating = "优秀";
+    else if (health >= 80) health_rating = "良好";
+    else if (health >= 70) health_rating = "一般";
+    else if (health >= 0) health_rating = "较差";
+    int est_cycles_left = 0;
+    if (cycle_count > 0 && health > 0) {
+        float loss_per_cycle = (100.0f - health) / cycle_count;
+        if (loss_per_cycle > 0.001f)
+            est_cycles_left = (int)((health - 60.0f) / loss_per_cycle);
+    }
     snprintf(body, sizeof(body),
         "{\"capacity\":%d,\"temp\":%d,\"voltage\":%d,\"current\":%d,"
         "\"status\":\"%s\",\"limit_enabled\":%d,\"charge_limit\":%d,"
         "\"temp_limit\":%d,\"resume_delta\":%d,\"interval\":%d,"
         "\"soc_temp\":%d,\"gpu_temp\":%d,\"chg_temp\":%d,\"case_temp\":%d,"
-        "\"cycle_count\":%d,\"health\":%d,"
+        "\"cycle_count\":%d,\"health\":%d,\"health_rating\":\"%s\","
+        "\"charge_full_mah\":%d,\"est_cycles_left\":%d,"
+        "\"charge_power_w\":%d,\"est_full_min\":%d,"
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
-        "\"control_state\":\"%s\",\"full_once\":%d}",
+        "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld}",
         bat_capacity, bat_temp, bat_volt, bat_curr, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
-        cycle_count, health,
+        cycle_count, health, health_rating,
+        charge_full, est_cycles_left,
+        charge_power, est_full_min,
         usb_online, proto_name, pd_type, usb_power_max,
-        control_state, full_once);
+        control_state, full_once, (long)full_until);
     send_resp(fd, 200, "application/json", body);
 }
 
@@ -293,10 +317,10 @@ static void handle_export(int fd) {
     char buf[8192]; int n = 0;
     n += snprintf(buf+n, sizeof(buf)-n, "=== ChargeControl 导出 ===\n时间: %ld\n\n--- 配置 ---\n", (long)time(NULL));
     FILE *f = fopen(CONFIG, "r");
-    if (f) { while (fgets(buf+n, sizeof(buf)-n, f)) n += strlen(buf+n); fclose(f); }
+    if (f) { while (n < (int)sizeof(buf)-256 && fgets(buf+n, sizeof(buf)-n, f)) n += strlen(buf+n); fclose(f); }
     n += snprintf(buf+n, sizeof(buf)-n, "\n--- 日志 ---\n");
     f = fopen(LOGFILE, "r");
-    if (f) { while (fgets(buf+n, sizeof(buf)-n, f)) n += strlen(buf+n); fclose(f); }
+    if (f) { while (n < (int)sizeof(buf)-256 && fgets(buf+n, sizeof(buf)-n, f)) n += strlen(buf+n); fclose(f); }
     n += snprintf(buf+n, sizeof(buf)-n, "\n--- 历史 (最后20条) ---\n");
     f = fopen(HISTORY, "r");
     if (f) {
@@ -327,7 +351,9 @@ static int serve_file(int fd, const char *uri) {
     if (strstr(path, "..")) { send_resp(fd, 404, "text/plain", "Not Found"); return -1; }
     FILE *f = fopen(path, "rb"); if (!f) { send_resp(fd, 404, "text/plain", "Not Found"); return -1; }
     fseek(f, 0, SEEK_END); long len = ftell(f); fseek(f, 0, SEEK_SET);
-    char *body = malloc(len+1); size_t rd = fread(body, 1, len, f); fclose(f);
+    char *body = malloc(len+1);
+    if (!body) { fclose(f); send_resp(fd, 500, "text/plain", "OOM"); return -1; }
+    size_t rd = fread(body, 1, len, f); fclose(f);
     body[rd] = '\0';
     const char *ct = "text/plain";
     if (strstr(uri, ".html")) ct = "text/html";
@@ -367,7 +393,8 @@ static void handle_client(int fd) {
     }
     if (!strcmp(uri, "/api/export")) { handle_export(fd); return; }
     if (!strcmp(uri, "/api/history")) { char *j = history_json(); send_resp(fd, 200, "application/json", j); free(j); return; }
-    serve_file(fd, uri);
+    if (!strcmp(method, "GET")) serve_file(fd, uri);
+    else send_resp(fd, 405, "text/plain", "Method Not Allowed");
 }
 
 static void on_sig(int sig) { (void)sig; running = 0; }
