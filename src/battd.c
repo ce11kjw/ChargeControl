@@ -27,6 +27,8 @@ static int temp_limit = 45;       /* 温度上限 °C */
 static int resume_delta = 5;      /* 低于上限 resume_delta% 恢复充电 */
 static int interval = 5;          /* 轮询间隔秒 */
 static int limit_enabled = 1;
+static int temp_suspended = 0;
+static time_t last_save = 0;
 
 static int bat_capacity = -1;
 static int bat_temp = -1;
@@ -86,13 +88,20 @@ static void apply_control(void) {
     snprintf(path, sizeof(path), "%s/input_suspend", SYSFS);
 
     if (!limit_enabled) {
-        write_str(path, "0");           /* 确保恢复充电 */
+        write_str(path, "0");
+        temp_suspended = 0;
         return;
     }
-    /* 温度保护优先 */
+    /* 温度保护：超限则暂停，恢复后取消暂停标志 */
     if (bat_temp >= temp_limit) {
         write_str(path, "1");
+        temp_suspended = 1;
         return;
+    }
+    if (temp_suspended) {
+        /* 温度已恢复，解除暂停 */
+        write_str(path, "0");
+        temp_suspended = 0;
     }
     if (bat_capacity >= charge_limit) {
         write_str(path, "1");
@@ -135,10 +144,33 @@ static void save_config(void) {
 
 /* ---------- history ---------- */
 static void push_history(void) {
+    time_t now = time(NULL);
+    /* 每 60 秒记录一次 */
+    if (now - last_save < 60) return;
+    last_save = now;
+
+    /* 文件超过 512KB 时截断只保留尾部 256KB */
+    struct stat st;
+    if (stat(HISTORY, &st) == 0 && st.st_size > 512 * 1024) {
+        FILE *f = fopen(HISTORY, "r");
+        if (f) {
+            fseek(f, -256 * 1024, SEEK_END);
+            char tmp[256] = {0};
+            size_t _fr = fread(tmp, 1, 255, f); (void)_fr;
+            fclose(f);
+            /* 跳到第一个完整行 */
+            char *p = tmp;
+            while (*p && *p != '\n') p++;
+            if (*p == '\n') p++;
+            f = fopen(HISTORY, "w");
+            if (f) { fwrite(p, 1, strlen(p), f); fclose(f); }
+        }
+    }
+
     FILE *f = fopen(HISTORY, "a");
     if (!f) return;
     fprintf(f, "{\"t\":%ld,\"c\":%d,\"tmp\":%d,\"v\":%d,\"s\":\"%s\"}\n",
-            (long)time(NULL), bat_capacity, bat_temp, bat_volt, bat_status);
+            (long)now, bat_capacity, bat_temp, bat_volt, bat_status);
     fclose(f);
 }
 
@@ -195,8 +227,8 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
         "Access-Control-Allow-Origin: *\r\n"
         "\r\n",
         code, code == 200 ? "OK" : "Not Found", ctype, body ? strlen(body) : 0);
-    write(fd, head, n);
-    if (body) write(fd, body, strlen(body));
+    ssize_t _w = write(fd, head, n); (void)_w;
+    if (body) { ssize_t _w2 = write(fd, body, strlen(body)); (void)_w2; }
 }
 
 static void handle_status(int fd) {
@@ -222,18 +254,8 @@ static void handle_limit(int fd, const char *body) {
             char key[64], val[64];
             strncpy(key, tok, sizeof(key) - 1); key[sizeof(key)-1] = '\0';
             strncpy(val, eq + 1, sizeof(val) - 1); val[sizeof(val)-1] = '\0';
-            /* url decode simple %XX */
-            char dec[64] = {0};
-            int di = 0;
-            for (int i = 0; val[i] && di < 63; i++) {
-                if (val[i] == '%' && val[i+1] && val[i+2]) {
-                    int h1 = val[i+1] >= 'a' ? val[i+1]-'a'+10 : val[i+1] >= 'A' ? val[i+1]-'A'+10 : val[i+1]-'0';
-                    int h2 = val[i+2] >= 'a' ? val[i+2]-'a'+10 : val[i+2] >= 'A' ? val[i+2]-'A'+10 : val[i+2]-'0';
-                    dec[di++] = (char)((h1 << 4) | h2);
-                    i += 2;
-                } else dec[di++] = val[i];
-            }
-            dec[di] = '\0';
+            /* 直接使用 val，纯数字表单无需 URL 解码 */
+            const char *dec = val;
             if      (!strcmp(key, "charge_limit")) charge_limit = atoi(dec);
             else if (!strcmp(key, "temp_limit"))   temp_limit = atoi(dec);
             else if (!strcmp(key, "resume_delta")) resume_delta = atoi(dec);
@@ -277,8 +299,8 @@ static int serve_file(int fd, const char *uri) {
     int n = snprintf(head, sizeof(head),
         "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
         ct, rd);
-    write(fd, head, n);
-    write(fd, body, rd);
+    ssize_t _w = write(fd, head, n); (void)_w;
+    ssize_t _w3 = write(fd, body, rd); (void)_w3;
     free(body);
     return 0;
 }
@@ -316,6 +338,7 @@ static void on_sig(int sig) { (void)sig; running = 0; }
 int main(void) {
     /* 读配置 */
     load_config();
+    last_save = time(NULL);
     /* 立即刷一次电池数据 */
     update_battery();
 
