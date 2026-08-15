@@ -147,23 +147,29 @@ static void push_history(void) {
     time_t now = time(NULL);
     /* 每 60 秒记录一次 */
     if (now - last_save < 60) return;
-    last_save = now;
 
     /* 文件超过 512KB 时截断只保留尾部 256KB */
     struct stat st;
     if (stat(HISTORY, &st) == 0 && st.st_size > 512 * 1024) {
         FILE *f = fopen(HISTORY, "r");
         if (f) {
-            fseek(f, -256 * 1024, SEEK_END);
-            char tmp[256] = {0};
-            size_t _fr = fread(tmp, 1, 255, f); (void)_fr;
+            long keep = 256 * 1024;
+            fseek(f, -keep, SEEK_END);
+            long pos = ftell(f);
+            if (pos < 0) { fclose(f); return; }
+            long tail_len = st.st_size - pos;
+            char *tail = malloc(tail_len + 1);
+            if (!tail) { fclose(f); return; }
+            size_t _fr = fread(tail, 1, tail_len, f); (void)_fr;
             fclose(f);
+            tail[tail_len] = '\0';
             /* 跳到第一个完整行 */
-            char *p = tmp;
+            char *p = tail;
             while (*p && *p != '\n') p++;
             if (*p == '\n') p++;
             f = fopen(HISTORY, "w");
             if (f) { fwrite(p, 1, strlen(p), f); fclose(f); }
+            free(tail);
         }
     }
 
@@ -172,6 +178,7 @@ static void push_history(void) {
     fprintf(f, "{\"t\":%ld,\"c\":%d,\"tmp\":%d,\"v\":%d,\"s\":\"%s\"}\n",
             (long)now, bat_capacity, bat_temp, bat_volt, bat_status);
     fclose(f);
+    last_save = now;
 }
 
 /* 返回历史 JSON 数组（只读尾 HIST_MAX 行）*/
@@ -364,6 +371,7 @@ int main(void) {
         FD_SET(srv, &rfds);
         struct timeval tv = { 1, 0 };
         int s = select(srv + 1, &rfds, NULL, NULL, &tv);
+        if (s < 0) { sleep(1); continue; }
         if (s > 0 && FD_ISSET(srv, &rfds)) {
             struct sockaddr_in cli;
             socklen_t cli_len = sizeof(cli);
