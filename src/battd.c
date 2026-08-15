@@ -91,7 +91,7 @@ static void update_battery(void) {
     for (int i = 0; i < 100; i++) {
         char tzpath[128]; snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/type", THERMAL, i);
         char tname[64];
-        if (read_str(tzpath, tname, sizeof(tname)) <= 0) break;
+        if (read_str(tzpath, tname, sizeof(tname)) <= 0) continue;
         snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/temp", THERMAL, i);
         int tval = read_int(tzpath);
         if (tval < 0) continue;
@@ -134,6 +134,16 @@ static void apply_control(void) {
     char path[MAX_LINE];
     snprintf(path, sizeof(path), "%s/input_suspend", SYSFS);
 
+    /* 温度保护永远优先（手动充满期间也生效）*/
+    if (bat_temp >= temp_limit) {
+        write_str(path, "1"); temp_suspended = 1;
+        return;
+    }
+    if (temp_suspended) {
+        write_str(path, "0"); temp_suspended = 0;
+    }
+
+    /* 手动充满：仅跳过容量上限 */
     if (full_once) {
         if (time(NULL) >= full_until) {
             full_once = 0;
@@ -143,14 +153,9 @@ static void apply_control(void) {
             return;
         }
     }
+
     if (!limit_enabled) {
         write_str(path, "0"); temp_suspended = 0; return;
-    }
-    if (bat_temp >= temp_limit) {
-        write_str(path, "1"); temp_suspended = 1; return;
-    }
-    if (temp_suspended) {
-        write_str(path, "0"); temp_suspended = 0;
     }
     if (bat_capacity >= charge_limit) {
         write_str(path, "1");
@@ -247,7 +252,7 @@ static void handle_status(int fd) {
     int charge_full = read_int(SYSFS "/charge_full") / 1000;
     int charge_power = 0;
     if (bat_volt > 0 && bat_curr < 0)
-        charge_power = (bat_volt * (-bat_curr)) / 1000;
+        charge_power = (bat_volt * (-bat_curr)) / 1000000;
     int est_full_min = 0;
     if (charge_power > 0 && charge_limit > bat_capacity && charge_full > 0) {
         int remain = ((charge_limit - bat_capacity) * charge_full) / 100;
@@ -331,7 +336,7 @@ static void handle_export(int fd) {
     if (f) {
         char *lines[20]; int lc = 0;
         char line[512];
-        while (fgets(line, sizeof(line), f) && lc < 20) {
+        while (n < (int)sizeof(buf)-512 && fgets(line, sizeof(line), f) && lc < 20) {
             lines[lc] = strdup(line); lc++;
         }
         fclose(f);
@@ -386,7 +391,7 @@ static void handle_client(int fd) {
     if (!strcmp(uri, "/api/status")) { handle_status(fd); return; }
     if (!strcmp(uri, "/api/limit") && !strcmp(method, "POST")) { handle_limit(fd, body); return; }
     if (!strcmp(uri, "/api/full") && !strcmp(method, "POST")) { handle_full(fd, body); return; }
-    if (!strcmp(uri, "/api/log")) {
+    if (!strcmp(uri, "/api/log") && !strcmp(method, "GET")) {
         FILE *lf = fopen(LOGFILE, "r");
         if (!lf) { send_resp(fd, 200, "text/plain", "暂无日志"); return; }
         fseek(lf, 0, SEEK_END); long lsz = ftell(lf); rewind(lf);
