@@ -237,9 +237,13 @@ function app() {
     async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this.save(); },
 
     async fullOnce() {
-      if (this.s.full_once) { this.s.full_once = 0; return; }
-      const d = await this.fetchJson(this.API_BASE + '/api/full', { method:'POST' });
-      if (d) this.s.full_once = 1;
+      if (this.s.full_once) {
+        await this.fetchJson(this.API_BASE + '/api/full', { method:'POST', body:'cancel=1', headers:{'Content-Type':'application/x-www-form-urlencoded'} });
+        this.s.full_once = 0;
+        return;
+      }
+      await this.fetchJson(this.API_BASE + '/api/full', { method:'POST' });
+      this.s.full_once = 1;
     },
 
     fullRemain() {

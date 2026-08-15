@@ -307,10 +307,15 @@ static void handle_limit(int fd, const char *body) {
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
 }
 
-static void handle_full(int fd) {
-    full_once = 1; full_until = time(NULL) + FULL_TIMEOUT;
-    log_event("手动充满已启动，30分钟超时");
-    send_resp(fd, 200, "application/json", "{\"ok\":true,\"timeout\":1800}");
+static void handle_full(int fd, const char *body) {
+    if (body && strstr(body, "cancel=1")) {
+        full_once = 0;
+        log_event("手动充满已取消");
+    } else {
+        full_once = 1; full_until = time(NULL) + FULL_TIMEOUT;
+        log_event("手动充满已启动，30分钟超时");
+    }
+    send_resp(fd, 200, "application/json", "{\"ok\":true}");
 }
 
 static void handle_export(int fd) {
@@ -380,7 +385,7 @@ static void handle_client(int fd) {
     }
     if (!strcmp(uri, "/api/status")) { handle_status(fd); return; }
     if (!strcmp(uri, "/api/limit") && !strcmp(method, "POST")) { handle_limit(fd, body); return; }
-    if (!strcmp(uri, "/api/full") && !strcmp(method, "POST")) { handle_full(fd); return; }
+    if (!strcmp(uri, "/api/full") && !strcmp(method, "POST")) { handle_full(fd, body); return; }
     if (!strcmp(uri, "/api/log")) {
         FILE *lf = fopen(LOGFILE, "r");
         if (!lf) { send_resp(fd, 200, "text/plain", "暂无日志"); return; }
