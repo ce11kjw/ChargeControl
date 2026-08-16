@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.20"
+#define VERSION "v1.2.21"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -380,17 +380,22 @@ static void push_history(void) {
         if (f) {
             fseek(f, -256 * 1024, SEEK_END);
             long pos = ftell(f);
-            if (pos < 0) { fclose(f); return; }
-            long tail_len = st.st_size - pos;
-            char *tail = malloc(tail_len + 1);
-            if (!tail) { fclose(f); return; }
-            size_t _fr = fread(tail, 1, tail_len, f); (void)_fr;
-            fclose(f); tail[tail_len] = '\0';
-            char *p = tail; while (*p && *p != '\n') p++;
-            if (*p == '\n') p++;
-            f = fopen(HISTORY, "w");
-            if (f) { fwrite(p, 1, strlen(p), f); fclose(f); }
-            free(tail);
+            if (pos < 0) { fclose(f); f = NULL; }
+            else {
+                long tail_len = st.st_size - pos;
+                char *tail = malloc(tail_len + 1);
+                if (!tail) { fclose(f); f = NULL; }
+                else {
+                    size_t _fr = fread(tail, 1, tail_len, f); (void)_fr;
+                    fclose(f);
+                    tail[tail_len] = '\0';
+                    char *p = tail; while (*p && *p != '\n') p++;
+                    if (*p == '\n') p++;
+                    f = fopen(HISTORY, "w");
+                    if (f) { fwrite(p, 1, strlen(p), f); fclose(f); }
+                    free(tail);
+                }
+            }
         }
     }
     FILE *f = fopen(HISTORY, "a"); if (!f) return;
