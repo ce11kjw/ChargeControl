@@ -74,6 +74,7 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'">📊 仪表盘</div>
     <div class="tab" :class="{active: tab==='set'}" @click="tab='set'">⚙️ 设置</div>
     <div class="tab" :class="{active: tab==='log'}" @click="tab='log'">📜 日志</div>
+    <div class="tab" :class="{active: tab==='stats'}" @click="tab='stats'">📊 统计</div>
   </div>
 
   <div x-show="tab==='dash'">
@@ -119,28 +120,9 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
         <div x-show="s.health > 0 && s.health < 80" style="color:var(--red)">&#x26a0;&#xfe0f; 健康度低于80%</div>
         <div x-show="s.cycle_count >= 0" style="color:#94a3b8">已循环 <span x-text="s.cycle_count"></span> 次 · 衰减 <span x-text="s.health >= 0 ? (100 - s.health).toFixed(1) + '%' : '—'"></span></div>
         <div x-show="s.temp > 0" style="color:#94a3b8">当前温度 <span x-text="s.temp + '°C'"></span> · 电压 <span x-text="s.voltage ? (s.voltage/1000).toFixed(3) + 'V' : '—'"></span></div>
+        <div x-show="s.current" style="color:#94a3b8">当前电流 <span x-text="curDisplay()"></span></div>
         <div x-show="s.power_mw" style="color:#94a3b8">当前功率 <span x-text="powerDisplay()"></span></div>
       </div>
-    <div class="panel" style="margin-bottom:12px">
-      <h2>🔋 充电统计</h2>
-      <div class="row">
-        <span class="lbl">本次充电</span>
-        <span style="font-size:13px;color:#94a3b8" x-text="sessText()"></span>
-      </div>
-      <div class="row">
-        <span class="lbl">累计次数</span>
-        <span style="font-size:13px;color:#e2e8f0" x-text="s.stats_count + ' 次'"></span>
-      </div>
-      <div class="row">
-        <span class="lbl">累计时长</span>
-        <span style="font-size:13px;color:#e2e8f0" x-text="fmtMin(s.stats_min)"></span>
-      </div>
-      <div class="row">
-        <span class="lbl">累计充入</span>
-        <span style="font-size:13px;color:#e2e8f0" x-text="s.stats_mah + ' mAh'"></span>
-      </div>
-    </div>
-
     </div>
 
     <div class="temp-grid">
@@ -159,7 +141,7 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
 
     <div class="temp-grid" style="margin-top:12px">
       <div class="temp-item"><span class="n">电压</span><span class="v" x-text="s.voltage ? (s.voltage/1000).toFixed(3) + 'V' : '—'"></span></div>
-      <div class="temp-item"><span class="n">电流</span><span class="v" x-text="s.current ? s.current + 'mA' : '—'"></span></div>
+      <div class="temp-item"><span class="n">电流</span><span class="v" :style="s.current < 0 ? 'color:var(--green)' : (s.current > 0 ? 'color:var(--orange)' : '')" x-text="curDisplay()"></span></div>
       <div class="temp-item"><span class="n">电量</span><span class="v" x-text="capDisplay()"></span></div>
       <div class="temp-item"><span class="n">旁路</span><span class="v" x-text="(s.bypass_ok ? (s.bypass_on ? '已激活' : '未激活') : '不支持')" :style="s.bypass_on ? 'color:var(--green)' : ''"></span></div>
     </div>
@@ -213,6 +195,32 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
       <div class="row">
         <span class="lbl">保留历史（趋势图数据）</span>
         <div class="toggle" :class="s.history_enabled ? 'on' : ''" @click="toggleHistory()"></div>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="tab==='stats'">
+    <div class="panel">
+      <h2>🔋 充电统计</h2>
+      <div class="row">
+        <span class="lbl">本次充电</span>
+        <span style="font-size:13px;color:#94a3b8" x-text="sessText()"></span>
+      </div>
+      <div class="row">
+        <span class="lbl">本次充入</span>
+        <span style="font-size:13px;color:#e2e8f0" x-text="s.sess_mah + ' mAh'"></span>
+      </div>
+      <div class="row">
+        <span class="lbl">累计充电次数</span>
+        <span style="font-size:13px;color:#e2e8f0" x-text="s.stats_count + ' 次'"></span>
+      </div>
+      <div class="row">
+        <span class="lbl">累计充电时长</span>
+        <span style="font-size:13px;color:#e2e8f0" x-text="fmtMin(s.stats_min)"></span>
+      </div>
+      <div class="row">
+        <span class="lbl">累计充入电量</span>
+        <span style="font-size:13px;color:#e2e8f0" x-text="s.stats_mah ? (s.stats_mah/1000).toFixed(2) + ' Ah' : '0'"></span>
       </div>
     </div>
   </div>
@@ -320,10 +328,18 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
       return this.s.capacity + '%';
     },
 
+    curDisplay() {
+      const c = this.s.current;
+      if (!c) return '—';
+      return (c < 0 ? '+' : '-') + Math.abs(c) + ' mA';
+    },
+
     powerDisplay() {
-      if (!this.s.power_mw) return '—';
-      const w = Math.abs(this.s.power_mw) / 1000;
-      return (w >= 10 ? w.toFixed(0) : w.toFixed(1)) + ' W';
+      const pw = this.s.power_mw;
+      if (!pw) return '—';
+      const w = Math.abs(pw) / 1000;
+      const v = (w >= 10 ? w.toFixed(0) : w.toFixed(1)) + ' W';
+      return (pw > 0 ? '充电 ' : '放电 ') + v;
     },
 
     cpuCpuPct() { return (this.s.cpu_pct / 10).toFixed(1); },

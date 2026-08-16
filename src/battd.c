@@ -365,14 +365,21 @@ static void handle_status(int fd) {
         if (bv > 0) bypass_on = 1;
     }
     int power_mw = 0;
+    /* 实时读取电流/电压（不依赖缓存）*/
+    int cur_raw = read_int(SYSFS "/current_now");
+    int vol_raw = read_int(SYSFS "/voltage_now");
+    int cur_ma = cur_raw / 1000;
+    int vol_mv = vol_raw / 1000;
+    /* usb 输入端（实时）优先 */
     int usb_curr = read_int(SYSFS_USB "/input_current_now");
     int usb_volt = read_int(SYSFS_USB "/voltage_now");
     if (usb_curr > 0 && usb_volt > 0) {
         power_mw = (int)(((long)usb_curr / 1000) * ((long)usb_volt / 1000) / 1000);
         if (strcmp(bat_status, "Charging") != 0) power_mw = -power_mw;
-    } else if (bat_curr != 0 && bat_volt > 0) {
-        power_mw = ((long)bat_volt * (bat_curr < 0 ? -bat_curr : bat_curr)) / 1000;
-        if (bat_curr > 0) power_mw = -power_mw;
+    } else if (cur_ma != 0 && vol_mv > 0) {
+        /* 电池侧：电流负=充电 → 功率正；电流正=放电 → 功率负 */
+        power_mw = ((long)vol_mv * (cur_ma < 0 ? -cur_ma : cur_ma)) / 1000;
+        if (cur_ma > 0) power_mw = -power_mw;
     }
     int cap_raw = read_int("/sys/class/power_supply/bms/capacity_raw");
     int capacity_disp = cap_raw > 0 ? cap_raw : bat_capacity * 100;
@@ -409,7 +416,7 @@ static void handle_status(int fd) {
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
         "\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld}",
-        bat_capacity, capacity_disp, bat_temp, bat_volt, bat_curr, bat_status,
+        bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
         cycle_count, health, health_rating,
