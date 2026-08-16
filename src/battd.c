@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.10"
+#define VERSION "v1.2.11"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -291,16 +291,20 @@ static void handle_charging_state(void) {
 
 static int in_night_window(void) {
     if (!night_enabled) return 0;
+    if (night_start_h == night_end_h) return 0;
     time_t t = time(NULL); struct tm *tm = localtime(&t);
     int h = tm->tm_hour;
     if (night_start_h < night_end_h) return h >= night_start_h && h < night_end_h;
-    return h >= night_start_h || h < night_end_h;
+    if (h >= night_start_h) return 1;
+    return h < night_end_h;
 }
 
 static void apply_night_mode(void) {
     if (!night_enabled) return;
     if (in_night_window() && bat_capacity >= charge_limit) {
         if (write_str(SYSFS "/input_suspend", "1") < 0) log_event("night write fail");
+    } else if (night_enabled && !in_night_window() && bat_capacity < charge_limit && bat_curr > 0) {
+        if (write_str(SYSFS "/input_suspend", "0") < 0) log_event("night resume fail");
     }
 }
 
