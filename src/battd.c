@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.15"
+#define VERSION "v1.2.16"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -558,7 +558,9 @@ static void handle_limit(int fd, const char *body) {
             else if (!strcmp(key, "ne")) night_end_h = atoi(dec);
             else if (!strcmp(key, "scene")) {
                 scene = atoi(dec);
-                if (scene == 3) { paused = 1; log_event("scene: trip pause"); }
+                if (scene == 1) { charge_limit = 70; temp_limit = 40; log_event("scene: gaming"); }
+                else if (scene == 2) { night_enabled = 1; log_event("scene: sleep"); }
+                else if (scene == 3) { paused = 1; log_event("scene: trip pause"); }
                 else if (scene == 0) { paused = 0; }
             }
             else if (!strcmp(key, "lang")) lang = atoi(dec);
