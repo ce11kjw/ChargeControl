@@ -121,6 +121,26 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
         <div x-show="s.temp > 0" style="color:#94a3b8">当前温度 <span x-text="s.temp + '°C'"></span> · 电压 <span x-text="s.voltage ? (s.voltage/1000).toFixed(3) + 'V' : '—'"></span></div>
         <div x-show="s.power_mw" style="color:#94a3b8">当前功率 <span x-text="powerDisplay()"></span></div>
       </div>
+    <div class="panel" style="margin-bottom:12px">
+      <h2>🔋 充电统计</h2>
+      <div class="row">
+        <span class="lbl">本次充电</span>
+        <span style="font-size:13px;color:#94a3b8" x-text="sessText()"></span>
+      </div>
+      <div class="row">
+        <span class="lbl">累计次数</span>
+        <span style="font-size:13px;color:#e2e8f0" x-text="s.stats_count + ' 次'"></span>
+      </div>
+      <div class="row">
+        <span class="lbl">累计时长</span>
+        <span style="font-size:13px;color:#e2e8f0" x-text="fmtMin(s.stats_min)"></span>
+      </div>
+      <div class="row">
+        <span class="lbl">累计充入</span>
+        <span style="font-size:13px;color:#e2e8f0" x-text="s.stats_mah + ' mAh'"></span>
+      </div>
+    </div>
+
     </div>
 
     <div class="temp-grid">
@@ -214,7 +234,7 @@ function app() {
   return {
     API_BASE: 'http://127.0.0.1:8800',
     tab: 'dash', 
-    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false },
+    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0 },
     logContent: '', lastUpdate: '', updateMsg: '', timer: null, chart: null, fullTimer: null,
 
     async fetchJson(url, opts) { try { const r = await fetch(url, opts); return await r.json(); } catch (e) { return null; } },
@@ -281,6 +301,18 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
     async toggleHistory() {
       this.s.history_enabled = this.s.history_enabled ? 0 : 1;
       await this.save();
+    },
+
+    sessText() {
+      if (this.s.sess_active) return '充电中 ' + this.fmtMin(this.s.sess_min) + ' · 已充入 ' + this.s.sess_mah + ' mAh';
+      if (this.s.sess_min > 0 || this.s.sess_mah > 0) return '上次 ' + this.fmtMin(this.s.sess_min) + ' · 充入 ' + this.s.sess_mah + ' mAh';
+      return '—';
+    },
+    fmtMin(m) {
+      if (!m) return '0 分';
+      if (m < 60) return m + ' 分';
+      const h = Math.floor(m / 60), mm = m % 60;
+      return h + ' 小时' + (mm ? ' ' + mm + ' 分' : '');
     },
 
     capDisplay() {

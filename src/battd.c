@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.4"
+#define VERSION "v1.2.5"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -45,6 +45,13 @@ static int proc_pid_val = 0;
 static int cpu_pct = 0;
 static int bypass_supported = 0;
 static char bypass_node[64] = "";
+/* 充电统计 */
+static time_t sess_start = 0;
+static int sess_start_cap = -1;
+static int sess_active = 0;
+static int sess_min = 0, sess_mah = 0;
+static int stats_count = 0;
+static long stats_min = 0, stats_mah = 0;
 
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 static char bat_status[32] = "Unknown";
@@ -105,6 +112,7 @@ static void update_temps(void) {
     }
 }
 
+static void handle_charging_state(void);
 static void update_battery(void) {
     char path[MAX_LINE]; int v;
     snprintf(path, sizeof(path), "%s/capacity", SYSFS);
@@ -146,6 +154,7 @@ static void update_battery(void) {
     else if (bat_capacity >= charge_limit && strcmp(bat_status, "Charging") == 0) strcpy(control_state, "suspended");
     else if (strcmp(bat_status, "Charging") == 0) strcpy(control_state, "charging");
     else strcpy(control_state, "idle");
+    handle_charging_state();
 }
 
 static void apply_control(void) {
@@ -215,6 +224,41 @@ static void save_config(void) {
     fprintf(f, "enabled=%d\n", limit_enabled);
     fprintf(f, "history_enabled=%d\n", history_enabled);
     fclose(f);
+}
+
+static void save_stats(void) {
+    FILE *f = fopen("/data/adb/battery-manager/stats.json", "w");
+    if (!f) return;
+    fprintf(f, "{\"count\":%d,\"min\":%ld,\"mah\":%ld}", stats_count, stats_min, stats_mah);
+    fclose(f);
+}
+static void load_stats(void) {
+    FILE *f = fopen("/data/adb/battery-manager/stats.json", "r");
+    if (!f) return;
+    if (fscanf(f, "{\"count\":%d,\"min\":%ld,\"mah\":%ld}", &stats_count, &stats_min, &stats_mah) < 3)
+        { stats_count = 0; stats_min = 0; stats_mah = 0; }
+    fclose(f);
+}
+static void handle_charging_state(void) {
+    int charging = strcmp(bat_status, "Charging") == 0;
+    if (charging && !sess_active) {
+        sess_start = time(NULL); sess_start_cap = bat_capacity;
+        sess_active = 1; sess_min = 0; sess_mah = 0;
+    } else if (charging) {
+        sess_min = (int)((time(NULL) - sess_start) / 60);
+    }
+    if (!charging && sess_active) {
+        sess_active = 0;
+        if (sess_min > 0 || sess_mah > 0) {
+            stats_count++; stats_min += sess_min; stats_mah += sess_mah;
+            save_stats();
+        }
+    }
+    if (sess_start_cap >= 0 && bat_capacity > sess_start_cap) {
+        int cf = read_int(SYSFS "/charge_full");
+        int chg_full = cf > 0 ? cf / 1000 : 4000;
+        sess_mah = ((bat_capacity - sess_start_cap) * chg_full) / 100;
+    }
 }
 
 static void push_history(void) {
@@ -362,7 +406,9 @@ static void handle_status(int fd) {
         "\"power_mw\":%d,\"est_full_min\":%d,"
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
-        "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,\"bypass_ok\":%d,\"bypass_on\":%d}",
+        "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
+        "\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
+        "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld}",
         bat_capacity, capacity_disp, bat_temp, bat_volt, bat_curr, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
@@ -370,7 +416,8 @@ static void handle_status(int fd) {
         charge_full, est_cycles_left,
         power_mw, est_full_min,
         usb_online, proto_name, pd_type, usb_power_max,
-        control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct, bypass_ok, bypass_on);
+        control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
+        bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah);
     send_resp(fd, 200, "application/json", body);
 }
 
@@ -533,7 +580,7 @@ static void handle_client(int fd) {
 static void on_sig(int sig) { (void)sig; running = 0; }
 
 int main(void) {
-    load_config(); last_save = time(NULL);
+    load_config(); load_stats(); last_save = time(NULL);
     update_battery();
     /* 探测旁路支持 */
     FILE *bf = popen("ls /sys/class/power_supply/*/bypass_charger /sys/class/power_supply/*/charge_bypass 2>/dev/null | head -1", "r");
