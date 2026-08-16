@@ -41,6 +41,7 @@ static long prev_proc_ticks = 0;
 static char proc_name_buf[32] = "";
 static int proc_pid_val = 0;
 static int cpu_pct = 0;
+static int bypass_supported = 0;
 
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 static char bat_status[32] = "Unknown";
@@ -277,7 +278,7 @@ static void handle_status(int fd) {
             if (p) {
                 p++; while (*p == ' ') p++;
                 long ut = 0, st = 0;
-                sscanf(p, "%*c %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %ld %ld", &ut, &st);
+                sscanf(p, "%*c %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %ld %ld", &ut, &st);
                 long now_pt = ut + st;
                 FILE *tf = fopen("/proc/stat", "r");
                 if (tf) { char tb[256]; if (fgets(tb, sizeof(tb), tf)) {
@@ -302,13 +303,13 @@ static void handle_status(int fd) {
         }
         fclose(sf);
     }
-    /* bypass 探测 */
-    int bypass_ok = 0, bypass_on = 0;
-    FILE *bf = popen("ls /sys/class/power_supply/*/bypass_charger /sys/class/power_supply/*/charge_bypass 2>/dev/null | head -1", "r");
-    if (bf) { char bb[64]; if (fgets(bb, sizeof(bb), bf)) {
-        bb[strcspn(bb, "\n")] = 0;
-        if (strlen(bb) > 0) { bypass_ok = 1; bypass_on = read_int(bb) > 0; }
-    } pclose(bf); }
+    /* bypass 状态（实时读节点值）*/
+    int bypass_ok = bypass_supported, bypass_on = 0;
+    if (bypass_ok) {
+        int bv = read_int(SYSFS_USB "/bypass_charger");
+        if (bv < 0) bv = read_int(SYSFS "/charge_bypass");
+        if (bv > 0) bypass_on = 1;
+    }
     int power_mw = 0;
     int usb_curr = read_int(SYSFS_USB "/input_current_now");
     int usb_volt = read_int(SYSFS_USB "/voltage_now");
@@ -404,9 +405,9 @@ static void handle_pause(int fd, const char *body) {
     } else {
         paused = 0;
         log_event("manual resume");
+    }
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
 }
-    }
 
 static void handle_export(int fd) {
     char buf[8192]; int n = 0;
@@ -498,6 +499,9 @@ static void on_sig(int sig) { (void)sig; running = 0; }
 int main(void) {
     load_config(); last_save = time(NULL);
     update_battery();
+    /* 探测旁路支持 */
+    FILE *bf = popen("ls /sys/class/power_supply/*/bypass_charger /sys/class/power_supply/*/charge_bypass 2>/dev/null | head -1", "r");
+    if (bf) { char bb[64]; if (fgets(bb, sizeof(bb), bf) && strlen(bb) > 0) bypass_supported = 1; pclose(bf); }
     log_event("ChargeControl 守护进程启动");
 
     int srv = socket(AF_INET, SOCK_STREAM, 0);
