@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.18"
+#define VERSION "v1.2.19"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -689,7 +689,7 @@ static void handle_client(int fd) {
     char buf[MAX_LINE]; int n = read(fd, buf, sizeof(buf)-1);
     if (n <= 0) return; buf[n] = '\0';
     char method[16], uri[256];
-    if (sscanf(buf, "%15s %255s", method, uri) != 2) return;
+    if (sscanf(buf, "%15s %255s", method, uri) != 2 || strlen(uri) >= 255) return;
     char *body = NULL;
     if (!strcmp(method, "POST")) {
         char *hp = strstr(buf, "\r\n\r\n");
