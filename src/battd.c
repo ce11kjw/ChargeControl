@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.5"
+#define VERSION "v1.2.8"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -51,6 +51,14 @@ static int sess_start_cap = -1;
 static int sess_active = 0;
 static int sess_min = 0, sess_mah = 0;
 static int stats_count = 0;
+static int night_enabled = 0;
+static int night_start_h = 23, night_end_h = 7;
+static int scene = 0;
+static char webhook_url[256] = "";
+static int lang = 0;
+static int theme = 0;
+static time_t session_30s = 0;
+static int alerted_high = 0;
 static long stats_min = 0, stats_mah = 0;
 
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
@@ -230,6 +238,28 @@ static void save_stats(void) {
     fprintf(f, "{\"count\":%d,\"min\":%ld,\"mah\":%ld}", stats_count, stats_min, stats_mah);
     fclose(f);
 }
+static void load_extras(void) {
+    FILE *f = fopen("/data/adb/battery-manager/extras.json", "r");
+    if (!f) return;
+    char buf[512]; size_t n = fread(buf, 1, sizeof(buf)-1, f); fclose(f);
+    buf[n] = 0;
+    char *p = strstr(buf, "\"webhook\":\"");
+    if (p) {
+        p += 11; int i = 0;
+        while (*p && *p != '"' && i < 255) webhook_url[i++] = *p++;
+        webhook_url[i] = 0;
+    }
+    sscanf(buf, "{\"night\":%d,\"ns\":%d,\"ne\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d}",
+        &night_enabled, &night_start_h, &night_end_h, &scene, &lang, &theme);
+}
+static void save_extras(void) {
+    FILE *f = fopen("/data/adb/battery-manager/extras.json", "w");
+    if (!f) return;
+    fprintf(f, "{\"night\":%d,\"ns\":%d,\"ne\":%d,\"scene\":%d,\"webhook\":\"%s\",\"lang\":%d,\"theme\":%d}",
+        night_enabled, night_start_h, night_end_h, scene, webhook_url, lang, theme);
+    fclose(f);
+}
+
 static void load_stats(void) {
     FILE *f = fopen("/data/adb/battery-manager/stats.json", "r");
     if (!f) return;
@@ -256,6 +286,69 @@ static void handle_charging_state(void) {
         int cf = read_int(SYSFS "/charge_full");
         int chg_full = cf > 0 ? cf / 1000 : 4000;
         sess_mah = ((bat_capacity - sess_start_cap) * chg_full) / 100;
+    }
+}
+
+static int in_night_window(void) {
+    if (!night_enabled) return 0;
+    time_t t = time(NULL); struct tm *tm = localtime(&t);
+    int h = tm->tm_hour;
+    if (night_start_h < night_end_h) return h >= night_start_h && h < night_end_h;
+    return h >= night_start_h || h < night_end_h;
+}
+
+static void apply_night_mode(void) {
+    if (!night_enabled) return;
+    if (in_night_window() && bat_capacity >= charge_limit) {
+        if (write_str(SYSFS "/input_suspend", "1") > 0) log_event("night: pause");
+    }
+}
+
+static void high_temp_alert(void) {
+    if (bat_temp >= 50 && !alerted_high) {
+        alerted_high = 1;
+        log_event("⚠️ high temp alert");
+        if (webhook_url[0]) {
+            char cmd[300];
+            snprintf(cmd, sizeof(cmd), "curl -s -m 5 -X POST -d 'temp=%d' '%s' >/dev/null 2>&1", bat_temp, webhook_url);
+            FILE *wh = popen(cmd, "r");
+            if (wh) pclose(wh);
+        }
+    }
+    if (bat_temp < 45) alerted_high = 0;
+}
+
+static char top_uid[15][64];
+static double top_mah[15];
+static int top_count = 0;
+static time_t top_last = 0;
+
+static void get_top_uid(void) {
+    time_t t = time(NULL);
+    if (t - top_last < 60) return;
+    top_last = t;
+    top_count = 0;
+    FILE *f = popen("dumpsys batterystats --checkin 2>/dev/null", "r");
+    if (!f) return;
+    char line[512];
+    struct uidmah_t { int uid; double mah; char name[64]; } tmp[200];
+    int n = 0;
+    while (fgets(line, sizeof(line), f) && n < 200) {
+        int uid; double mah; char pk[64];
+        if (sscanf(line, "9,%d,l,pwi,uid,%lf,", &uid, &mah) == 2) {
+            if (mah > 0) { tmp[n].uid = uid; tmp[n].mah = mah; tmp[n].name[0] = 0; n++; }
+        }
+        if (sscanf(line, "9,0,i,uid,%d,%63[^,]", &uid, pk) == 2) {
+            for (int i = 0; i < n; i++) if (tmp[i].uid == uid) { strncpy(tmp[i].name, pk, 63); break; }
+        }
+    }
+    pclose(f);
+    for (int i = 0; i < n; i++) for (int j = i+1; j < n; j++)
+        if (tmp[j].mah > tmp[i].mah) { struct uidmah_t x = tmp[i]; tmp[i] = tmp[j]; tmp[j] = x; }
+    top_count = n < 10 ? n : 10;
+    for (int i = 0; i < top_count; i++) {
+        top_mah[i] = tmp[i].mah;
+        snprintf(top_uid[i], 64, "%s", tmp[i].name[0] ? tmp[i].name : "uid1000");
     }
 }
 
@@ -287,6 +380,16 @@ static void push_history(void) {
             (long)now, bat_capacity, bat_temp, bat_volt, bat_status);
     fclose(f);
     last_save = now;
+    if (sess_active && now - session_30s >= 30) {
+        session_30s = now;
+        FILE *sf = fopen("/data/adb/battery-manager/session.jsonl", "a");
+        if (sf) {
+            fprintf(sf, "{\"t\":%ld,\"c\":%d,\"mah\":%d,\"tmp\":%d}\n",
+                (long)now, bat_capacity, sess_mah, bat_temp);
+            fclose(sf);
+        }
+    }
+    if (!sess_active) session_30s = 0;
 }
 
 static char *history_json(void) {
@@ -413,7 +516,7 @@ static void handle_status(int fd) {
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
         "\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
-        "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld}",
+        "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"top_n\":%d}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
@@ -422,7 +525,7 @@ static void handle_status(int fd) {
         power_mw, est_full_min,
         usb_online, proto_name, pd_type, usb_power_max,
         control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
-        bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah);
+        bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high, top_count);
     send_resp(fd, 200, "application/json", body);
 }
 
@@ -442,7 +545,14 @@ static void handle_limit(int fd, const char *body) {
             else if (!strcmp(key, "enabled")) limit_enabled = atoi(dec);
             else if (!strcmp(key, "history_enabled")) history_enabled = atoi(dec);
             else if (!strcmp(key, "bypass") && bypass_supported) write_str(bypass_node, atoi(dec) ? "1" : "0");
+            else if (!strcmp(key, "night")) night_enabled = atoi(dec);
+            else if (!strcmp(key, "ns")) night_start_h = atoi(dec);
+            else if (!strcmp(key, "ne")) night_end_h = atoi(dec);
+            else if (!strcmp(key, "scene")) scene = atoi(dec);
+            else if (!strcmp(key, "lang")) lang = atoi(dec);
+            else if (!strcmp(key, "theme")) theme = atoi(dec);
         }
+        save_extras();
         free(copy);
         save_config(); apply_control();
         log_event("配置已更新");
@@ -577,6 +687,17 @@ static void handle_client(int fd) {
     }
     if (!strcmp(uri, "/api/export")) { handle_export(fd); return; }
     if (!strcmp(uri, "/api/update-check")) { handle_update_check(fd); return; }
+    if (!strcmp(uri, "/api/topuid")) {
+        get_top_uid();
+        char out[2560]; int n = 0;
+        n += snprintf(out+n, sizeof(out)-n, "{\"uids\":[");
+        for (int i = 0; i < top_count; i++) {
+            n += snprintf(out+n, sizeof(out)-n, "%s{\"n\":\"%s\",\"m\":%.2f}", i?",":"", top_uid[i], top_mah[i]);
+        }
+        n += snprintf(out+n, sizeof(out)-n, "]}");
+        send_resp(fd, 200, "application/json", out);
+        return;
+    }
     if (!strcmp(uri, "/api/history")) { char *j = history_json(); send_resp(fd, 200, "application/json", j); free(j); return; }
     if (!strcmp(method, "GET")) serve_file(fd, uri);
     else send_resp(fd, 405, "text/plain", "Method Not Allowed");
@@ -585,7 +706,7 @@ static void handle_client(int fd) {
 static void on_sig(int sig) { (void)sig; running = 0; }
 
 int main(void) {
-    load_config(); load_stats(); last_save = time(NULL);
+    load_config(); load_stats(); load_extras(); last_save = time(NULL);
     update_battery();
     /* 探测旁路支持 */
     FILE *bf = popen("ls /sys/class/power_supply/*/bypass_charger /sys/class/power_supply/*/charge_bypass 2>/dev/null | head -1", "r");
@@ -616,6 +737,7 @@ int main(void) {
         time_t now = time(NULL);
         if (now - last_poll >= (time_t)interval) {
             last_poll = now; update_battery(); apply_control(); push_history();
+            apply_night_mode(); high_temp_alert(); get_top_uid();
         }
     }
     log_event("ChargeControl 守护进程停止");
