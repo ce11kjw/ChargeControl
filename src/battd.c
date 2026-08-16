@@ -42,6 +42,7 @@ static char proc_name_buf[32] = "";
 static int proc_pid_val = 0;
 static int cpu_pct = 0;
 static int bypass_supported = 0;
+static char bypass_node[64] = "";
 
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 static char bat_status[32] = "Unknown";
@@ -107,7 +108,7 @@ static void update_battery(void) {
             soc_temp = tval / 1000;
         else if (gpu_temp < 0 && (strstr(tname, "gpu1") || strstr(tname, "gpu-therm") || strstr(tname, "gpu_therm")))
             gpu_temp = tval / 1000;
-        else if (chg_temp < 0 && (strstr(tname, "mtk-master-charger") || strstr(tname, "charger") || strstr(tname, "bq") || strstr(tname, "smb")))
+        else if (chg_temp < 0 && (strstr(tname, "mtk-master-charger") || strstr(tname, "usb-therm") || strstr(tname, "bq") || strstr(tname, "smb")))
             chg_temp = tval / 1000;
         else if (case_temp < 0 && (strstr(tname, "X7_therm") || strstr(tname, "charger2") || strstr(tname, "case") || strstr(tname, "skin") || strstr(tname, "quiet_therm")))
             case_temp = tval / 1000;
@@ -322,13 +323,13 @@ static void handle_status(int fd) {
     }
     int cap_raw = read_int("/sys/class/power_supply/bms/capacity_raw");
     int capacity_disp = cap_raw > 0 ? cap_raw : bat_capacity * 100;
-    int paused = read_int(SYSFS "/input_suspend");
-    if (paused < 0) paused = read_int(SYSFS_USB "/input_suspend");
-    if (paused < 0) paused = 0;
+    int hw_paused = read_int(SYSFS "/input_suspend");
+    if (hw_paused < 0) hw_paused = read_int(SYSFS_USB "/input_suspend");
+    if (hw_paused < 0) hw_paused = 0;
     int est_full_min = 0;
     if (power_mw > 0 && charge_limit > bat_capacity && charge_full > 0) {
         int remain = ((charge_limit - bat_capacity) * charge_full) / 100;
-        int cmA = power_mw / (bat_volt > 0 ? bat_volt : 4000);
+        int cmA = power_mw * 1000 / (bat_volt > 0 ? bat_volt : 4000);
         if (cmA > 0) est_full_min = (remain * 60) / cmA;
     }
     const char *health_rating = "未知";
@@ -360,7 +361,7 @@ static void handle_status(int fd) {
         charge_full, est_cycles_left,
         power_mw, est_full_min,
         usb_online, proto_name, pd_type, usb_power_max,
-        control_state, full_once, (long)full_until, history_enabled, paused, proc_name_buf, proc_pid_val, cpu_pct, bypass_ok, bypass_on);
+        control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct, bypass_ok, bypass_on);
     send_resp(fd, 200, "application/json", body);
 }
 
@@ -379,6 +380,7 @@ static void handle_limit(int fd, const char *body) {
             else if (!strcmp(key, "interval")) interval = atoi(dec);
             else if (!strcmp(key, "enabled")) limit_enabled = atoi(dec);
             else if (!strcmp(key, "history_enabled")) history_enabled = atoi(dec);
+            else if (!strcmp(key, "bypass") && bypass_supported) write_str(bypass_node, atoi(dec) ? "1" : "0");
         }
         free(copy);
         save_config(); apply_control();
@@ -501,7 +503,7 @@ int main(void) {
     update_battery();
     /* 探测旁路支持 */
     FILE *bf = popen("ls /sys/class/power_supply/*/bypass_charger /sys/class/power_supply/*/charge_bypass 2>/dev/null | head -1", "r");
-    if (bf) { char bb[64]; if (fgets(bb, sizeof(bb), bf) && strlen(bb) > 0) bypass_supported = 1; pclose(bf); }
+    if (bf) { char bb[64]; if (fgets(bb, sizeof(bb), bf)) { size_t bl = strlen(bb); while (bl > 0 && (bb[bl-1]=='\n'||bb[bl-1]==' ')) bb[--bl]='\0'; if (bl>0) { bypass_supported = 1; strncpy(bypass_node, bb, sizeof(bypass_node)-1); } } pclose(bf); }
     log_event("ChargeControl 守护进程启动");
 
     int srv = socket(AF_INET, SOCK_STREAM, 0);
