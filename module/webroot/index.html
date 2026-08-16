@@ -9,6 +9,13 @@
 <style>
 * { margin:0; padding:0; box-sizing:border-box; font-family:system-ui,-apple-system,sans-serif; }
 :root { --bg:#0f172a; --card:#1e293b; --accent:#22d3ee; --green:#4ade80; --red:#f87171; --orange:#fb923c; --amber:#fbbf24; --blue:#60a5fa; --gray:#64748b; }
+:root[data-theme="1"] { --bg:#f1f5f9; --card:#ffffff; --accent:#0891b2; --green:#16a34a; --red:#dc2626; --orange:#ea580c; --amber:#d97706; --blue:#2563eb; --gray:#94a3b8; }
+:root[data-theme="1"] body { color:#0f172a; }
+:root[data-theme="1"] .tab { color:#475569; }
+:root[data-theme="1"] .row { border-color:#e2e8f0; }
+:root[data-theme="1"] .inp, :root[data-theme="1"] input[type="text"], :root[data-theme="1"] select { background:#f8fafc !important; border-color:#cbd5e1 !important; color:#0f172a !important; }
+:root[data-theme="1"] .temp-item, :root[data-theme="1"] .health-box, :root[data-theme="1"] .big-cap, :root[data-theme="1"] .card, :root[data-theme="1"] .panel { color:#0f172a; }
+:root[data-theme="1"] .log-box { background:#f8fafc; color:#1e293b; border-color:#cbd5e1; }
 body { background:var(--bg); color:#e2e8f0; min-height:100vh; padding-bottom:20px; }
 .container { max-width:560px; margin:0 auto; padding:16px; }
 h1 { font-size:20px; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
@@ -377,6 +384,7 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
     async setExtras(obj) {
       const p = new URLSearchParams(obj);
       await this.fetchJson(this.API_BASE + '/api/limit', { method:'POST', body: p.toString(), headers:{'Content-Type':'application/x-www-form-urlencoded'} });
+      document.documentElement.setAttribute('data-theme', String(this.s.theme));
     },
     async loadTopUid() {
       const d = await this.fetchJson(this.API_BASE + '/api/topuid');
@@ -478,7 +486,7 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
     tempColor(t) { if (t <= 0) return 'var(--gray)'; return t < 45 ? 'var(--green)' : t < 55 ? 'var(--orange)' : 'var(--red)'; },
 
     init() {
-      this.poll(); this.loadHistory(); this.loadTopUid();
+      this.poll(); this.loadHistory(); this.loadTopUid(); document.documentElement.setAttribute('data-theme', String(this.s.theme));
       this.timer = setInterval(() => this.poll(), 3000);
       setInterval(() => this.loadHistory(), 30000); setInterval(() => this.loadTopUid(), 60000);
       setInterval(() => { if (this.tab === 'log') this.refreshLog(); }, 10000);
