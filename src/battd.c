@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.16"
+#define VERSION "v1.2.17"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -317,10 +317,20 @@ static void high_temp_alert(void) {
         alerted_high = 1;
         log_event("⚠️ high temp alert");
         if (webhook_url[0]) {
-            char cmd[300];
-            snprintf(cmd, sizeof(cmd), "curl -s -m 5 -X POST -d 'temp=%d' '%s' >/dev/null 2>&1", bat_temp, webhook_url);
-            FILE *wh = popen(cmd, "r");
-            if (wh) pclose(wh);
+            char cmd[512];
+            /* 安全：URL 必须是 http:// 或 https:// 开头，且不含 shell 特殊字符 */
+            if ((strncmp(webhook_url, "http://", 7) == 0 || strncmp(webhook_url, "https://", 8) == 0) &&
+                !strchr(webhook_url, '\'') && !strchr(webhook_url, '"') &&
+                !strchr(webhook_url, '$') && !strchr(webhook_url, ';') &&
+                !strchr(webhook_url, '`') && !strchr(webhook_url, '\\') &&
+                !strchr(webhook_url, '|') && !strchr(webhook_url, '&') &&
+                !strchr(webhook_url, '<')) {
+                snprintf(cmd, sizeof(cmd), "curl -s -m 5 -X POST -d 'temp=%d' '%s' >/dev/null 2>&1", bat_temp, webhook_url);
+                FILE *wh = popen(cmd, "r");
+                if (wh) pclose(wh);
+            } else {
+                log_event("webhook URL invalid chars");
+            }
         }
     }
     if (bat_temp < 45) alerted_high = 0;
