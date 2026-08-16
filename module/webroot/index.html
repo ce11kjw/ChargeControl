@@ -220,20 +220,28 @@ function app() {
       const caps = h.map(x => x.c);
       const temps = h.map(x => x.tmp);
       if (!this.chart) {
+        const grad1 = document.createElement('canvas').getContext('2d').createLinearGradient(0,0,0,220);
+        grad1.addColorStop(0,'rgba(74,222,128,.35)'); grad1.addColorStop(1,'rgba(74,222,128,0)');
+        const grad2 = document.createElement('canvas').getContext('2d').createLinearGradient(0,0,0,220);
+        grad2.addColorStop(0,'rgba(251,146,60,.35)'); grad2.addColorStop(1,'rgba(251,146,60,0)');
         this.chart = new Chart(document.getElementById('chart'), {
           type: 'line',
           data: { labels, datasets: [
-            { label:'电量 %', data:caps, borderColor:'#4ade80', tension:.3, yAxisID:'y', pointRadius:0, borderWidth:2 },
-            { label:'温度 °C', data:temps, borderColor:'#fb923c', tension:.3, yAxisID:'y1', pointRadius:0, borderWidth:2 }
+            { label:'电量 %', data:caps, borderColor:'#4ade80', backgroundColor:grad1, fill:true, tension:.35, yAxisID:'y', pointRadius:0, pointHoverRadius:4, borderWidth:2 },
+            { label:'温度 °C', data:temps, borderColor:'#fb923c', backgroundColor:grad2, fill:true, tension:.35, yAxisID:'y1', pointRadius:0, pointHoverRadius:4, borderWidth:2 }
           ]},
           options: {
             responsive: true, maintainAspectRatio: false,
+            interaction:{ mode:'index', intersect:false },
             scales: {
-              y:{ position:'left', min:0, max:100, grid:{color:'#334155'}, ticks:{color:'#94a3b8'} },
-              y1:{ position:'right', min:20, max:60, grid:{display:false}, ticks:{color:'#94a3b8'} },
-              x:{ ticks:{color:'#94a3b8', maxTicksLimit:6} }
+              y:{ position:'left', suggestedMin:50, suggestedMax:100, grid:{color:'#334155'}, ticks:{color:'#94a3b8'} },
+              y1:{ position:'right', suggestedMin:30, suggestedMax:50, grid:{display:false}, ticks:{color:'#94a3b8'} },
+              x:{ ticks:{color:'#94a3b8', maxTicksLimit:8, maxRotation:0} }
             },
-            plugins:{ legend:{ labels:{ color:'#e2e8f0' } } }
+            plugins:{
+              legend:{ labels:{ color:'#e2e8f0', boxWidth:14, font:{size:11} } },
+              tooltip:{ backgroundColor:'#1e293b', borderColor:'#334155', borderWidth:1, titleColor:'#e2e8f0', bodyColor:'#94a3b8', callbacks:{ label:(c)=> c.dataset.label + ': ' + (c.dataset.yAxisID==='y' ? c.parsed.y + '%' : c.parsed.y + '°C') } }
+            }
           }
         });
       } else {
