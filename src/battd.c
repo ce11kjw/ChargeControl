@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.13"
+#define VERSION "v1.2.14"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -174,7 +174,9 @@ static void apply_control(void) {
         return;
     }
     if (temp_suspended) {
-        if (write_str(path, "0") < 0) log_event("写input_suspend失败(恢复)");
+        if (!paused) {
+            if (write_str(path, "0") < 0) log_event("写input_suspend失败(恢复)");
+        }
         temp_suspended = 0;
     }
     if (paused) {
@@ -560,7 +562,7 @@ static void handle_limit(int fd, const char *body) {
         }
         save_extras();
         free(copy);
-        save_config(); apply_control();
+        save_config(); apply_control(); apply_night_mode();
         log_event("配置已更新");
     }
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
