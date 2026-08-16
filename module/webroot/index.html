@@ -80,6 +80,7 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
   <div x-show="tab==='dash'">
     <div class="banner" :class="bannerClass()" x-show="true">
       <span x-text="bannerText()"></span>
+      <span x-show="s.alerted" style="color:var(--red);font-weight:700;margin-left:8px" x-text="t('alert_high')"></span>
     </div>
 
     <div class="big-cap">
@@ -153,8 +154,27 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
     </div>
   </div>
 
-  <div x-show="tab==='set'">
+  <div class="panel">
+      <h2 x-text="t('night')"></h2>
+      <div class="row"><span class="lbl">开始</span>
+        <input type="number" class="inp" x-model.number="s.ns" min="0" max="23" @change="setExtras({ns: $event.target.value})">
+        <span class="lbl">结束</span>
+        <input type="number" class="inp" x-model.number="s.ne" min="0" max="23" @change="setExtras({ne: $event.target.value})"></div>
+      <div class="row"><span class="lbl">启用</span>
+        <div class="toggle" :class="s.night ? 'on' : ''" @click="setExtras({night: s.night?0:1})"></div></div>
+    </div>
+<div x-show="tab==='set'">
     <div class="panel">
+      <h2 x-text="t('scene')"></h2>
+      <div class="row"><span class="lbl" x-text="s.scene==1?t('scene_gaming'):s.scene==2?t('scene_sleep'):s.scene==3?t('scene_trip'):t('scene_custom')"></span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <button class="btn" @click="applyScene(1)">🎮 游戏</button>
+        <button class="btn" @click="applyScene(2)">😴 睡眠</button>
+        <button class="btn" @click="applyScene(3)">✈️ 出差</button>
+        <button class="btn gray" @click="applyScene(0)">⚙️ 自定义</button>
+      </div>
+    </div>
+<div class="panel">
       <h2>⚙️ 充电控制</h2>
       <div class="row">
         <span class="lbl">启用充电限制</span>
@@ -190,6 +210,13 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
       <button class="btn" @click="togglePause()" :disabled="s.control_state === 'temp_protect'" x-text="s.control_state === 'temp_protect' ? '温度保护优先' : (s.paused ? '恢复充电' : '暂停充电')" style="opacity:s.control_state === 'temp_protect' ? .5 : 1"></button>
     </div>
 
+<div class="panel">
+      <h2 x-text="t('webhook')"></h2>
+      <div class="row">
+        <input type="text" style="width:100%;background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px;font-size:12px" placeholder="https://..." x-model="webhookUrl" @change="setExtras({webhook: webhookUrl})">
+      </div>
+      <div class="row" style="font-size:11px;color:#94a3b8" x-text="t('webhook_hint')"></div>
+    </div>
     <div class="panel">
       <h2>📜 历史记录</h2>
       <div class="row">
@@ -199,6 +226,17 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
     </div>
   </div>
 
+<div class="panel">
+      <h2 x-text="t('topuid')"></h2>
+      <div x-show="s.topUid.length === 0" style="color:#94a3b8;font-size:12px" x-text="t('topuid_loading')"></div>
+      <template x-for="(u, i) in s.topUid" :key="i">
+        <div style="display:flex;align-items:center;gap:8px;background:#0f172a;padding:8px 12px;border-radius:8px;margin-bottom:4px">
+          <span style="font-size:11px;color:#94a3b8;width:18px" x-text="(i+1)+'.'"></span>
+          <span style="flex:1;font-size:13px;color:#e2e8f0;word-break:break-all" x-text="u.n"></span>
+          <span style="font-size:12px;color:var(--orange)" x-text="u.m + ' mAh'"></span>
+        </div>
+      </template>
+    </div>
   <div x-show="tab==='stats'">
     <div class="panel">
       <h2>🔋 充电统计</h2>
@@ -225,6 +263,21 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
     </div>
   </div>
 
+<div class="panel">
+      <h2 x-text="t('lang') + ' / ' + t('theme')"></h2>
+      <div class="row"><span class="lbl">语言</span>
+        <select style="background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:4px" @change="setExtras({lang: $event.target.value})">
+          <option value="0" :selected="s.lang==0">简体中文</option>
+          <option value="1" :selected="s.lang==1">English</option>
+        </select>
+      </div>
+      <div class="row"><span class="lbl">主题</span>
+        <select style="background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:4px" @change="setExtras({theme: $event.target.value})">
+          <option value="0" :selected="s.theme==0">深色</option>
+          <option value="1" :selected="s.theme==1">浅色</option>
+        </select>
+      </div>
+    </div>
   <div x-show="tab==='log'">
     <div class="panel">
       <h2>📜 运行日志</h2>
@@ -241,8 +294,10 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
 function app() {
   return {
     API_BASE: 'http://127.0.0.1:8800',
+    i18n: {zh: {night:'🌙 夜间模式', scene:'🎮 快捷场景', webhook:'🔔 WebHook', topuid:'🏆 耗电排行', lang:'🌐 语言', theme:'🎨 主题', scene_gaming:'🎮 游戏 (70%)', scene_sleep:'😴 睡眠 (夜间模式)', scene_trip:'✈️ 出差 (停充)', scene_custom:'⚙️ 自定义', webhook_hint:'WebHook URL (温度>50°C 触发)', topuid_loading:'加载中...', alert_high:'⚠️ 高温告警中'}, en: {night:'🌙 Night Mode', scene:'🎮 Scenes', webhook:'🔔 WebHook', topuid:'🏆 Top Power', lang:'🌐 Language', theme:'🎨 Theme', scene_gaming:'🎮 Gaming (70%)', scene_sleep:'😴 Sleep (Night)', scene_trip:'✈️ Trip (Pause)', scene_custom:'⚙️ Custom', webhook_hint:'WebHook URL (triggered temp>50°C)', topuid_loading:'Loading...', alert_high:'⚠️ High Temp Alert'}},
+    t(k) { return (this.i18n[this.s.lang?'en':'zh']||{})[k] || k; },
     tab: 'dash', 
-    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, scene:0, alerted:0, topUid:[], lang:0, theme:0 },
+    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, topUid:[], lang:0, theme:0, webhookUrl:'' },
     logContent: '', lastUpdate: '', updateMsg: '', timer: null, chart: null, fullTimer: null,
 
     async fetchJson(url, opts) { try { const r = await fetch(url, opts); return await r.json(); } catch (e) { return null; } },
@@ -309,6 +364,23 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
     async toggleHistory() {
       this.s.history_enabled = this.s.history_enabled ? 0 : 1;
       await this.save();
+    },
+
+    async applyScene(sc) {
+      this.s.scene = sc;
+      if (sc === 1) { this.s.charge_limit = 70; this.s.temp_limit = 40; }
+      else if (sc === 2) { this.s.night = 1; }
+      else if (sc === 3) { await this.togglePause(); }
+      await this.save();
+      await this.setExtras({scene: sc});
+    },
+    async setExtras(obj) {
+      const p = new URLSearchParams(obj);
+      await this.fetchJson(this.API_BASE + '/api/limit', { method:'POST', body: p.toString(), headers:{'Content-Type':'application/x-www-form-urlencoded'} });
+    },
+    async loadTopUid() {
+      const d = await this.fetchJson(this.API_BASE + '/api/topuid');
+      if (d && d.uids) { this.s.topUid = d.uids; }
     },
 
     sessText() {
@@ -406,9 +478,9 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
     tempColor(t) { if (t <= 0) return 'var(--gray)'; return t < 45 ? 'var(--green)' : t < 55 ? 'var(--orange)' : 'var(--red)'; },
 
     init() {
-      this.poll(); this.loadHistory();
+      this.poll(); this.loadHistory(); this.loadTopUid();
       this.timer = setInterval(() => this.poll(), 3000);
-      setInterval(() => this.loadHistory(), 30000);
+      setInterval(() => this.loadHistory(), 30000); setInterval(() => this.loadTopUid(), 60000);
       setInterval(() => { if (this.tab === 'log') this.refreshLog(); }, 10000);
     }
   };
