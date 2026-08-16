@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.19"
+#define VERSION "v1.2.20"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -634,10 +634,10 @@ static void handle_export(int fd) {
     char buf[8192]; int n = 0;
     n += snprintf(buf+n, sizeof(buf)-n, "=== ChargeControl 导出 ===\n时间: %ld\n\n--- 配置 ---\n", (long)time(NULL));
     FILE *f = fopen(CONFIG, "r");
-    if (f) { while (n < (int)sizeof(buf)-256 && fgets(buf+n, sizeof(buf)-n, f)) n += strlen(buf+n); fclose(f); }
+    if (f) { char line[256]; while (n < (int)sizeof(buf)-256 && fgets(line, sizeof(line), f)) n += snprintf(buf+n, sizeof(buf)-n, "%s", line); fclose(f); }
     n += snprintf(buf+n, sizeof(buf)-n, "\n--- 日志 ---\n");
     f = fopen(LOGFILE, "r");
-    if (f) { while (n < (int)sizeof(buf)-256 && fgets(buf+n, sizeof(buf)-n, f)) n += strlen(buf+n); fclose(f); }
+    if (f) { char line[256]; while (n < (int)sizeof(buf)-256 && fgets(line, sizeof(line), f)) n += snprintf(buf+n, sizeof(buf)-n, "%s", line); fclose(f); }
     n += snprintf(buf+n, sizeof(buf)-n, "\n--- 历史 (最后20条) ---\n");
     f = fopen(HISTORY, "r");
     if (f) {
