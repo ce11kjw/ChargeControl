@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <time.h>
+#include <ctype.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -23,6 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
+#define VERSION "v1.2.4"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -83,6 +85,26 @@ static void log_event(const char *msg) {
     fclose(f);
 }
 
+static void update_temps(void) {
+    soc_temp = -1; gpu_temp = -1; chg_temp = -1; case_temp = -1;
+    for (int i = 0; i < 100; i++) {
+        char tzpath[128]; snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/type", THERMAL, i);
+        char tname[64];
+        if (read_str(tzpath, tname, sizeof(tname)) <= 0) continue;
+        snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/temp", THERMAL, i);
+        int tval = read_int(tzpath);
+        if (tval < 0) continue;
+        if (soc_temp < 0 && (strstr(tname, "soc_max") || strstr(tname, "tsens") || strstr(tname, "cpu-therm") || strstr(tname, "cpu_max") || strstr(tname, "cpuss") || strstr(tname, "cpu_therm") || strstr(tname, "soc_therm")))
+            soc_temp = tval / 1000;
+        else if (gpu_temp < 0 && (strstr(tname, "gpu1") || strstr(tname, "gpu-therm") || strstr(tname, "gpu_therm") || strstr(tname, "gpu-max") || strstr(tname, "gpu_max") || strstr(tname, "gpu-thermal") || strstr(tname, "gpu_thermal")))
+            gpu_temp = tval / 1000;
+        else if (chg_temp < 0 && (strstr(tname, "mtk-master-charger") || strstr(tname, "usb-therm") || strstr(tname, "bq") || strstr(tname, "smb") || strstr(tname, "charger-thermal") || strstr(tname, "charger_thermal")))
+            chg_temp = tval / 1000;
+        else if (case_temp < 0 && (strstr(tname, "X7_therm") || strstr(tname, "charger2") || strstr(tname, "case") || strstr(tname, "skin") || strstr(tname, "quiet_therm") || strstr(tname, "shell") || strstr(tname, "frame") || strstr(tname, "back_therm")))
+            case_temp = tval / 1000;
+    }
+}
+
 static void update_battery(void) {
     char path[MAX_LINE]; int v;
     snprintf(path, sizeof(path), "%s/capacity", SYSFS);
@@ -96,23 +118,7 @@ static void update_battery(void) {
     snprintf(path, sizeof(path), "%s/status", SYSFS);
     read_str(path, bat_status, sizeof(bat_status));
 
-    soc_temp = -1; gpu_temp = -1; chg_temp = -1; case_temp = -1;
-    for (int i = 0; i < 100; i++) {
-        char tzpath[128]; snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/type", THERMAL, i);
-        char tname[64];
-        if (read_str(tzpath, tname, sizeof(tname)) <= 0) continue;
-        snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/temp", THERMAL, i);
-        int tval = read_int(tzpath);
-        if (tval < 0) continue;
-        if (soc_temp < 0 && (strstr(tname, "soc_max") || strstr(tname, "tsens") || strstr(tname, "cpu-therm") || strstr(tname, "cpu_max") || strstr(tname, "cpuss")))
-            soc_temp = tval / 1000;
-        else if (gpu_temp < 0 && (strstr(tname, "gpu1") || strstr(tname, "gpu-therm") || strstr(tname, "gpu_therm")))
-            gpu_temp = tval / 1000;
-        else if (chg_temp < 0 && (strstr(tname, "mtk-master-charger") || strstr(tname, "usb-therm") || strstr(tname, "bq") || strstr(tname, "smb")))
-            chg_temp = tval / 1000;
-        else if (case_temp < 0 && (strstr(tname, "X7_therm") || strstr(tname, "charger2") || strstr(tname, "case") || strstr(tname, "skin") || strstr(tname, "quiet_therm")))
-            case_temp = tval / 1000;
-    }
+    update_temps();
 
     snprintf(path, sizeof(path), "%s/cycle_count", SYSFS);
     if ((v = read_int(path)) >= 0) cycle_count = v;
@@ -271,6 +277,7 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
 
 static void handle_status(int fd) {
     char body[2048];
+    update_temps();
     int charge_full = read_int(SYSFS "/charge_full") / 1000;
 
     /* 自身进程信息 */
@@ -317,7 +324,7 @@ static void handle_status(int fd) {
     int usb_curr = read_int(SYSFS_USB "/input_current_now");
     int usb_volt = read_int(SYSFS_USB "/voltage_now");
     if (usb_curr > 0 && usb_volt > 0) {
-        power_mw = ((long)usb_curr * usb_volt) / 1000;
+        power_mw = (int)(((long)usb_curr / 1000) * ((long)usb_volt / 1000) / 1000);
         if (strcmp(bat_status, "Charging") != 0) power_mw = -power_mw;
     } else if (bat_curr != 0 && bat_volt > 0) {
         power_mw = ((long)bat_volt * (bat_curr < 0 ? -bat_curr : bat_curr)) / 1000;
@@ -413,6 +420,30 @@ static void handle_pause(int fd, const char *body) {
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
 }
 
+static int ver_cmp(const char *a, const char *b) {
+    int na = 0, nb = 0;
+    const char *pa = a; while (*pa && !isdigit(*pa)) pa++;
+    const char *pb = b; while (*pb && !isdigit(*pb)) pb++;
+    int va = atoi(pa), vb = atoi(pb);
+    return va - vb;
+}
+
+static void handle_update_check(int fd) {
+    FILE *cf = popen("curl -s --max-time 8 https://api.github.com/repos/ce11kjw/ChargeControl/releases/latest", "r");
+    if (!cf) { send_resp(fd, 200, "application/json", "{\"update_available\":false,\"error\":\"network\"}"); return; }
+    char cbuf[2048]; size_t cl = fread(cbuf, 1, sizeof(cbuf)-1, cf); pclose(cf);
+    cbuf[cl] = '\0';
+    char *tag = strstr(cbuf, "\"tag_name\":\"");
+    if (!tag) { send_resp(fd, 200, "application/json", "{\"update_available\":false,\"error\":\"parse\"}"); return; }
+    tag += 12; char latest[32]; int i = 0;
+    while (*tag && *tag != '"' && i < 31) latest[i++] = *tag++;
+    latest[i] = '\0';
+    int newer = ver_cmp(latest, VERSION);
+    char resp[256];
+    snprintf(resp, sizeof(resp), "{\"update_available\":%s,\"latest\":\"%s\",\"current\":\"%s\"}", newer > 0 ? "true" : "false", latest, VERSION);
+    send_resp(fd, 200, "application/json", resp);
+}
+
 static void handle_export(int fd) {
     char buf[8192]; int n = 0;
     n += snprintf(buf+n, sizeof(buf)-n, "=== ChargeControl 导出 ===\n时间: %ld\n\n--- 配置 ---\n", (long)time(NULL));
@@ -493,6 +524,7 @@ static void handle_client(int fd) {
         return;
     }
     if (!strcmp(uri, "/api/export")) { handle_export(fd); return; }
+    if (!strcmp(uri, "/api/update-check")) { handle_update_check(fd); return; }
     if (!strcmp(uri, "/api/history")) { char *j = history_json(); send_resp(fd, 200, "application/json", j); free(j); return; }
     if (!strcmp(method, "GET")) serve_file(fd, uri);
     else send_resp(fd, 405, "text/plain", "Method Not Allowed");

@@ -68,7 +68,7 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.2.3</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.4</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'">📊 仪表盘</div>
@@ -101,7 +101,7 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
       <div class="card">
         <div class="lbl">守护进程</div>
         <div class="val" style="font-size:20px" x-text="s.proc_name || '—'"></div>
-        <div class="sub" x-text="'PID ' + (s.proc_pid || '—') + '  CPU ' + (s.cpu_pct ? (cpuCpuPct() + '%') : '—')"></div>
+        <div class="sub" x-text="'PID ' + (s.proc_pid || '—') + '  CPU ' + (s.cpu_pct >= 0 ? (cpuCpuPct() + '%') : '—')"></div>
       </div>
       <div class="card">
         <div class="lbl">循环次数</div>
@@ -117,6 +117,9 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
         <div x-show="s.charge_full_mah > 0">满充 <span x-text="s.charge_full_mah + 'mAh'"></span> / 设计 <span>5380mAh</span></div>
         <div x-show="s.est_cycles_left > 0">剩余约 <span x-text="s.est_cycles_left"></span> 次循环 (至60%)</div>
         <div x-show="s.health > 0 && s.health < 80" style="color:var(--red)">&#x26a0;&#xfe0f; 健康度低于80%</div>
+        <div x-show="s.cycle_count >= 0" style="color:#94a3b8">已循环 <span x-text="s.cycle_count"></span> 次 · 衰减 <span x-text="s.health >= 0 ? (100 - s.health).toFixed(1) + '%' : '—'"></span></div>
+        <div x-show="s.temp > 0" style="color:#94a3b8">当前温度 <span x-text="s.temp + '°C'"></span> · 电压 <span x-text="s.voltage ? (s.voltage/1000).toFixed(3) + 'V' : '—'"></span></div>
+        <div x-show="s.power_mw" style="color:#94a3b8">当前功率 <span x-text="powerDisplay()"></span></div>
       </div>
     </div>
 
@@ -158,14 +161,14 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
       <div style="font-size:13px;color:#94a3b8;padding:4px 0 6px">高级设置</div>
       <div>
         <div class="row"><span class="lbl">充电上限 <b x-text="s.charge_limit + '%'"></b></span>
-          <input type="range" class="slider" min="20" max="100" x-model.number="s.charge_limit" @change="saveWithConfirm()"></div>
+          <input type="range" class="slider" min="20" max="100" x-model.number="s.charge_limit" @change="save()"></div>
         <div class="row"><span class="lbl">温度上限 <b x-text="s.temp_limit + '°C'"></b></span>
-          <input type="range" class="slider" min="30" max="60" x-model.number="s.temp_limit" @change="saveWithConfirm()"></div>
+          <input type="range" class="slider" min="30" max="60" x-model.number="s.temp_limit" @change="save()"></div>
         <div class="row"><span class="lbl">恢复充电 <b x-text="'低于上限 ' + s.resume_delta + '%'"></b></span>
-          <input type="range" class="slider" min="1" max="20" x-model.number="s.resume_delta" @change="saveWithConfirm()"></div>
+          <input type="range" class="slider" min="1" max="20" x-model.number="s.resume_delta" @change="save()"></div>
         <div class="row"><span class="lbl">轮询间隔 <b x-text="s.interval + 's'"></b></span>
-          <input type="range" class="slider" min="1" max="60" x-model.number="s.interval" @change="saveWithConfirm()"></div>
-        <button class="btn" @click="saveWithConfirm()">保存设置</button>
+          <input type="range" class="slider" min="1" max="60" x-model.number="s.interval" @change="save()"></div>
+        <button class="btn" @click="save()">保存设置</button>
       </div>
     </div>
 
@@ -200,6 +203,8 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
       <div class="log-box" x-text="logContent || '暂无日志'"></div>
       <button class="btn gray" @click="refreshLog()" style="margin-top:8px">🔄 刷新日志</button>
       <button class="btn gray" @click="exportLog()" style="margin-top:8px">⬇️ 导出全部（配置+日志+历史）</button>
+      <button class="btn gray" @click="checkUpdate()" style="margin-top:8px">🔄 检查更新</button>
+      <div class="info" style="font-size:12px;color:#94a3b8;margin-top:8px" x-text="updateMsg"></div>
     </div>
   </div>
 </div>
@@ -210,7 +215,7 @@ function app() {
     API_BASE: 'http://127.0.0.1:8800',
     tab: 'dash', 
     s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false },
-    logContent: '', lastUpdate: '', timer: null, chart: null, fullTimer: null,
+    logContent: '', lastUpdate: '', updateMsg: '', timer: null, chart: null, fullTimer: null,
 
     async fetchJson(url, opts) { try { const r = await fetch(url, opts); return await r.json(); } catch (e) { return null; } },
 
@@ -264,9 +269,7 @@ function app() {
       this.lastUpdate = '已保存 ' + new Date().toLocaleTimeString();
     },
 
-    async saveWithConfirm() { if (!confirm('确认保存此设置？')) return; await this.save(); },
-
-    async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this.save(); },
+async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this.save(); },
 
     async togglePause() {
       this.s.paused = !this.s.paused;
@@ -321,6 +324,14 @@ function app() {
     },
 
     async exportLog() { window.open(this.API_BASE + '/api/export', '_blank'); },
+
+    async checkUpdate() {
+      this.updateMsg = '检查中...';
+      const d = await this.fetchJson(this.API_BASE + '/api/update-check');
+      if (!d) { this.updateMsg = '检查失败（网络不可用）'; return; }
+      if (d.update_available) this.updateMsg = '发现新版本 ' + d.latest + '（当前 ' + d.current + '）→ 前往 GitHub 下载';
+      else this.updateMsg = '已是最新版本 ' + d.current + ' ✅';
+    },
 
 
 
