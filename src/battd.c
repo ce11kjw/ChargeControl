@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.17"
+#define VERSION "v1.2.18"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -745,7 +745,7 @@ int main(void) {
     addr.sin_port = htons(PORT);
     if (bind(srv, (struct sockaddr*)&addr, sizeof(addr)) < 0) return 1;
     if (listen(srv, 8) < 0) return 1;
-    signal(SIGINT, on_sig); signal(SIGTERM, on_sig);
+    signal(SIGINT, on_sig); signal(SIGTERM, on_sig); signal(SIGPIPE, SIG_IGN);
 
     time_t last_poll = 0;
     while (running) {
