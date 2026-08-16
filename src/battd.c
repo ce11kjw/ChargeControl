@@ -126,8 +126,6 @@ static void update_battery(void) {
     snprintf(path, sizeof(path), "%s/status", SYSFS);
     read_str(path, bat_status, sizeof(bat_status));
 
-    update_temps();
-
     snprintf(path, sizeof(path), "%s/cycle_count", SYSFS);
     if ((v = read_int(path)) >= 0) cycle_count = v;
     int full = 0, design = 0;
@@ -254,7 +252,7 @@ static void handle_charging_state(void) {
             save_stats();
         }
     }
-    if (sess_start_cap >= 0 && bat_capacity > sess_start_cap) {
+    if (sess_active && sess_start_cap >= 0 && bat_capacity > sess_start_cap) {
         int cf = read_int(SYSFS "/charge_full");
         int chg_full = cf > 0 ? cf / 1000 : 4000;
         sess_mah = ((bat_capacity - sess_start_cap) * chg_full) / 100;
@@ -389,7 +387,7 @@ static void handle_status(int fd) {
     int est_full_min = 0;
     if (power_mw > 0 && charge_limit > bat_capacity && charge_full > 0) {
         int remain = ((charge_limit - bat_capacity) * charge_full) / 100;
-        int cmA = power_mw * 1000 / (bat_volt > 0 ? bat_volt : 4000);
+        int cmA = power_mw * 1000 / (vol_mv > 0 ? vol_mv : 4000);
         if (cmA > 0) est_full_min = (remain * 60) / cmA;
     }
     const char *health_rating = "未知";
