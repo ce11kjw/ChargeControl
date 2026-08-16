@@ -80,7 +80,7 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
     </div>
 
     <div class="big-cap">
-      <div class="val" :style="'color:' + capColor()" x-text="s.capacity + '%'"></div>
+      <div class="val" :style="'color:' + capColor()" x-text="capDisplay()"></div>
       <div class="bar"><div class="fill" :style="'width:' + s.capacity + '%;background:' + capColor()"></div></div>
       <div class="info"><span x-text="s.status"></span><span x-text="s.voltage ? (s.voltage/1000).toFixed(2) + 'V' : '—'"></span></div>
     </div>
@@ -92,9 +92,9 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
         <div class="sub">上限 <span x-text="s.temp_limit + '°C'"></span></div>
       </div>
       <div class="card">
-        <div class="lbl">充电功率</div>
-        <div class="val" x-text="s.charge_power_w ? s.charge_power_w + 'W' : '—'"></div>
-        <div class="sub" x-text="s.charge_power_w && s.est_full_min ? '充满约' + s.est_full_min + '分' : (s.current < 0 ? '充电中' : (s.current > 0 ? '放电' : '待机'))"></div>
+        <div class="lbl">实时功率</div>
+        <div class="val" :style="powerColor()" x-text="powerDisplay()"></div>
+        <div class="sub" x-text="s.power_mw ? (s.power_mw < 0 ? '放电中' : (s.est_full_min ? '充满约' + s.est_full_min + '分' : '充电中')) : '待机'"></div>
       </div>
       <div class="card">
         <div class="lbl">循环次数</div>
@@ -170,6 +170,22 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
       </div>
       <button class="btn green" @click="fullOnce()" x-text="s.full_once ? '取消手动充满' : '充到 100%'"></button>
     </div>
+
+    <div class="panel">
+      <h2>⏯ 手动暂停/恢复</h2>
+      <div class="row">
+        <span class="lbl" x-text="s.paused ? '已暂停充电' : '充电未被暂停'"></span>
+      </div>
+      <button class="btn" @click="togglePause()" x-text="s.paused ? '恢复充电' : '暂停充电'"></button>
+    </div>
+
+    <div class="panel">
+      <h2>📜 历史记录</h2>
+      <div class="row">
+        <span class="lbl">保留历史（趋势图数据）</span>
+        <div class="toggle" :class="s.history_enabled ? 'on' : ''" @click="toggleHistory()"></div>
+      </div>
+    </div>
   </div>
 
   <div x-show="tab==='log'">
@@ -187,7 +203,7 @@ function app() {
   return {
     API_BASE: 'http://127.0.0.1:8800',
     tab: 'dash', showAdvanced: false,
-    s: { capacity:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, charge_power_w:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0 },
+    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false },
     logContent: '', lastUpdate: '', timer: null, chart: null, fullTimer: null,
 
     async fetchJson(url, opts) { try { const r = await fetch(url, opts); return await r.json(); } catch (e) { return null; } },
@@ -229,12 +245,38 @@ function app() {
     },
 
     async save() {
-      const p = new URLSearchParams({ charge_limit:this.s.charge_limit, temp_limit:this.s.temp_limit, resume_delta:this.s.resume_delta, interval:this.s.interval, enabled:this.s.limit_enabled?1:0 });
+      const p = new URLSearchParams({ charge_limit:this.s.charge_limit, temp_limit:this.s.temp_limit, resume_delta:this.s.resume_delta, interval:this.s.interval, enabled:this.s.limit_enabled?1:0, history_enabled:this.s.history_enabled?1:0 });
       await this.fetchJson(this.API_BASE + '/api/limit', { method:'POST', body:p.toString(), headers:{'Content-Type':'application/x-www-form-urlencoded'} });
       this.lastUpdate = '已保存 ' + new Date().toLocaleTimeString();
     },
 
     async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this.save(); },
+
+    async togglePause() {
+      this.s.paused = !this.s.paused;
+      await this.fetchJson(this.API_BASE + '/api/pause', { method:'POST', body: this.s.paused ? 'pause=1' : 'pause=0', headers:{'Content-Type':'application/x-www-form-urlencoded'} });
+    },
+
+    async toggleHistory() {
+      this.s.history_enabled = this.s.history_enabled ? 0 : 1;
+      await this.save();
+    },
+
+    capDisplay() {
+      if (this.s.capacity_disp > 0) return (this.s.capacity_disp / 100).toFixed(1) + '%';
+      return this.s.capacity + '%';
+    },
+
+    powerDisplay() {
+      if (!this.s.power_mw) return '—';
+      const w = Math.abs(this.s.power_mw) / 1000;
+      return (w >= 10 ? w.toFixed(0) : w.toFixed(1)) + ' W';
+    },
+
+    powerColor() {
+      if (!this.s.power_mw) return '';
+      return this.s.power_mw < 0 ? 'var(--orange)' : 'var(--green)';
+    },
 
     async fullOnce() {
       if (this.s.full_once) {

@@ -34,6 +34,7 @@ static int temp_suspended = 0;
 static time_t last_save = 0;
 static int full_once = 0;
 static time_t full_until = 0;
+static int history_enabled = 1;
 
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 static char bat_status[32] = "Unknown";
@@ -177,6 +178,7 @@ static void load_config(void) {
         else if (!strcmp(k, "resume_delta")) resume_delta = atoi(v);
         else if (!strcmp(k, "interval")) interval = atoi(v);
         else if (!strcmp(k, "enabled")) limit_enabled = atoi(v);
+        else if (!strcmp(k, "history_enabled")) history_enabled = atoi(v);
     }
     fclose(f);
 }
@@ -187,11 +189,13 @@ static void save_config(void) {
     fprintf(f, "resume_delta=%d\n", resume_delta);
     fprintf(f, "interval=%d\n", interval);
     fprintf(f, "enabled=%d\n", limit_enabled);
+    fprintf(f, "history_enabled=%d\n", history_enabled);
     fclose(f);
 }
 
 static void push_history(void) {
     time_t now = time(NULL);
+    if (!history_enabled) return;
     if (now - last_save < 60) return;
     struct stat st;
     if (stat(HISTORY, &st) == 0 && st.st_size > 512 * 1024) {
@@ -250,13 +254,23 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
 static void handle_status(int fd) {
     char body[2048];
     int charge_full = read_int(SYSFS "/charge_full") / 1000;
-    int charge_power = 0;
-    if (bat_volt > 0 && bat_curr < 0)
-        charge_power = (bat_volt * (-bat_curr)) / 1000000;
+    int power_mw = 0;
+    int usb_curr = read_int(SYSFS_USB "/input_current_now");
+    int usb_volt = read_int(SYSFS_USB "/voltage_now");
+    if (usb_curr > 0 && usb_volt > 0) {
+        power_mw = ((long)usb_curr * usb_volt) / 1000;
+        if (strcmp(bat_status, "Charging") != 0) power_mw = -power_mw;
+    } else if (bat_curr != 0 && bat_volt > 0) {
+        power_mw = ((long)bat_volt * (bat_curr < 0 ? -bat_curr : bat_curr)) / 1000;
+        if (bat_curr > 0) power_mw = -power_mw;
+    }
+    int cap_raw = read_int("/sys/class/power_supply/bms/capacity_raw");
+    int capacity_disp = cap_raw > 0 ? cap_raw : bat_capacity * 100;
     int est_full_min = 0;
-    if (charge_power > 0 && charge_limit > bat_capacity && charge_full > 0) {
+    if (power_mw > 0 && charge_limit > bat_capacity && charge_full > 0) {
         int remain = ((charge_limit - bat_capacity) * charge_full) / 100;
-        est_full_min = (remain * 60) / (-bat_curr > 0 ? -bat_curr : 1);
+        int cmA = power_mw / (bat_volt > 0 ? bat_volt : 4000);
+        if (cmA > 0) est_full_min = (remain * 60) / cmA;
     }
     const char *health_rating = "未知";
     if (health >= 90) health_rating = "优秀";
@@ -270,23 +284,24 @@ static void handle_status(int fd) {
             est_cycles_left = (int)((health - 60.0f) / loss_per_cycle);
     }
     snprintf(body, sizeof(body),
-        "{\"capacity\":%d,\"temp\":%d,\"voltage\":%d,\"current\":%d,"
+        "{\"capacity\":%d,\"capacity_disp\":%d,\"temp\":%d,\"voltage\":%d,\"current\":%d,"
         "\"status\":\"%s\",\"limit_enabled\":%d,\"charge_limit\":%d,"
         "\"temp_limit\":%d,\"resume_delta\":%d,\"interval\":%d,"
         "\"soc_temp\":%d,\"gpu_temp\":%d,\"chg_temp\":%d,\"case_temp\":%d,"
         "\"cycle_count\":%d,\"health\":%d,\"health_rating\":\"%s\","
         "\"charge_full_mah\":%d,\"est_cycles_left\":%d,"
-        "\"charge_power_w\":%d,\"est_full_min\":%d,"
+        "\"power_mw\":%d,\"est_full_min\":%d,"
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
-        "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld}",
-        bat_capacity, bat_temp, bat_volt, bat_curr, bat_status,
+        "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
+        "\"history_enabled\":%d}",
+        bat_capacity, capacity_disp, bat_temp, bat_volt, bat_curr, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
         cycle_count, health, health_rating,
         charge_full, est_cycles_left,
-        charge_power, est_full_min,
+        power_mw, est_full_min,
         usb_online, proto_name, pd_type, usb_power_max,
-        control_state, full_once, (long)full_until);
+        control_state, full_once, (long)full_until, history_enabled);
     send_resp(fd, 200, "application/json", body);
 }
 
@@ -304,6 +319,7 @@ static void handle_limit(int fd, const char *body) {
             else if (!strcmp(key, "resume_delta")) resume_delta = atoi(dec);
             else if (!strcmp(key, "interval")) interval = atoi(dec);
             else if (!strcmp(key, "enabled")) limit_enabled = atoi(dec);
+            else if (!strcmp(key, "history_enabled")) history_enabled = atoi(dec);
         }
         free(copy);
         save_config(); apply_control();
@@ -319,6 +335,17 @@ static void handle_full(int fd, const char *body) {
     } else {
         full_once = 1; full_until = time(NULL) + FULL_TIMEOUT;
         log_event("手动充满已启动，30分钟超时");
+    }
+    send_resp(fd, 200, "application/json", "{\"ok\":true}");
+}
+
+static void handle_pause(int fd, const char *body) {
+    char path[MAX_LINE];
+    snprintf(path, sizeof(path), "%s/input_suspend", SYSFS);
+    if (body && strstr(body, "pause=1")) {
+        write_str(path, "1"); log_event("手动暂停充电");
+    } else {
+        write_str(path, "0"); log_event("手动恢复充电");
     }
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
 }
@@ -391,6 +418,7 @@ static void handle_client(int fd) {
     if (!strcmp(uri, "/api/status")) { handle_status(fd); return; }
     if (!strcmp(uri, "/api/limit") && !strcmp(method, "POST")) { handle_limit(fd, body); return; }
     if (!strcmp(uri, "/api/full") && !strcmp(method, "POST")) { handle_full(fd, body); return; }
+    if (!strcmp(uri, "/api/pause") && !strcmp(method, "POST")) { handle_pause(fd, body); return; }
     if (!strcmp(uri, "/api/log") && !strcmp(method, "GET")) {
         FILE *lf = fopen(LOGFILE, "r");
         if (!lf) { send_resp(fd, 200, "text/plain", "暂无日志"); return; }
