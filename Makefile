@@ -14,6 +14,7 @@ clean:
 
 package: $(TARGET)
 	rm -f $(OUTPUT)
+	cp $(TARGET) $(MODULE_DIR)/bin/battd
 	cd $(MODULE_DIR) && zip -r ../$(OUTPUT) .
 
 .PHONY: all clean package

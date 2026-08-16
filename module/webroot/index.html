@@ -68,7 +68,7 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.2.0</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.2</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'">📊 仪表盘</div>
@@ -208,7 +208,7 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
 function app() {
   return {
     API_BASE: 'http://127.0.0.1:8800',
-    tab: 'dash', showAdvanced: false,
+    tab: 'dash', 
     s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false },
     logContent: '', lastUpdate: '', timer: null, chart: null, fullTimer: null,
 
@@ -322,15 +322,7 @@ function app() {
 
     async exportLog() { window.open(this.API_BASE + '/api/export', '_blank'); },
 
-    protoLabel() {
-      const p = this.s.proto_name; const o = this.s.usb_online;
-      if (!o) return '未连接';
-      let label = p;
-      if (p === 'USB_PD') label = 'PD ' + (this.s.pd_type > 0 ? this.s.pd_type + '.0' : '');
-      else if (p === 'USB_DCP') label = '普通充电';
-      else if (p && p.includes('QC')) label = 'QC 快充';
-      return label + (this.s.power_max ? ' ' + this.s.power_max + 'W' : '');
-    },
+
 
     bannerClass() {
       const st = this.s.control_state;
