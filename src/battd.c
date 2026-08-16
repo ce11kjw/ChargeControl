@@ -266,6 +266,9 @@ static void handle_status(int fd) {
     }
     int cap_raw = read_int("/sys/class/power_supply/bms/capacity_raw");
     int capacity_disp = cap_raw > 0 ? cap_raw : bat_capacity * 100;
+    int paused = read_int(SYSFS "/input_suspend");
+    if (paused < 0) paused = read_int(SYSFS_USB "/input_suspend");
+    if (paused < 0) paused = 0;
     int est_full_min = 0;
     if (power_mw > 0 && charge_limit > bat_capacity && charge_full > 0) {
         int remain = ((charge_limit - bat_capacity) * charge_full) / 100;
@@ -293,7 +296,7 @@ static void handle_status(int fd) {
         "\"power_mw\":%d,\"est_full_min\":%d,"
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
-        "\"history_enabled\":%d}",
+        "\"history_enabled\":%d,\"paused\":%d}",
         bat_capacity, capacity_disp, bat_temp, bat_volt, bat_curr, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
@@ -301,7 +304,7 @@ static void handle_status(int fd) {
         charge_full, est_cycles_left,
         power_mw, est_full_min,
         usb_online, proto_name, pd_type, usb_power_max,
-        control_state, full_once, (long)full_until, history_enabled);
+        control_state, full_once, (long)full_until, history_enabled, paused);
     send_resp(fd, 200, "application/json", body);
 }
 
