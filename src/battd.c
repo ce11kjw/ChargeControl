@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.12"
+#define VERSION "v1.2.13"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -301,6 +301,8 @@ static int in_night_window(void) {
 
 static void apply_night_mode(void) {
     if (!night_enabled) return;
+    /* 手动暂停时，夜间模式让位用户 */
+    if (paused) return;
     if (in_night_window() && bat_capacity >= charge_limit) {
         if (write_str(SYSFS "/input_suspend", "1") < 0) log_event("night write fail");
     } else if (night_enabled && !in_night_window() && bat_capacity < charge_limit && bat_curr <= 0) {
@@ -740,8 +742,8 @@ int main(void) {
         }
         time_t now = time(NULL);
         if (now - last_poll >= (time_t)interval) {
-            last_poll = now; update_battery(); apply_control(); push_history();
-            apply_night_mode(); high_temp_alert(); get_top_uid();
+            last_poll = now; update_battery(); push_history();
+            apply_control(); apply_night_mode(); high_temp_alert(); get_top_uid();
         }
     }
     log_event("ChargeControl 守护进程停止");
