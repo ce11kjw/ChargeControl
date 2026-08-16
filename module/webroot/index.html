@@ -61,6 +61,9 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
 .health-box { display:flex; align-items:center; gap:12px; background:var(--card); border-radius:14px; padding:14px; margin-bottom:12px; }
 .health-box .big { font-size:36px; font-weight:800; }
 .health-box .meta { font-size:12px; color:#94a3b8; line-height:1.6; }
+  .slider { -webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:#334155;outline:none;vertical-align:middle; }
+  .slider::-webkit-slider-thumb { -webkit-appearance:none;appearance:none;width:20px;height:20px;border-radius:50%;background:#4ade80;cursor:pointer; }
+  .slider::-moz-range-thumb { width:20px;height:20px;border-radius:50%;background:#4ade80;cursor:pointer; }
 </style>
 </head>
 <body>
@@ -76,7 +79,6 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
   <div x-show="tab==='dash'">
     <div class="banner" :class="bannerClass()" x-show="true">
       <span x-text="bannerText()"></span>
-      <span class="proto-chip" x-text="protoLabel()"></span>
     </div>
 
     <div class="big-cap">
@@ -97,44 +99,46 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
         <div class="sub" x-text="s.power_mw ? (s.power_mw < 0 ? '放电中' : (s.est_full_min ? '充满约' + s.est_full_min + '分' : '充电中')) : '待机'"></div>
       </div>
       <div class="card">
-        <div class="lbl">循环次数</div>
-        <div class="val" x-text="s.cycle_count >= 0 ? s.cycle_count : '—'"></div>
-        <div class="sub">健康度 <span x-text="s.health > 0 ? s.health + '%' : '—'"></span> · <span x-text="s.health_rating"></span></div>
+        <div class="lbl">守护进程</div>
+        <div class="val" style="font-size:20px" x-text="s.proc_name || '—'"></div>
+        <div class="sub" x-text="'PID ' + (s.proc_pid || '—') + '  CPU ' + (s.cpu_pct ? (cpuCpuPct() + '%') : '—')"></div>
       </div>
       <div class="card">
-        <div class="lbl">充电限制</div>
-        <div class="val" :style="s.limit_enabled ? 'color:var(--green)' : 'color:var(--gray)'" x-text="s.limit_enabled ? '已启用' : '已关闭'"></div>
-        <div class="sub">上限 <span x-text="s.charge_limit + '%'"></span></div>
+        <div class="lbl">循环次数</div>
+        <div class="val" x-text="s.cycle_count >= 0 ? s.cycle_count : '—'"></div>
+        <div class="sub">健康度 <span x-text="s.health > 0 ? s.health + '%' : '—'"></span> <span x-text="s.health_rating"></span></div>
       </div>
     </div>
 
     <div class="health-box">
       <div class="big" :style="'color:' + healthColor()" x-text="s.health > 0 ? s.health + '%' : '—'"></div>
       <div class="meta">
-        <div>电池健康度 · <span x-text="s.health_rating"></span></div>
-        <div x-show="s.charge_full_mah > 0">满充 <span x-text="s.charge_full_mah + 'mAh'"></span> / 设计 <span x-text="s.charge_full_mah && s.health > 0 ? Math.round(s.charge_full_mah * 100 / s.health) + 'mAh' : '—'"></span></div>
-        <div x-show="s.est_cycles_left > 0">预计剩余约 <span x-text="s.est_cycles_left"></span> 次循环 (至60%)</div>
-        <div x-show="s.health > 0 && s.health < 80" style="color:var(--red)">⚠️ 健康度低于80%，建议更换电池</div>
+        <div>电池健康度 <span x-text="s.health_rating"></span></div>
+        <div x-show="s.charge_full_mah > 0">满充 <span x-text="s.charge_full_mah + 'mAh'"></span> / 设计 <span>5380mAh</span></div>
+        <div x-show="s.est_cycles_left > 0">剩余约 <span x-text="s.est_cycles_left"></span> 次循环 (至60%)</div>
+        <div x-show="s.health > 0 && s.health < 80" style="color:var(--red)">&#x26a0;&#xfe0f; 健康度低于80%</div>
       </div>
     </div>
 
     <div class="temp-grid">
-      <div class="temp-item">
-        <div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.soc_temp)"></span><span class="n">SoC</span></div>
-        <span class="v" :style="'color:' + tempColor(s.soc_temp)" x-text="s.soc_temp > 0 ? s.soc_temp + '°' : '—'"></span>
-      </div>
-      <div class="temp-item">
-        <div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.gpu_temp)"></span><span class="n">GPU</span></div>
-        <span class="v" :style="'color:' + tempColor(s.gpu_temp)" x-text="s.gpu_temp > 0 ? s.gpu_temp + '°' : '—'"></span>
-      </div>
-      <div class="temp-item">
-        <div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.chg_temp)"></span><span class="n">充电IC</span></div>
-        <span class="v" :style="'color:' + tempColor(s.chg_temp)" x-text="s.chg_temp > 0 ? s.chg_temp + '°' : '—'"></span>
-      </div>
-      <div class="temp-item">
-        <div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.case_temp)"></span><span class="n">机身</span></div>
-        <span class="v" :style="'color:' + tempColor(s.case_temp)" x-text="s.case_temp > 0 ? s.case_temp + '°' : '—'"></span>
-      </div>
+      <div class="temp-item"><div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.soc_temp)"></span><span class="n">SoC</span></div><span class="v" :style="'color:' + tempColor(s.soc_temp)" x-text="s.soc_temp > 0 ? s.soc_temp + '°' : '—'"></span></div>
+      <div class="temp-item"><div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.gpu_temp)"></span><span class="n">GPU</span></div><span class="v" :style="'color:' + tempColor(s.gpu_temp)" x-text="s.gpu_temp > 0 ? s.gpu_temp + '°' : '—'"></span></div>
+      <div class="temp-item"><div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.chg_temp)"></span><span class="n">充电IC</span></div><span class="v" :style="'color:' + tempColor(s.chg_temp)" x-text="s.chg_temp > 0 ? s.chg_temp + '°' : '—'"></span></div>
+      <div class="temp-item"><div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.case_temp)"></span><span class="n">机身</span></div><span class="v" :style="'color:' + tempColor(s.case_temp)" x-text="s.case_temp > 0 ? s.case_temp + '°' : '—'"></span></div>
+    </div>
+
+    <div class="temp-grid" style="margin-top:12px">
+      <div class="temp-item"><span class="n">充电协议</span><span class="v" x-text="s.proto_name || '—'"></span></div>
+      <div class="temp-item"><span class="n">协商功率</span><span class="v" x-text="s.power_max ? s.power_max + 'W' : '—'"></span></div>
+      <div class="temp-item"><span class="n">PD版本</span><span class="v" x-text="s.pd_type ? 'PD' + s.pd_type : '—'"></span></div>
+      <div class="temp-item"><span class="n">连接状态</span><span class="v" x-text="s.usb_online ? '已连接' : '未连接'"></span></div>
+    </div>
+
+    <div class="temp-grid" style="margin-top:12px">
+      <div class="temp-item"><span class="n">电压</span><span class="v" x-text="s.voltage ? (s.voltage/1000).toFixed(3) + 'V' : '—'"></span></div>
+      <div class="temp-item"><span class="n">电流</span><span class="v" x-text="s.current ? s.current + 'mA' : '—'"></span></div>
+      <div class="temp-item"><span class="n">电量</span><span class="v" x-text="capDisplay()"></span></div>
+      <div class="temp-item"><span class="n">旁路</span><span class="v" x-text="(s.bypass_ok ? (s.bypass_on ? '已激活' : '未激活') : '不支持')" :style="s.bypass_on ? 'color:var(--green)' : ''"></span></div>
     </div>
 
     <div class="panel" style="margin-top:16px">
@@ -151,15 +155,17 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
         <span class="lbl">启用充电限制</span>
         <div class="toggle" :class="s.limit_enabled ? 'on' : ''" @click="toggleEnabled()"></div>
       </div>
-      <div class="collapse-head" :class="showAdvanced ? 'open' : ''" @click="showAdvanced = !showAdvanced">
-        <span style="font-size:13px;color:#94a3b8">高级设置</span><span class="arrow">▼</span>
-      </div>
-      <div x-show="showAdvanced">
-        <div class="row"><span class="lbl">充电上限</span><input type="number" min="20" max="100" x-model.number="s.charge_limit" @change="save()"></div>
-        <div class="row"><span class="lbl">温度上限 (°C)</span><input type="number" min="30" max="60" x-model.number="s.temp_limit" @change="save()"></div>
-        <div class="row"><span class="lbl">恢复充电 (低于上限%)</span><input type="number" min="1" max="20" x-model.number="s.resume_delta" @change="save()"></div>
-        <div class="row"><span class="lbl">轮询间隔 (秒)</span><input type="number" min="1" max="60" x-model.number="s.interval" @change="save()"></div>
-        <button class="btn" @click="save()">保存设置</button>
+      <div style="font-size:13px;color:#94a3b8;padding:4px 0 6px">高级设置</div>
+      <div>
+        <div class="row"><span class="lbl">充电上限 <b x-text="s.charge_limit + '%'"></b></span>
+          <input type="range" class="slider" min="20" max="100" x-model.number="s.charge_limit" @change="saveWithConfirm()"></div>
+        <div class="row"><span class="lbl">温度上限 <b x-text="s.temp_limit + '°C'"></b></span>
+          <input type="range" class="slider" min="30" max="60" x-model.number="s.temp_limit" @change="saveWithConfirm()"></div>
+        <div class="row"><span class="lbl">恢复充电 <b x-text="'低于上限 ' + s.resume_delta + '%'"></b></span>
+          <input type="range" class="slider" min="1" max="20" x-model.number="s.resume_delta" @change="saveWithConfirm()"></div>
+        <div class="row"><span class="lbl">轮询间隔 <b x-text="s.interval + 's'"></b></span>
+          <input type="range" class="slider" min="1" max="60" x-model.number="s.interval" @change="saveWithConfirm()"></div>
+        <button class="btn" @click="saveWithConfirm()">保存设置</button>
       </div>
     </div>
 
@@ -203,7 +209,7 @@ function app() {
   return {
     API_BASE: 'http://127.0.0.1:8800',
     tab: 'dash', showAdvanced: false,
-    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false },
+    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false },
     logContent: '', lastUpdate: '', timer: null, chart: null, fullTimer: null,
 
     async fetchJson(url, opts) { try { const r = await fetch(url, opts); return await r.json(); } catch (e) { return null; } },
@@ -258,12 +264,16 @@ function app() {
       this.lastUpdate = '已保存 ' + new Date().toLocaleTimeString();
     },
 
+    async saveWithConfirm() { if (!confirm('确认保存此设置？')) return; await this.save(); },
+
     async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this.save(); },
 
     async togglePause() {
       this.s.paused = !this.s.paused;
       await this.fetchJson(this.API_BASE + '/api/pause', { method:'POST', body: this.s.paused ? 'pause=1' : 'pause=0', headers:{'Content-Type':'application/x-www-form-urlencoded'} });
     },
+
+    async toggleBypass() { if (!this.s.bypass_ok) return; this.s.bypass_on = !this.s.bypass_on; await this.fetchJson(this.API_BASE + '/api/limit', { method:'POST', body: 'bypass=' + (this.s.bypass_on ? 1 : 0), headers:{'Content-Type':'application/x-www-form-urlencoded'} }); },
 
     async toggleHistory() {
       this.s.history_enabled = this.s.history_enabled ? 0 : 1;
@@ -280,6 +290,8 @@ function app() {
       const w = Math.abs(this.s.power_mw) / 1000;
       return (w >= 10 ? w.toFixed(0) : w.toFixed(1)) + ' W';
     },
+
+    cpuCpuPct() { return (this.s.cpu_pct / 10).toFixed(1); },
 
     powerColor() {
       if (!this.s.power_mw) return '';

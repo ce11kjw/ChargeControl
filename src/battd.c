@@ -35,6 +35,12 @@ static time_t last_save = 0;
 static int full_once = 0;
 static time_t full_until = 0;
 static int history_enabled = 1;
+static int paused = 0;
+static long prev_cpu_ticks = 0;
+static long prev_proc_ticks = 0;
+static char proc_name_buf[32] = "";
+static int proc_pid_val = 0;
+static int cpu_pct = 0;
 
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 static char bat_status[32] = "Unknown";
@@ -96,12 +102,14 @@ static void update_battery(void) {
         snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/temp", THERMAL, i);
         int tval = read_int(tzpath);
         if (tval < 0) continue;
-        if (!strcmp(tname, "soc_max")) soc_temp = tval / 1000;
-        else if (!strcmp(tname, "gpu1")) gpu_temp = tval / 1000;
-        else if (!strcmp(tname, "mtk-master-charger")) chg_temp = tval / 1000;
-        else if (!strcmp(tname, "X7_therm") || !strcmp(tname, "charger2_therm")) {
-            if (case_temp < 0) case_temp = tval / 1000;
-        }
+        if (soc_temp < 0 && (strstr(tname, "soc_max") || strstr(tname, "tsens") || strstr(tname, "cpu-therm") || strstr(tname, "cpu_max") || strstr(tname, "cpuss")))
+            soc_temp = tval / 1000;
+        else if (gpu_temp < 0 && (strstr(tname, "gpu1") || strstr(tname, "gpu-therm") || strstr(tname, "gpu_therm")))
+            gpu_temp = tval / 1000;
+        else if (chg_temp < 0 && (strstr(tname, "mtk-master-charger") || strstr(tname, "charger") || strstr(tname, "bq") || strstr(tname, "smb")))
+            chg_temp = tval / 1000;
+        else if (case_temp < 0 && (strstr(tname, "X7_therm") || strstr(tname, "charger2") || strstr(tname, "case") || strstr(tname, "skin") || strstr(tname, "quiet_therm")))
+            case_temp = tval / 1000;
     }
 
     snprintf(path, sizeof(path), "%s/cycle_count", SYSFS);
@@ -125,6 +133,7 @@ static void update_battery(void) {
 
     if (!limit_enabled) strcpy(control_state, "disabled");
     else if (temp_suspended) strcpy(control_state, "temp_protect");
+    else if (paused) strcpy(control_state, "paused");
     else if (full_once) strcpy(control_state, "manual_full");
     else if (bat_capacity >= charge_limit && strcmp(bat_status, "Charging") == 0) strcpy(control_state, "suspended");
     else if (strcmp(bat_status, "Charging") == 0) strcpy(control_state, "charging");
@@ -142,6 +151,10 @@ static void apply_control(void) {
     }
     if (temp_suspended) {
         write_str(path, "0"); temp_suspended = 0;
+    }
+    if (paused) {
+        write_str(path, "1");
+        return;
     }
 
     /* 手动充满：仅跳过容量上限 */
@@ -254,6 +267,48 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
 static void handle_status(int fd) {
     char body[2048];
     int charge_full = read_int(SYSFS "/charge_full") / 1000;
+
+    /* 自身进程信息 */
+    proc_pid_val = getpid();
+    FILE *sf = fopen("/proc/self/stat", "r");
+    if (sf) {
+        char sb[512]; if (fgets(sb, sizeof(sb), sf)) {
+            char *p = strrchr(sb, ')');
+            if (p) {
+                p++; while (*p == ' ') p++;
+                long ut = 0, st = 0;
+                sscanf(p, "%*c %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %ld %ld", &ut, &st);
+                long now_pt = ut + st;
+                FILE *tf = fopen("/proc/stat", "r");
+                if (tf) { char tb[256]; if (fgets(tb, sizeof(tb), tf)) {
+                    long u, n, s, i, w;
+                    if (sscanf(tb, "cpu  %ld %ld %ld %ld %ld", &u, &n, &s, &i, &w) >= 5) {
+                        long now_ct = u+n+s+i+w;
+                        if (prev_proc_ticks > 0) {
+                            long pd = now_pt - prev_proc_ticks;
+                            long cd = now_ct - prev_cpu_ticks;
+                            if (cd > 0) cpu_pct = (int)(pd * 1000 / cd);
+                        }
+                        prev_cpu_ticks = now_ct;
+                    }
+                } fclose(tf); }
+                prev_proc_ticks = now_pt;
+                char *s0 = strchr(sb, '('); char *s1 = strrchr(sb, ')');
+                if (s0 && s1 && s1 > s0) {
+                    int l = s1 - s0 - 1; if (l > 31) l = 31;
+                    strncpy(proc_name_buf, s0+1, l); proc_name_buf[l] = '\0';
+                }
+            }
+        }
+        fclose(sf);
+    }
+    /* bypass 探测 */
+    int bypass_ok = 0, bypass_on = 0;
+    FILE *bf = popen("ls /sys/class/power_supply/*/bypass_charger /sys/class/power_supply/*/charge_bypass 2>/dev/null | head -1", "r");
+    if (bf) { char bb[64]; if (fgets(bb, sizeof(bb), bf)) {
+        bb[strcspn(bb, "\n")] = 0;
+        if (strlen(bb) > 0) { bypass_ok = 1; bypass_on = read_int(bb) > 0; }
+    } pclose(bf); }
     int power_mw = 0;
     int usb_curr = read_int(SYSFS_USB "/input_current_now");
     int usb_volt = read_int(SYSFS_USB "/voltage_now");
@@ -296,7 +351,7 @@ static void handle_status(int fd) {
         "\"power_mw\":%d,\"est_full_min\":%d,"
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
-        "\"history_enabled\":%d,\"paused\":%d}",
+        "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,\"bypass_ok\":%d,\"bypass_on\":%d}",
         bat_capacity, capacity_disp, bat_temp, bat_volt, bat_curr, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
@@ -304,7 +359,7 @@ static void handle_status(int fd) {
         charge_full, est_cycles_left,
         power_mw, est_full_min,
         usb_online, proto_name, pd_type, usb_power_max,
-        control_state, full_once, (long)full_until, history_enabled, paused);
+        control_state, full_once, (long)full_until, history_enabled, paused, proc_name_buf, proc_pid_val, cpu_pct, bypass_ok, bypass_on);
     send_resp(fd, 200, "application/json", body);
 }
 
@@ -343,15 +398,15 @@ static void handle_full(int fd, const char *body) {
 }
 
 static void handle_pause(int fd, const char *body) {
-    char path[MAX_LINE];
-    snprintf(path, sizeof(path), "%s/input_suspend", SYSFS);
     if (body && strstr(body, "pause=1")) {
-        write_str(path, "1"); log_event("手动暂停充电");
+        paused = 1;
+        log_event("manual pause");
     } else {
-        write_str(path, "0"); log_event("手动恢复充电");
-    }
+        paused = 0;
+        log_event("manual resume");
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
 }
+    }
 
 static void handle_export(int fd) {
     char buf[8192]; int n = 0;
