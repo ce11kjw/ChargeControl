@@ -148,14 +148,16 @@ static void apply_control(void) {
 
     /* 温度保护永远优先（手动充满期间也生效）*/
     if (bat_temp >= temp_limit) {
-        write_str(path, "1"); temp_suspended = 1;
+        if (write_str(path, "1") < 0) log_event("写input_suspend失败(温度保护)");
+        temp_suspended = 1;
         return;
     }
     if (temp_suspended) {
-        write_str(path, "0"); temp_suspended = 0;
+        if (write_str(path, "0") < 0) log_event("写input_suspend失败(恢复)");
+        temp_suspended = 0;
     }
     if (paused) {
-        write_str(path, "1");
+        if (write_str(path, "1") < 0) log_event("写input_suspend失败(暂停)");
         return;
     }
 
@@ -165,18 +167,19 @@ static void apply_control(void) {
             full_once = 0;
             log_event("手动充满结束，恢复充电限制");
         } else {
-            write_str(path, "0");
+            if (write_str(path, "0") < 0) log_event("写input_suspend失败(充满)");
             return;
         }
     }
 
     if (!limit_enabled) {
-        write_str(path, "0"); temp_suspended = 0; return;
+        if (write_str(path, "0") < 0) log_event("写input_suspend失败(关闭)");
+        temp_suspended = 0; return;
     }
     if (bat_capacity >= charge_limit) {
-        write_str(path, "1");
+        if (write_str(path, "1") < 0) log_event("写input_suspend失败(到上限)");
     } else if (bat_capacity <= charge_limit - resume_delta) {
-        write_str(path, "0");
+        if (write_str(path, "0") < 0) log_event("写input_suspend失败(恢复充电)");
     }
 }
 static void load_config(void) {
@@ -307,8 +310,7 @@ static void handle_status(int fd) {
     /* bypass 状态（实时读节点值）*/
     int bypass_ok = bypass_supported, bypass_on = 0;
     if (bypass_ok) {
-        int bv = read_int(SYSFS_USB "/bypass_charger");
-        if (bv < 0) bv = read_int(SYSFS "/charge_bypass");
+        int bv = read_int(bypass_node);
         if (bv > 0) bypass_on = 1;
     }
     int power_mw = 0;

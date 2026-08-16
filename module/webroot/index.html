@@ -180,9 +180,9 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
     <div class="panel">
       <h2>⏯ 手动暂停/恢复</h2>
       <div class="row">
-        <span class="lbl" x-text="s.paused ? '已暂停充电' : '充电未被暂停'"></span>
+        <span class="lbl" x-text="s.control_state === 'temp_protect' ? '🌡️ 温度保护中（自动）' : (s.paused ? '已暂停充电' : '充电未被暂停')"></span>
       </div>
-      <button class="btn" @click="togglePause()" x-text="s.paused ? '恢复充电' : '暂停充电'"></button>
+      <button class="btn" @click="togglePause()" :disabled="s.control_state === 'temp_protect'" x-text="s.control_state === 'temp_protect' ? '温度保护优先' : (s.paused ? '恢复充电' : '暂停充电')" style="opacity:s.control_state === 'temp_protect' ? .5 : 1"></button>
     </div>
 
     <div class="panel">
