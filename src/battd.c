@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.21"
+#define VERSION "v1.2.22"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -130,7 +130,13 @@ static void update_battery(void) {
     snprintf(path, sizeof(path), "%s/voltage_now", SYSFS);
     if ((v = read_int(path)) >= 0) bat_volt = v / 1000;
     snprintf(path, sizeof(path), "%s/current_now", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_curr = v / 1000;
+    if ((v = read_int(path)) >= 0) {
+        bat_curr = v / 1000;
+        if (bat_curr != 0 && bat_volt > 0) {
+            power_mw = bat_curr * bat_volt / 1000;
+            if (strcmp(bat_status, "Charging") != 0) power_mw = -power_mw;
+        }
+    }
     snprintf(path, sizeof(path), "%s/status", SYSFS);
     read_str(path, bat_status, sizeof(bat_status));
 

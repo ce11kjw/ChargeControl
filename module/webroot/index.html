@@ -116,14 +116,13 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
         <div class="sub" x-text="'PID ' + (s.proc_pid || '—') + '  CPU ' + (s.cpu_pct >= 0 ? (cpuCpuPct() + '%') : '—')"></div>
       </div>
       <div class="card">
-        <div class="lbl">循环次数</div>
-        <div class="val" x-text="s.cycle_count >= 0 ? s.cycle_count : '—'"></div>
-        <div class="sub">健康度 <span x-text="s.health > 0 ? s.health + '%' : '—'"></span> <span x-text="s.health_rating"></span></div>
+        <div style="display:flex;gap:20px;font-size:13px;color:#94a3b8;margin-top:4px">
+          <span>循环 <strong style="color:#e2e8f0" x-text="s.cycle_count >= 0 ? s.cycle_count : '—'"></strong> 次</span>
+          <span>健康度 <strong style="color:#e2e8f0" x-text="s.health > 0 ? s.health + '%' : '—'"></strong> <span x-text="s.health_rating"></span></span>
+          <span x-show="s.health >= 0">衰减 <strong style="color:#e2e8f0" x-text="(100 - s.health).toFixed(1) + '%'"></strong></span>
+        </div>
       </div>
     </div>
-
-    <div class="health-box">
-      <div class="big" :style="'color:' + healthColor()" x-text="s.health > 0 ? s.health + '%' : '—'"></div>
       <div class="meta">
         <div>电池健康度 <span x-text="s.health_rating"></span></div>
         <div x-show="s.charge_full_mah > 0">满充 <span x-text="s.charge_full_mah + 'mAh'"></span> / 设计 <span>5380mAh</span></div>
