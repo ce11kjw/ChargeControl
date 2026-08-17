@@ -78,7 +78,7 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.2.30</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.31</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'">📊 仪表盘</div>
@@ -309,6 +309,7 @@ function app() {
     i18n: {zh: {night:'🌙 夜间模式', scene:'🎮 快捷场景', webhook:'🔔 WebHook', topuid:'🏆 耗电排行', lang:'🌐 语言', theme:'🎨 主题', scene_gaming:'🎮 游戏 (70%)', scene_sleep:'😴 睡眠 (夜间模式)', scene_trip:'✈️ 出差 (停充)', scene_custom:'⚙️ 自定义', webhook_hint:'WebHook URL (温度>50°C 触发)', topuid_loading:'加载中...', alert_high:'⚠️ 高温告警中'}, en: {night:'🌙 Night Mode', scene:'🎮 Scenes', webhook:'🔔 WebHook', topuid:'🏆 Top Power', lang:'🌐 Language', theme:'🎨 Theme', scene_gaming:'🎮 Gaming (70%)', scene_sleep:'😴 Sleep (Night)', scene_trip:'✈️ Trip (Pause)', scene_custom:'⚙️ Custom', webhook_hint:'WebHook URL (triggered temp>50°C)', topuid_loading:'Loading...', alert_high:'⚠️ High Temp Alert'}},
     t(k) { return (this.i18n[this.s.lang?'en':'zh']||{})[k] || k; },
     tab: 'dash', 
+    webhookUrl: '',
     s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, topUid:[], lang:0, theme:0, webhookUrl:'' },
     logContent: '', lastUpdate: '', updateMsg: '', timer: null, chart: null, fullTimer: null,
 
@@ -316,7 +317,7 @@ function app() {
 
     async poll() {
       const d = await this.fetchJson(this.API_BASE + '/api/status');
-      if (d) { this.s = Object.assign(this.s, d); this.lastUpdate = '更新于 ' + new Date().toLocaleTimeString(); }
+      if (d) { this.s = Object.assign(this.s, d); if (d.webhook) this.webhookUrl = d.webhook; this.lastUpdate = '更新于 ' + new Date().toLocaleTimeString(); }
     },
 
     async loadHistory() {

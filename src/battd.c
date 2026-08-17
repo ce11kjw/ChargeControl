@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.30"
+#define VERSION "v1.2.31"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -69,6 +69,19 @@ static int usb_online = 0, usb_power_max = 0, pd_type = 0;
 static int usb_curr_cache = 0, usb_volt_cache = 0;
 static char proto_name[32] = "未知";
 static char control_state[24] = "idle";
+
+static void url_decode(char *s) {
+    char *w = s;
+    while (*s) {
+        if (*s == '%' && isxdigit((unsigned char)s[1]) && isxdigit((unsigned char)s[2])) {
+            int hi = isdigit(s[1]) ? s[1]-'0' : (tolower(s[1])-'a'+10);
+            int lo = isdigit(s[2]) ? s[2]-'0' : (tolower(s[2])-'a'+10);
+            *w++ = (char)((hi<<4)|lo); s += 3;
+        } else if (*s == '+') { *w++ = ' '; s++; }
+        else *w++ = *s++;
+    }
+    *w = '\0';
+}
 
 static int read_int(const char *path) {
     char buf[64]; int fd = open(path, O_RDONLY);
@@ -551,7 +564,7 @@ static void handle_status(int fd) {
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
-        "\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
+        "\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"top_n\":%d}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
@@ -561,7 +574,7 @@ static void handle_status(int fd) {
         power_mw, est_full_min,
         usb_online, proto_name, pd_type, usb_power_max,
         control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
-        bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high, top_count);
+        webhook_url, bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high, top_count);
     send_resp(fd, 200, "application/json", body);
 }
 
@@ -593,6 +606,11 @@ static void handle_limit(int fd, const char *body) {
             }
             else if (!strcmp(key, "lang")) lang = atoi(dec);
             else if (!strcmp(key, "theme")) theme = atoi(dec);
+            else if (!strcmp(key, "webhook")) {
+                char wb[256]; strncpy(wb, dec, 255); wb[255] = '\0';
+                url_decode(wb);
+                if (strlen(wb) < 255) strcpy(webhook_url, wb);
+            }
         }
         save_extras();
         free(copy);
