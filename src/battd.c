@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.29"
+#define VERSION "v1.2.30"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -621,6 +621,9 @@ static void handle_pause(int fd, const char *body) {
     } else {
         paused = 0;
         log_event("manual resume");
+        /* 恢复后立即写 0（中间地带 apply_control 不会写，避免卡死）*/
+        if (bat_temp < temp_limit)
+            write_str(SYSFS "/input_suspend", "0");
     }
     apply_control();
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
