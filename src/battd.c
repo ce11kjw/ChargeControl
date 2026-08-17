@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.22"
+#define VERSION "v1.2.28"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -591,7 +591,7 @@ static void handle_limit(int fd, const char *body) {
         }
         save_extras();
         free(copy);
-        save_config(); save_extras(); apply_control(); apply_night_mode(); high_temp_alert(); get_top_uid();
+        save_config(); apply_control(); apply_night_mode(); high_temp_alert(); get_top_uid();
         log_event("配置已更新");
     }
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
@@ -620,11 +620,17 @@ static void handle_pause(int fd, const char *body) {
 }
 
 static int ver_cmp(const char *a, const char *b) {
-    int na = 0, nb = 0;
-    const char *pa = a; while (*pa && !isdigit(*pa)) pa++;
-    const char *pb = b; while (*pb && !isdigit(*pb)) pb++;
-    int va = atoi(pa), vb = atoi(pb);
-    return va - vb;
+    /* 跳过前缀，比较主.次.修订 三段 */
+    while (*a && !isdigit(*a)) a++;
+    while (*b && !isdigit(*b)) b++;
+    for (int i = 0; i < 3; i++) {
+        int va = atoi(a), vb = atoi(b);
+        if (va != vb) return va - vb;
+        a = strchr(a, '.'); b = strchr(b, '.');
+        if (!a || !b) return 0;
+        a++; b++;
+    }
+    return 0;
 }
 
 static void handle_update_check(int fd) {
