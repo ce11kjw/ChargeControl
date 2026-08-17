@@ -233,6 +233,23 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
         <div class="toggle" :class="s.history_enabled ? 'on' : ''" @click="toggleHistory()"></div>
       </div>
     </div>
+
+    <div class="panel">
+      <h2 x-text="t('lang') + ' / ' + t('theme')"></h2>
+      <div class="row"><span class="lbl">语言</span>
+        <select style="background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:4px" @change="setExtras({lang: $event.target.value})">
+          <option value="0" :selected="s.lang==0">简体中文</option>
+          <option value="1" :selected="s.lang==1">English</option>
+        </select>
+      </div>
+      <div class="row"><span class="lbl">主题</span>
+        <select style="background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:4px" @change="setExtras({theme: $event.target.value})">
+          <option value="0" :selected="s.theme==0">深色</option>
+          <option value="1" :selected="s.theme==1">浅色</option>
+        </select>
+      </div>
+    </div>
+  
   </div>
 
 <div x-show="tab==='stats'">
@@ -259,24 +276,21 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
         <span style="font-size:13px;color:#e2e8f0" x-text="s.stats_mah ? (s.stats_mah/1000).toFixed(2) + ' Ah' : '0'"></span>
       </div>
     </div>
-  </div>
 
     <div class="panel">
-      <h2 x-text="t('lang' + ' / ' + t('theme')"></h2>
-      <div class="row"><span class="lbl">语言</span>
-        <select style="background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:4px" @change="setExtras({lang: $event.target.value})">
-          <option value="0" :selected="s.lang==0">简体中文</option>
-          <option value="1" :selected="s.lang==1">English</option>
-        </select>
-      </div>
-      <div class="row"><span class="lbl">主题</span>
-        <select style="background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:4px" @change="setExtras({theme: $event.target.value})">
-          <option value="0" :selected="s.theme==0">深色</option>
-          <option value="1" :selected="s.theme==1">浅色</option>
-        </select>
-      </div>
+      <h2 x-text="t('topuid')"></h2>
+      <div x-show="s.topUid.length === 0" style="color:#94a3b8;font-size:12px" x-text="t('topuid_loading')"></div>
+      <template x-for="(u, i) in s.topUid" :key="i">
+        <div style="display:flex;align-items:center;gap:8px;background:rgba(148,163,184,.08);padding:8px 12px;border-radius:8px;margin-bottom:4px">
+          <span style="font-size:11px;color:#94a3b8;width:18px" x-text="(i+1)+'.'"></span>
+          <span style="flex:1;font-size:13px;color:#e2e8f0;word-break:break-all" x-text="u.n"></span>
+          <span style="font-size:12px;color:var(--orange)" x-text="u.m + ' mAh'"></span>
+        </div>
+      </template>
     </div>
-  <div x-show="tab==='log'">
+  </div>
+
+<div x-show="tab==='log'">
     <div class="panel">
       <h2>📜 运行日志</h2>
       <div class="log-box" x-text="logContent || '暂无日志'"></div>
