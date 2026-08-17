@@ -116,22 +116,18 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
         <div class="sub" x-text="'PID ' + (s.proc_pid || '—') + '  CPU ' + (s.cpu_pct >= 0 ? (cpuCpuPct() + '%') : '—')"></div>
       </div>
       <div class="card">
-        <div style="display:flex;gap:20px;font-size:13px;color:#94a3b8;margin-top:4px">
-          <span>循环 <strong style="color:#e2e8f0" x-text="s.cycle_count >= 0 ? s.cycle_count : '—'"></strong> 次</span>
+        <div style="display:flex;gap:16px;font-size:13px;color:#94a3b8;margin-top:4px;flex-wrap:wrap">
+          <span>循环 <strong style="color:#e2e8f0" x-text="s.cycle_count >= 0 ? s.cycle_count : '—'"></strong> 次 · 衰减 <strong style="color:#e2e8f0" x-text="s.health >= 0 ? (100 - s.health).toFixed(1) + '%' : '—'"></strong></span>
           <span>健康度 <strong style="color:#e2e8f0" x-text="s.health > 0 ? s.health + '%' : '—'"></strong> <span x-text="s.health_rating"></span></span>
-          <span x-show="s.health >= 0">衰减 <strong style="color:#e2e8f0" x-text="(100 - s.health).toFixed(1) + '%'"></strong></span>
         </div>
       </div>
     </div>
       <div class="meta">
-        <div>电池健康度 <span x-text="s.health_rating"></span></div>
-        <div x-show="s.charge_full_mah > 0">满充 <span x-text="s.charge_full_mah + 'mAh'"></span> / 设计 <span>5380mAh</span></div>
-        <div x-show="s.est_cycles_left > 0">剩余约 <span x-text="s.est_cycles_left"></span> 次循环 (至60%)</div>
+        <div>满充 <span x-text="s.charge_full_mah + 'mAh'"></span> / 设计 <span>5380mAh</span> · 剩余约 <span x-text="s.est_cycles_left > 0 ? s.est_cycles_left : '—'"></span> 次 (至60%)</div>
+
         <div x-show="s.health > 0 && s.health < 80" style="color:var(--red)">&#x26a0;&#xfe0f; 健康度低于80%</div>
-        <div x-show="s.cycle_count >= 0" style="color:#94a3b8">已循环 <span x-text="s.cycle_count"></span> 次 · 衰减 <span x-text="s.health >= 0 ? (100 - s.health).toFixed(1) + '%' : '—'"></span></div>
-        <div x-show="s.temp > 0" style="color:#94a3b8">当前温度 <span x-text="s.temp + '°C'"></span> · 电压 <span x-text="s.voltage ? (s.voltage/1000).toFixed(3) + 'V' : '—'"></span></div>
-        <div x-show="s.current" style="color:#94a3b8">当前电流 <span x-text="curDisplay()"></span></div>
-        <div x-show="s.power_mw" style="color:#94a3b8">当前功率 <span x-text="powerDisplay()"></span></div>
+        <div x-show="s.temp > 0" style="color:#94a3b8">温度 <span x-text="s.temp + '°C'"></span> · 电压 <span x-text="s.voltage ? (s.voltage/1000).toFixed(3) + 'V' : '—'"></span></div>
+        <div x-show="s.current || s.power_mw" style="color:#94a3b8">电流 <span x-text="curDisplay()"></span> · 功率 <span x-text="powerDisplay()"></span></div>
       </div>
     </div>
 

@@ -66,6 +66,7 @@ static char bat_status[32] = "Unknown";
 static int soc_temp = -1, gpu_temp = -1, chg_temp = -1, case_temp = -1;
 static int cycle_count = -1, health = -1;
 static int usb_online = 0, usb_power_max = 0, pd_type = 0;
+static int usb_curr_cache = 0, usb_volt_cache = 0;
 static char proto_name[32] = "未知";
 static char control_state[24] = "idle";
 
@@ -133,8 +134,7 @@ static void update_battery(void) {
     if ((v = read_int(path)) >= 0) {
         bat_curr = v / 1000;
         if (bat_curr != 0 && bat_volt > 0) {
-            power_mw = bat_curr * bat_volt / 1000;
-            if (strcmp(bat_status, "Charging") != 0) power_mw = -power_mw;
+            /* power_mw 由 handle_status 实时计算 */
         }
     }
     snprintf(path, sizeof(path), "%s/status", SYSFS);
@@ -152,6 +152,8 @@ static void update_battery(void) {
     usb_online = read_int(SYSFS_USB "/online");
     usb_power_max = read_int(SYSFS_USB "/power_max");
     pd_type = read_int(SYSFS_USB "/pd_type");
+    usb_curr_cache = read_int(SYSFS_USB "/current_now");
+    usb_volt_cache = read_int(SYSFS_USB "/voltage_now");
     char buf[64];
     if (read_str(SYSFS_USB "/real_type", buf, sizeof(buf)) > 0)
         strncpy(proto_name, buf, sizeof(proto_name)-1);
@@ -500,9 +502,9 @@ static void handle_status(int fd) {
     int vol_raw = read_int(SYSFS "/voltage_now");
     int cur_ma = cur_raw / 1000;
     int vol_mv = vol_raw / 1000;
-    /* usb 输入端（实时）优先 */
-    int usb_curr = read_int(SYSFS_USB "/input_current_now");
-    int usb_volt = read_int(SYSFS_USB "/voltage_now");
+    /* usb 输入端（5s 缓存）优先 */
+    int usb_curr = usb_curr_cache;
+    int usb_volt = usb_volt_cache;
     if (usb_curr > 0 && usb_volt > 0) {
         power_mw = (int)(((long)usb_curr / 1000) * ((long)usb_volt / 1000) / 1000);
         if (strcmp(bat_status, "Charging") != 0) power_mw = -power_mw;
