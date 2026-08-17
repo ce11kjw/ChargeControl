@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.31"
+#define VERSION "v1.2.32"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -609,7 +609,9 @@ static void handle_limit(int fd, const char *body) {
             else if (!strcmp(key, "webhook")) {
                 char wb[256]; strncpy(wb, dec, 255); wb[255] = '\0';
                 url_decode(wb);
-                if (strlen(wb) < 255) strcpy(webhook_url, wb);
+                if (strlen(wb) < 255 && !strchr(wb, '\"') && !strchr(wb, '\\'))
+                    strcpy(webhook_url, wb);
+                else log_event("webhook invalid chars");
             }
         }
         save_extras();
