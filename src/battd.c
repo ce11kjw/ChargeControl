@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.32"
+#define VERSION "v1.2.33"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -751,11 +751,15 @@ static void handle_client(int fd) {
     if (!strcmp(uri, "/api/log") && !strcmp(method, "GET")) {
         FILE *lf = fopen(LOGFILE, "r");
         if (!lf) { send_resp(fd, 200, "text/plain", "暂无日志"); return; }
-        fseek(lf, 0, SEEK_END); long lsz = ftell(lf); rewind(lf);
-        if (lsz > 0 && lsz < 65536) {
-            char *lbuf = malloc(lsz+1); size_t lrd = fread(lbuf, 1, lsz, lf); fclose(lf);
+        fseek(lf, 0, SEEK_END); long lsz = ftell(lf);
+        long start = 0;
+        if (lsz > 65536) { start = lsz - 65536; fseek(lf, start, SEEK_SET); lsz = 65536; }
+        else fseek(lf, 0, SEEK_SET);
+        char *lbuf = malloc(lsz+1);
+        if (lbuf) {
+            size_t lrd = fread(lbuf, 1, lsz, lf); fclose(lf);
             lbuf[lrd] = '\0'; send_resp(fd, 200, "text/plain", lbuf); free(lbuf);
-        } else { fclose(lf); send_resp(fd, 200, "text/plain", "日志过大"); }
+        } else { fclose(lf); send_resp(fd, 200, "text/plain", "暂无日志"); }
         return;
     }
     if (!strcmp(uri, "/api/export")) { handle_export(fd); return; }
