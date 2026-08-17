@@ -162,15 +162,6 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
     </div>
   </div>
 
-  <div class="panel">
-      <h2 x-text="t('night')"></h2>
-      <div class="row"><span class="lbl">开始</span>
-        <input type="number" class="inp" x-model.number="s.ns" min="0" max="23" @change="setExtras({ns: $event.target.value})">
-        <span class="lbl">结束</span>
-        <input type="number" class="inp" x-model.number="s.ne" min="0" max="23" @change="setExtras({ne: $event.target.value})"></div>
-      <div class="row"><span class="lbl">启用</span>
-        <div class="toggle" :class="s.night ? 'on' : ''" @click="setExtras({night: s.night?0:1})"></div></div>
-    </div>
 <div x-show="tab==='set'">
     <div class="panel">
       <h2>⚙️ 充电控制</h2>
