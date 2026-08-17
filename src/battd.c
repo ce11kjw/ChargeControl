@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.33"
+#define VERSION "v1.2.34"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -276,8 +276,14 @@ static void load_extras(void) {
         while (*p && *p != '"' && i < 255) webhook_url[i++] = *p++;
         webhook_url[i] = 0;
     }
-    sscanf(buf, "{\"night\":%d,\"ns\":%d,\"ne\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d}",
-        &night_enabled, &night_start_h, &night_end_h, &scene, &lang, &theme);
+    /* 逐字段解析（save_extras 中 webhook 位于 scene 与 lang 之间，整串 sscanf 会失配）*/
+    char *q;
+    if ((q = strstr(buf, "\"night\":"))) night_enabled = atoi(q + 8);
+    if ((q = strstr(buf, "\"ns\":"))) night_start_h = atoi(q + 5);
+    if ((q = strstr(buf, "\"ne\":"))) night_end_h = atoi(q + 5);
+    if ((q = strstr(buf, "\"scene\":"))) scene = atoi(q + 8);
+    if ((q = strstr(buf, "\"lang\":"))) lang = atoi(q + 7);
+    if ((q = strstr(buf, "\"theme\":"))) theme = atoi(q + 8);
 }
 static void save_extras(void) {
     FILE *f = fopen("/data/adb/battery-manager/extras.json", "w");
