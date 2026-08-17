@@ -170,16 +170,6 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
     </div>
 <div x-show="tab==='set'">
     <div class="panel">
-      <h2 x-text="t('scene')"></h2>
-      <div class="row"><span class="lbl" x-text="s.scene==1?t('scene_gaming'):s.scene==2?t('scene_sleep'):s.scene==3?t('scene_trip'):t('scene_custom')"></span></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-        <button class="btn" @click="applyScene(1)">🎮 游戏</button>
-        <button class="btn" @click="applyScene(2)">😴 睡眠</button>
-        <button class="btn" @click="applyScene(3)">✈️ 出差</button>
-        <button class="btn gray" @click="applyScene(0)">⚙️ 自定义</button>
-      </div>
-    </div>
-<div class="panel">
       <h2>⚙️ 充电控制</h2>
       <div class="row">
         <span class="lbl">启用充电限制</span>
@@ -216,6 +206,26 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
     </div>
 
 <div class="panel">
+      <h2 x-text="t('night')"></h2>
+      <div class="row"><span class="lbl">开始</span>
+        <input type="number" class="inp" x-model.number="s.ns" min="0" max="23" @change="setExtras({ns: $event.target.value})">
+        <span class="lbl">结束</span>
+        <input type="number" class="inp" x-model.number="s.ne" min="0" max="23" @change="setExtras({ne: $event.target.value})"></div>
+      <div class="row"><span class="lbl">启用</span>
+        <div class="toggle" :class="s.night ? 'on' : ''" @click="setExtras({night: s.night?0:1})"></div></div>
+    </div>
+
+<div class="panel">
+      <h2 x-text="t('scene')"></h2>
+      <div class="row"><span class="lbl" x-text="s.scene==1?t('scene_gaming'):s.scene==2?t('scene_sleep'):s.scene==3?t('scene_trip'):t('scene_custom')"></span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <button class="btn" @click="applyScene(1)">🎮 游戏</button>
+        <button class="btn" @click="applyScene(2)">😴 睡眠</button>
+        <button class="btn" @click="applyScene(3)">✈️ 出差</button>
+        <button class="btn gray" @click="applyScene(0)">⚙️ 自定义</button>
+      </div>
+    </div>
+<div class="panel">
       <h2 x-text="t('webhook')"></h2>
       <div class="row">
         <input type="text" style="width:100%;background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px;font-size:12px" placeholder="https://..." x-model="webhookUrl" @change="setExtras({webhook: webhookUrl})">
@@ -231,18 +241,7 @@ h1 .badge { font-size:11px; background:var(--accent); color:#0f172a; border-radi
     </div>
   </div>
 
-<div class="panel">
-      <h2 x-text="t('topuid')"></h2>
-      <div x-show="s.topUid.length === 0" style="color:#94a3b8;font-size:12px" x-text="t('topuid_loading')"></div>
-      <template x-for="(u, i) in s.topUid" :key="i">
-        <div style="display:flex;align-items:center;gap:8px;background:#0f172a;padding:8px 12px;border-radius:8px;margin-bottom:4px">
-          <span style="font-size:11px;color:#94a3b8;width:18px" x-text="(i+1)+'.'"></span>
-          <span style="flex:1;font-size:13px;color:#e2e8f0;word-break:break-all" x-text="u.n"></span>
-          <span style="font-size:12px;color:var(--orange)" x-text="u.m + ' mAh'"></span>
-        </div>
-      </template>
-    </div>
-  <div x-show="tab==='stats'">
+<div x-show="tab==='stats'">
     <div class="panel">
       <h2>🔋 充电统计</h2>
       <div class="row">
