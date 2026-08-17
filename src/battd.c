@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.34"
+#define VERSION "v1.2.35"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -589,20 +589,20 @@ static void handle_limit(int fd, const char *body) {
         char *copy = strdup(body); char *save = NULL;
         for (char *tok = strtok_r(copy, "&", &save); tok; tok = strtok_r(NULL, "&", &save)) {
             char *eq = strchr(tok, '='); if (!eq) continue;
-            *eq = '\0'; char key[64], val[64];
+            *eq = '\0'; char key[64], val[512];
             strncpy(key, tok, 63); key[63] = '\0';
-            strncpy(val, eq+1, 63); val[63] = '\0';
+            strncpy(val, eq+1, 511); val[511] = '\0';
             const char *dec = val;
-            if (!strcmp(key, "charge_limit")) charge_limit = atoi(dec);
-            else if (!strcmp(key, "temp_limit")) temp_limit = atoi(dec);
-            else if (!strcmp(key, "resume_delta")) resume_delta = atoi(dec);
-            else if (!strcmp(key, "interval")) interval = atoi(dec);
+            if (!strcmp(key, "charge_limit")) { int x = atoi(dec); if (x >= 20 && x <= 100) charge_limit = x; }
+            else if (!strcmp(key, "temp_limit")) { int x = atoi(dec); if (x >= 30 && x <= 60) temp_limit = x; }
+            else if (!strcmp(key, "resume_delta")) { int x = atoi(dec); if (x >= 1 && x <= 20) resume_delta = x; }
+            else if (!strcmp(key, "interval")) { int x = atoi(dec); if (x >= 1 && x <= 60) interval = x; }
             else if (!strcmp(key, "enabled")) limit_enabled = atoi(dec);
             else if (!strcmp(key, "history_enabled")) history_enabled = atoi(dec);
             else if (!strcmp(key, "bypass") && bypass_supported) write_str(bypass_node, atoi(dec) ? "1" : "0");
             else if (!strcmp(key, "night")) night_enabled = atoi(dec);
-            else if (!strcmp(key, "ns")) night_start_h = atoi(dec);
-            else if (!strcmp(key, "ne")) night_end_h = atoi(dec);
+            else if (!strcmp(key, "ns")) { int x = atoi(dec); if (x >= 0 && x <= 23) night_start_h = x; }
+            else if (!strcmp(key, "ne")) { int x = atoi(dec); if (x >= 0 && x <= 23) night_end_h = x; }
             else if (!strcmp(key, "scene")) {
                 scene = atoi(dec);
                 if (scene == 1) { charge_limit = 70; temp_limit = 40; log_event("scene: gaming"); }
