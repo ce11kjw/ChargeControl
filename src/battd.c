@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.28"
+#define VERSION "v1.2.29"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -101,7 +101,11 @@ static void log_event(const char *msg) {
     fclose(f);
 }
 
+static time_t temps_last = 0;
 static void update_temps(void) {
+    time_t tn = time(NULL);
+    if (tn - temps_last < 5) return;  /* 5s 节流 */
+    temps_last = tn;
     soc_temp = -1; gpu_temp = -1; chg_temp = -1; case_temp = -1;
     for (int i = 0; i < 100; i++) {
         char tzpath[128]; snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/type", THERMAL, i);
@@ -443,10 +447,11 @@ static char *history_json(void) {
 
 static void send_resp(int fd, int code, const char *ctype, const char *body) {
     char head[512];
+    const char *reason = code==200?"OK":code==405?"Method Not Allowed":code==404?"Not Found":code==500?"Internal Server Error":"Error";
     int n = snprintf(head, sizeof(head),
         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
         "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
-        code, code==200?"OK":"Not Found", ctype, body?strlen(body):0);
+        code, reason, ctype, body?strlen(body):0);
     ssize_t _w = write(fd, head, n); (void)_w;
     if (body) { ssize_t _w2 = write(fd, body, strlen(body)); (void)_w2; }
 }
@@ -605,6 +610,7 @@ static void handle_full(int fd, const char *body) {
         full_once = 1; full_until = time(NULL) + FULL_TIMEOUT;
         log_event("手动充满已启动，30分钟超时");
     }
+    apply_control();
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
 }
 
@@ -616,6 +622,7 @@ static void handle_pause(int fd, const char *body) {
         paused = 0;
         log_event("manual resume");
     }
+    apply_control();
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
 }
 
