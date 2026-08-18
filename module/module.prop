@@ -1,6 +1,6 @@
 id=chargecontrol
 name=ChargeControl
-version=v1.2.47
-versionCode=49
+version=v1.2.48
+versionCode=50
 author=ce11kjw
 description=电池管家 - 充电限制 + 温度保护 + 实时监控

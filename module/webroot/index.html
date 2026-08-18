@@ -74,7 +74,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.2.47</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.48</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'"><span class="ti">📊</span><span>仪表盘</span></div>
@@ -127,6 +127,15 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
         <div x-show="s.health > 0 && s.health < 80" style="color:var(--red);margin-top:4px">&#x26a0;&#xfe0f; 健康度低于80%</div>
         <div x-show="s.temp > 0" style="color:var(--txt2);margin-top:4px">温度 <span x-text="s.temp + '°C'"></span> · 电压 <span x-text="s.voltage ? (s.voltage/1000).toFixed(3) + 'V' : '—'"></span></div>
         <div x-show="s.current || s.power_mw" style="color:var(--txt2);margin-top:4px">电流 <span x-text="curDisplay()"></span> · 功率 <span x-text="powerDisplay()"></span></div>
+        <div style="color:var(--txt2);margin-top:4px" x-show="s.bat_technology || s.bat_manufacturer || s.bat_model_name">
+          <span x-show="s.bat_technology" x-text="s.bat_technology"></span>
+          <span x-show="s.bat_manufacturer"> · <span x-text="s.bat_manufacturer"></span></span>
+          <span x-show="s.bat_model_name"> · <span x-text="s.bat_model_name"></span></span>
+        </div>
+        <div style="color:var(--txt2);margin-top:4px" x-show="s.bat_health || s.bat_capacity_level">
+          <span x-show="s.bat_health">状态 <span x-text="s.bat_health"></span></span>
+          <span x-show="s.bat_capacity_level"> · 容量 <span x-text="s.bat_capacity_level"></span></span>
+        </div>
       </div>
     </div>
 
@@ -149,6 +158,10 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
         <div class="temp-item"><span class="n">连接状态</span><span class="v" :style="s.usb_online ? 'color:var(--green)' : ''" x-text="s.usb_online ? '已连接' : '未连接'"></span></div>
         <div class="temp-item"><span class="n">实时电流</span><span class="v" :style="s.current < 0 ? 'color:var(--green)' : (s.current > 0 ? 'color:var(--orange)' : '')" x-text="curDisplay()"></span></div>
         <div class="temp-item"><span class="n">旁路充电</span><span class="v" x-text="(s.bypass_ok ? (s.bypass_on ? '已激活' : '未激活') : '不支持')" :style="s.bypass_on ? 'color:var(--green)' : ''"></span></div>
+        <div class="temp-item"><span class="n">充电类型</span><span class="v" x-text="['未知','N/A','Trickle','Fast','Standard','Adaptive','Custom','Long Life','Bypass'][s.charge_type+1] || '—'"></span></div>
+        <div class="temp-item"><span class="n">预计充满</span><span class="v" x-text="s.time_to_full > 0 ? Math.ceil(s.time_to_full/60) + '分' : (s.est_full_min > 0 ? s.est_full_min + '分' : '—')"></span></div>
+        <div class="temp-item"><span class="n">累计电量</span><span class="v" x-text="s.charge_counter > 0 ? (s.charge_counter/1000).toFixed(0) + 'mAh' : '—'"></span></div>
+        <div class="temp-item"><span class="n">输入限流</span><span class="v" x-text="s.input_current_limit > 0 ? (s.input_current_limit/1000).toFixed(0) + 'mA' : '—'"></span></div>
       </div>
     </div>
 

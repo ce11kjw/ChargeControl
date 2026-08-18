@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.47"
+#define VERSION "v1.2.48"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -61,6 +61,9 @@ static time_t session_30s = 0;
 static int alerted_high = 0;
 static long stats_min = 0, stats_mah = 0;
 
+static char bat_technology[16] = "", bat_capacity_level[16] = "", bat_health[16] = "";
+static int bat_charge_type = -1, bat_time_to_full = -1, bat_charge_counter = -1, bat_input_current_limit = -1;
+static char bat_manufacturer[64] = "", bat_model_name[64] = "";
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 static char bat_status[32] = "Unknown";
 static int soc_temp = -1, gpu_temp = -1, chg_temp = -1, case_temp = -1;
@@ -143,6 +146,22 @@ static void update_battery(void) {
     char path[MAX_LINE]; int v;
     snprintf(path, sizeof(path), "%s/capacity", SYSFS);
     if ((v = read_int(path)) >= 0) bat_capacity = v;
+    snprintf(path, sizeof(path), "%s/capacity_level", SYSFS);
+    read_str(path, bat_capacity_level, sizeof(bat_capacity_level));
+    snprintf(path, sizeof(path), "%s/health", SYSFS);
+    read_str(path, bat_health, sizeof(bat_health));
+    snprintf(path, sizeof(path), "%s/technology", SYSFS);
+    read_str(path, bat_technology, sizeof(bat_technology));
+    snprintf(path, sizeof(path), "%s/charge_type", SYSFS);
+    if ((v = read_int(path)) >= 0) bat_charge_type = v;
+    snprintf(path, sizeof(path), "%s/time_to_full_now", SYSFS);
+    if ((v = read_int(path)) >= 0) bat_time_to_full = v;
+    snprintf(path, sizeof(path), "%s/charge_counter", SYSFS);
+    if ((v = read_int(path)) >= 0) bat_charge_counter = v;
+    snprintf(path, sizeof(path), "%s/manufacturer", SYSFS);
+    read_str(path, bat_manufacturer, sizeof(bat_manufacturer));
+    snprintf(path, sizeof(path), "%s/model_name", SYSFS);
+    read_str(path, bat_model_name, sizeof(bat_model_name));
     snprintf(path, sizeof(path), "%s/temp", SYSFS);
     if ((v = read_int(path)) >= 0) bat_temp = v / 10;
     snprintf(path, sizeof(path), "%s/voltage_now", SYSFS);
@@ -169,6 +188,7 @@ static void update_battery(void) {
     usb_online = read_int(SYSFS_USB "/online");
     usb_power_max = read_int(SYSFS_USB "/power_max");
     pd_type = read_int(SYSFS_USB "/pd_type");
+    bat_input_current_limit = read_int(SYSFS_USB "/input_current_limit");
     usb_curr_cache = read_int(SYSFS_USB "/current_now");
     usb_volt_cache = read_int(SYSFS_USB "/voltage_now");
     char buf[64];
@@ -476,7 +496,7 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
 }
 
 static void handle_status(int fd) {
-    char body[2048];
+    char body[3072];
     update_temps();
     int charge_full = read_int(SYSFS "/charge_full") / 1000;
 
@@ -570,7 +590,7 @@ static void handle_status(int fd) {
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
-        "\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
+        "\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"top_n\":%d}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
@@ -580,7 +600,7 @@ static void handle_status(int fd) {
         power_mw, est_full_min,
         usb_online, proto_name, pd_type, usb_power_max,
         control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
-        webhook_url, bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high, top_count);
+        bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, webhook_url, bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high, top_count);
     send_resp(fd, 200, "application/json", body);
 }
 
