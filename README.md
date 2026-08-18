@@ -145,6 +145,9 @@ make package  # 编译 + 打包为 ChargeControl.zip
 | v1.2.43 | 编译格式警告修复 |
 | v1.2.44 | WEBROOT 宏传参零警告 |
 | v1.2.45 | update.json KSU 远程更新 / 打包带版本号 / README 同步 |
+| v1.2.46 | KSU update.json 同步 / 编译零警告 |
+| v1.2.47 | 去框中框（iOS 列表行 / border-bottom 分隔） |
+| v1.2.48 | 新增 9 个 sysfs 字段（technology / capacity_level / health / charge_type / time_to_full / charge_counter / input_current_limit / manufacturer / model_name） |
 
 ## License
 
