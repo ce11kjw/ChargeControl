@@ -25,7 +25,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.61"
+#define VERSION "v1.2.62"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -225,7 +225,7 @@ static void update_temps(void) {
     if (tn - temps_last < 5) return;  /* 5s 节流 */
     temps_last = tn;
     soc_temp = -1; gpu_temp = -1; chg_temp = -1; case_temp = -1;
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0; i < 20; i++) {
         char tzpath[128]; snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/type", THERMAL, i);
         char tname[64];
         if (read_str(tzpath, tname, sizeof(tname)) <= 0) continue;
