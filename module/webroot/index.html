@@ -74,7 +74,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.2.63</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.64</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'"><span class="ti"><i class="fa-solid fa-gauge-high"></i></span><span>仪表盘</span></div>
@@ -150,7 +150,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel">
       <h2><i class="fa-solid fa-bolt" style="margin-right:6px"></i>充电详情</h2>
       <div class="temp-list">
-        <div class="temp-item"><span class="n">充电协议</span><span class="v" x-text="s.proto_name || '—'"></span></div><div class="temp-item"><span class="n">协商功率</span><span class="v" x-text="s.power_max ? s.power_max + 'W' : '—'"></span></div><div class="temp-item"><span class="n">PD版本</span><span class="v" x-text="s.pd_type ? 'PD' + s.pd_type : '—'"></span></div><div class="temp-item"><span class="n">连接状态</span><span class="v" :style="s.usb_online ? 'color:var(--green)' : ''" x-text="s.usb_online ? '已连接' : '未连接'"></span></div><div class="temp-item"><span class="n">实时电流</span><span class="v" :style="s.current < 0 ? 'color:var(--green)' : (s.current > 0 ? 'color:var(--orange)' : '')" x-text="curDisplay()"></span></div><div class="temp-item"><span class="n">旁路充电</span><span class="v" x-text="(s.bypass_ok ? (s.bypass_on ? '已激活' : '未激活') : '不支持')" :style="s.bypass_on ? 'color:var(--green)' : ''"></span></div><div class="temp-item"><span class="n">充电类型</span><span class="v" x-text="['未知','N/A','Trickle','Fast','Standard','Adaptive','Custom','Long Life','Bypass'][s.charge_type+1] || '—'"></span></div><div class="temp-item"><span class="n">预计充满</span><span class="v" x-text="s.time_to_full > 0 ? Math.ceil(s.time_to_full/60) + '分' : (s.est_full_txt || '—')"></span></div><div class="temp-item"><span class="n">累计电量</span><span class="v" x-text="s.charge_counter > 0 ? (s.charge_counter/1000).toFixed(0) + 'mAh' : '—'"></span></div><div class="temp-item"><span class="n">输入限流</span><span class="v" x-text="s.input_current_limit > 0 ? (s.input_current_limit/1000).toFixed(0) + 'mA' : '—'"></span></div>
+        <div class="temp-item"><span class="n">充电协议</span><span class="v" x-text="s.proto_name || '—'"></span></div><div class="temp-item"><span class="n">协商功率</span><span class="v" x-text="s.power_max ? s.power_max + 'W' : '—'"></span></div><div class="temp-item"><span class="n">PD版本</span><span class="v" x-text="s.pd_type ? 'PD' + s.pd_type : '—'"></span></div><div class="temp-item"><span class="n">连接状态</span><span class="v" :style="s.usb_online ? 'color:var(--green)' : ''" x-text="s.usb_online ? '已连接' : '未连接'"></span></div><div class="temp-item"><span class="n">实时电流</span><span class="v" :style="s.current < 0 ? 'color:var(--green)' : (s.current > 0 ? 'color:var(--orange)' : '')" x-text="curDisplay()"></span></div><div class="temp-item"><span class="n">旁路充电</span><span class="v" :style="s.bypass_on ? 'color:var(--green)' : ''" x-text="(s.bypass_on ? (s.bypass_hw ? '已激活' : '已激活(软件)') : '未激活')"></span></div><div class="temp-item"><span class="n">充电类型</span><span class="v" x-text="['未知','N/A','Trickle','Fast','Standard','Adaptive','Custom','Long Life','Bypass'][s.charge_type+1] || '—'"></span></div><div class="temp-item"><span class="n">预计充满</span><span class="v" x-text="s.time_to_full > 0 ? Math.ceil(s.time_to_full/60) + '分' : (s.est_full_txt || '—')"></span></div><div class="temp-item"><span class="n">累计电量</span><span class="v" x-text="s.charge_counter > 0 ? (s.charge_counter/1000).toFixed(0) + 'mAh' : '—'"></span></div><div class="temp-item"><span class="n">输入限流</span><span class="v" x-text="s.input_current_limit > 0 ? (s.input_current_limit/1000).toFixed(0) + 'mA' : '—'"></span></div>
       </div>
     </div></div>
     </div>
@@ -184,13 +184,9 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
         <span class="lbl">启用充电限制</span>
         <div class="toggle" :class="s.limit_enabled ? 'on' : ''" @click="toggleEnabled()"></div>
       </div>
-      <div class="row" x-show="s.bypass_ok">
-        <span class="lbl">旁路充电 <span style="font-size:11px;color:var(--txt2)">(充电器直供电池)</span></span>
+      <div class="row">
+        <span class="lbl">旁路充电 <span style="font-size:11px;color:var(--txt2)" x-text="s.bypass_hw ? '硬件直供' : '软件模式·维持55-60%'"></span></span>
         <div class="toggle" :class="s.bypass_on ? 'on' : ''" @click="toggleBypass()"></div>
-      </div>
-      <div class="row" x-show="!s.bypass_ok" style="opacity:.5">
-        <span class="lbl">旁路充电</span>
-        <span style="font-size:12px;color:var(--txt2)">设备不支持</span>
       </div>
       <div style="font-size:13px;color:var(--txt2);padding:4px 0 6px"><i class="fa-solid fa-sliders" style="margin-right:4px"></i>高级设置</div>
       <div>
@@ -338,7 +334,7 @@ function app() {
     t(k) { return (this.i18n[this.s.lang?'en':'zh']||{})[k] || k; },
     tab: 'dash', 
     webhookUrl: '', whLoaded: false,
-    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, est_full_txt:'', health_degrade:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, lang:0, theme:0, webhookUrl:'', mem_total:0, mem_avail:0, mem_free:0, storage_total:0, storage_free:0, uptime_secs:0, cpu_cores:0, kernel_ver:'', cpu_model:'', device_model:'', wifi_rssi:-128, wifi_on:0, mobile_on:0, ip_addr:'', bat_technology:'', bat_capacity_level:'', bat_health:'', charge_type:-1, time_to_full:-1, charge_counter:-1, input_current_limit:-1, bat_manufacturer:'', bat_model_name:'', voltage_ocv:-1, current_avg:-1, temp_ambient:-1, constant_charge_current:-1, constant_charge_voltage:-1, capacity_error_margin:-1, time_to_empty:-1, bat_present:-1, internal_resistance:-1, charge_now:-1, charge_term_current:-1, constant_charge_current_max:-1, constant_charge_voltage_max:-1, temp_max:-1, temp_min:-1, charger_temp:-1, charge_done:-1, input_voltage_settled:-1, safety_timer_expired:-1, calibrate:-1 },
+    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, est_full_txt:'', health_degrade:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, bypass_hw:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, lang:0, theme:0, webhookUrl:'', mem_total:0, mem_avail:0, mem_free:0, storage_total:0, storage_free:0, uptime_secs:0, cpu_cores:0, kernel_ver:'', cpu_model:'', device_model:'', wifi_rssi:-128, wifi_on:0, mobile_on:0, ip_addr:'', bat_technology:'', bat_capacity_level:'', bat_health:'', charge_type:-1, time_to_full:-1, charge_counter:-1, input_current_limit:-1, bat_manufacturer:'', bat_model_name:'', voltage_ocv:-1, current_avg:-1, temp_ambient:-1, constant_charge_current:-1, constant_charge_voltage:-1, capacity_error_margin:-1, time_to_empty:-1, bat_present:-1, internal_resistance:-1, charge_now:-1, charge_term_current:-1, constant_charge_current_max:-1, constant_charge_voltage_max:-1, temp_max:-1, temp_min:-1, charger_temp:-1, charge_done:-1, input_voltage_settled:-1, safety_timer_expired:-1, calibrate:-1 },
     logContent: '', lastUpdate: '', updateMsg: '', latestVer: '', timer: null, chart: null, fullTimer: null, loaded: false,
 
     async fetchJson(url, opts) { try { const r = await fetch(url, opts); return await r.json(); } catch (e) { return null; } },
@@ -405,7 +401,7 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
       await this.fetchJson(this.API_BASE + '/api/pause', { method:'POST', body: this.s.paused ? 'pause=1' : 'pause=0', headers:{'Content-Type':'application/x-www-form-urlencoded'} });
     },
 
-    async toggleBypass() { if (!this.s.bypass_ok) return; this.s.bypass_on = !this.s.bypass_on; await this.fetchJson(this.API_BASE + '/api/limit', { method:'POST', body: 'bypass=' + (this.s.bypass_on ? 1 : 0), headers:{'Content-Type':'application/x-www-form-urlencoded'} }); },
+    async toggleBypass() { this.s.bypass_on = !this.s.bypass_on; await this.fetchJson(this.API_BASE + '/api/limit', { method:'POST', body: 'bypass=' + (this.s.bypass_on ? 1 : 0), headers:{'Content-Type':'application/x-www-form-urlencoded'} }); },
 
     async toggleHistory() {
       this.s.history_enabled = this.s.history_enabled ? 0 : 1;

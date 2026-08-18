@@ -25,7 +25,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.63"
+#define VERSION "v1.2.64"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -47,6 +47,9 @@ static int proc_pid_val = 0;
 static int cpu_pct = 0;
 static int bypass_supported = 0;
 static char bypass_node[64] = "";
+static int bypass_soft = 0;
+#define BYPASS_LO 55
+#define BYPASS_HI 60
 /* 充电统计 */
 static time_t sess_start = 0;
 static int sess_start_cap = -1;
@@ -338,6 +341,17 @@ static void apply_control(void) {
         }
     }
 
+    /* 软旁路：维持电量在 [55,60]，充电器直供系统 */
+    if (bypass_soft) {
+        int ns2 = -1;
+        if (bat_capacity >= BYPASS_HI) ns2 = 1;
+        else if (bat_capacity <= BYPASS_LO) ns2 = 0;
+        if (ns2 >= 0 && ns2 != last_suspend_val) {
+            if (write_str(path, ns2 ? "1" : "0") < 0) log_event("写input_suspend失败(软旁路)");
+            last_suspend_val = ns2;
+        }
+        return;
+    }
     if (!limit_enabled) {
         if (write_str(path, "0") < 0) log_event("写input_suspend失败(关闭)");
         temp_suspended = 0; return;
@@ -404,12 +418,13 @@ static void load_extras(void) {
     if ((q = strstr(buf, "\"scene\":"))) scene = atoi(q + 8);
     if ((q = strstr(buf, "\"lang\":"))) lang = atoi(q + 7);
     if ((q = strstr(buf, "\"theme\":"))) theme = atoi(q + 8);
+    if ((q = strstr(buf, "\"bypass_soft\":"))) bypass_soft = atoi(q + 13);
 }
 static void save_extras(void) {
     FILE *f = fopen("/data/adb/battery-manager/extras.json", "w");
     if (!f) return;
-    fprintf(f, "{\"night\":%d,\"ns\":%d,\"ne\":%d,\"scene\":%d,\"webhook\":\"%s\",\"lang\":%d,\"theme\":%d}",
-        night_enabled, night_start_h, night_end_h, scene, webhook_url, lang, theme);
+    fprintf(f, "{\"night\":%d,\"ns\":%d,\"ne\":%d,\"scene\":%d,\"webhook\":\"%s\",\"lang\":%d,\"theme\":%d,\"bypass_soft\":%d}",
+        night_enabled, night_start_h, night_end_h, scene, webhook_url, lang, theme, bypass_soft);
     fclose(f);
 }
 
@@ -602,11 +617,11 @@ static void handle_status(int fd) {
         fclose(sf);
     }
     /* bypass 状态（实时读节点值）*/
-    int bypass_ok = bypass_supported, bypass_on = 0;
-    if (bypass_ok) {
+    int bypass_ok = 1, bypass_on = 0;
+    if (bypass_supported) {
         int bv = read_int(bypass_node);
         if (bv > 0) bypass_on = 1;
-    }
+    } else bypass_on = bypass_soft;
     int power_mw = 0;
     /* 实时读取电流/电压（不依赖缓存）*/
     int cur_raw = read_int(SYSFS "/current_now");
@@ -667,7 +682,7 @@ static void handle_status(int fd) {
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
-        "\"mem_total\":%d,\"mem_avail\":%d,\"mem_free\":%d,\"storage_total\":%d,\"storage_free\":%d,\"uptime_secs\":%d,\"cpu_cores\":%d,\"kernel_ver\":\"%s\",\"cpu_model\":\"%s\",\"device_model\":\"%s\",\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
+        "\"mem_total\":%d,\"mem_avail\":%d,\"mem_free\":%d,\"storage_total\":%d,\"storage_free\":%d,\"uptime_secs\":%d,\"cpu_cores\":%d,\"kernel_ver\":\"%s\",\"cpu_model\":\"%s\",\"device_model\":\"%s\",\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
@@ -677,7 +692,7 @@ static void handle_status(int fd) {
         power_mw, est_full_min, est_full_txt, health_degrade,
         usb_online, proto_name, pd_type, usb_power_max,
         control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
-        mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, cpu_model, device_model, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high);
+        mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, cpu_model, device_model, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high);
     /* 系统信息 */
     { int v = 0;
         FILE *mf = fopen("/proc/meminfo", "r");
@@ -729,7 +744,10 @@ static void handle_limit(int fd, const char *body) {
             else if (!strcmp(key, "interval")) { int x = atoi(dec); if (x >= 1 && x <= 60) interval = x; }
             else if (!strcmp(key, "enabled")) limit_enabled = atoi(dec);
             else if (!strcmp(key, "history_enabled")) history_enabled = atoi(dec);
-            else if (!strcmp(key, "bypass") && bypass_supported) write_str(bypass_node, atoi(dec) ? "1" : "0");
+            else if (!strcmp(key, "bypass")) {
+                if (bypass_supported) write_str(bypass_node, atoi(dec) ? "1" : "0");
+                else { bypass_soft = atoi(dec) ? 1 : 0; if (bypass_soft) last_suspend_val = -1; }
+            }
             else if (!strcmp(key, "night")) night_enabled = atoi(dec);
             else if (!strcmp(key, "ns")) { int x = atoi(dec); if (x >= 0 && x <= 23) night_start_h = x; }
             else if (!strcmp(key, "ne")) { int x = atoi(dec); if (x >= 0 && x <= 23) night_end_h = x; }
@@ -960,7 +978,7 @@ int main(void) {
     load_config(); load_stats(); load_extras(); last_save = time(NULL);
     update_battery();
     /* 探测旁路支持 */
-    FILE *bf = popen("ls /sys/class/power_supply/*/bypass_charger /sys/class/power_supply/*/charge_bypass 2>/dev/null | head -1", "r");
+    FILE *bf = popen("ls /sys/class/power_supply/*/bypass_charger /sys/class/power_supply/*/charge_bypass /sys/class/power_supply/*/bypass /sys/class/power_supply/*/bypass_mode /sys/class/power_supply/*/bypass_charging /sys/class/power_supply/*/charging_bypass /sys/class/power_supply/*/smb_bypass /sys/class/power_supply/*/main_bypass /sys/class/power_supply/*/batt_bypass /sys/class/power_supply/*/charge_control_bypass 2>/dev/null | head -1", "r");
     if (bf) { char bb[64]; if (fgets(bb, sizeof(bb), bf)) { size_t bl = strlen(bb); while (bl > 0 && (bb[bl-1]=='\n'||bb[bl-1]==' ')) bb[--bl]='\0'; if (bl>0) { bypass_supported = 1; strncpy(bypass_node, bb, sizeof(bypass_node)-1); } } pclose(bf); }
     log_event("ChargeControl 守护进程启动");
 
