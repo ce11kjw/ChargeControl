@@ -25,7 +25,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.53"
+#define VERSION "v1.2.55"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -39,6 +39,7 @@ static int full_once = 0;
 static time_t full_until = 0;
 static int history_enabled = 1;
 static int paused = 0;
+static int last_suspend_val = -1;
 static long prev_cpu_ticks = 0;
 static long prev_proc_ticks = 0;
 static char proc_name_buf[32] = "";
@@ -76,6 +77,8 @@ static int mem_total = -1, mem_avail = -1, mem_free = -1;
 static int storage_total = -1, storage_free = -1;
 static int uptime_secs = -1, cpu_cores = -1;
 static char kernel_ver[128] = "";
+static int charge_full_mah = 0, capacity_disp = 0, power_mw = 0, est_full_min = 0, est_cycles_left = 0;
+static char health_rating[16] = "";
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 static char bat_status[32] = "Unknown";
 static int soc_temp = -1, gpu_temp = -1, chg_temp = -1, case_temp = -1;
@@ -130,12 +133,48 @@ static void log_event(const char *msg) {
 }
 
 static time_t temps_last = 0;
+static time_t slow_bat_last = 0;
+static void slow_update_battery(void) {
+    time_t tn = time(NULL);
+    if (tn - slow_bat_last < 30) return;
+    slow_bat_last = tn;
+    char path[MAX_LINE]; int v;
+    snprintf(path, sizeof(path), "%s/capacity_level", SYSFS); read_str(path, bat_capacity_level, sizeof(bat_capacity_level));
+    snprintf(path, sizeof(path), "%s/health", SYSFS); read_str(path, bat_health, sizeof(bat_health));
+    snprintf(path, sizeof(path), "%s/technology", SYSFS); read_str(path, bat_technology, sizeof(bat_technology));
+    snprintf(path, sizeof(path), "%s/charge_type", SYSFS); if ((v = read_int(path)) >= 0) bat_charge_type = v;
+    snprintf(path, sizeof(path), "%s/time_to_full_now", SYSFS); if ((v = read_int(path)) >= 0) bat_time_to_full = v;
+    snprintf(path, sizeof(path), "%s/charge_counter", SYSFS); if ((v = read_int(path)) >= 0) bat_charge_counter = v;
+    snprintf(path, sizeof(path), "%s/manufacturer", SYSFS); read_str(path, bat_manufacturer, sizeof(bat_manufacturer));
+    snprintf(path, sizeof(path), "%s/model_name", SYSFS); read_str(path, bat_model_name, sizeof(bat_model_name));
+    snprintf(path, sizeof(path), "%s/voltage_ocv", SYSFS); if ((v = read_int(path)) >= 0) voltage_ocv = v;
+    snprintf(path, sizeof(path), "%s/current_avg", SYSFS); if ((v = read_int(path)) >= 0) current_avg = v;
+    snprintf(path, sizeof(path), "%s/constant_charge_current", SYSFS); if ((v = read_int(path)) >= 0) constant_charge_current = v;
+    snprintf(path, sizeof(path), "%s/constant_charge_voltage", SYSFS); if ((v = read_int(path)) >= 0) constant_charge_voltage = v;
+    snprintf(path, sizeof(path), "%s/capacity_error_margin", SYSFS); if ((v = read_int(path)) >= 0) capacity_error_margin = v;
+    snprintf(path, sizeof(path), "%s/time_to_empty_now", SYSFS); if ((v = read_int(path)) >= 0) time_to_empty = v;
+    snprintf(path, sizeof(path), "%s/present", SYSFS); if ((v = read_int(path)) >= 0) bat_present = v;
+    snprintf(path, sizeof(path), "%s/internal_resistance", SYSFS); if ((v = read_int(path)) >= 0) internal_resistance = v;
+    snprintf(path, sizeof(path), "%s/charge_now", SYSFS); if ((v = read_int(path)) >= 0) charge_now = v;
+    snprintf(path, sizeof(path), "%s/charge_term_current", SYSFS); if ((v = read_int(path)) >= 0) charge_term_current = v;
+    snprintf(path, sizeof(path), "%s/constant_charge_current_max", SYSFS); if ((v = read_int(path)) >= 0) constant_charge_current_max = v;
+    snprintf(path, sizeof(path), "%s/constant_charge_voltage_max", SYSFS); if ((v = read_int(path)) >= 0) constant_charge_voltage_max = v;
+    snprintf(path, sizeof(path), "%s/temp_max", SYSFS); if ((v = read_int(path)) >= 0) temp_max = v;
+    snprintf(path, sizeof(path), "%s/temp_min", SYSFS); if ((v = read_int(path)) >= 0) temp_min = v;
+    snprintf(path, sizeof(path), "%s/charger_temp", SYSFS); if ((v = read_int(path)) >= 0) charger_temp = v;
+    snprintf(path, sizeof(path), "%s/charge_done", SYSFS); if ((v = read_int(path)) >= 0) charge_done = v;
+    snprintf(path, sizeof(path), "%s/input_voltage_settled", SYSFS); if ((v = read_int(path)) >= 0) input_voltage_settled = v;
+    snprintf(path, sizeof(path), "%s/safety_timer_expired", SYSFS); if ((v = read_int(path)) >= 0) safety_timer_expired = v;
+    snprintf(path, sizeof(path), "%s/calibrate", SYSFS); if ((v = read_int(path)) >= 0) calibrate = v;
+    snprintf(path, sizeof(path), "%s/temp_ambient", SYSFS); if ((v = read_int(path)) >= 0) temp_ambient = v;
+}
+
 static void update_temps(void) {
     time_t tn = time(NULL);
     if (tn - temps_last < 5) return;  /* 5s 节流 */
     temps_last = tn;
     soc_temp = -1; gpu_temp = -1; chg_temp = -1; case_temp = -1;
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 50; i++) {
         char tzpath[128]; snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/type", THERMAL, i);
         char tname[64];
         if (read_str(tzpath, tname, sizeof(tname)) <= 0) continue;
@@ -158,62 +197,61 @@ static void update_battery(void) {
     char path[MAX_LINE]; int v;
     snprintf(path, sizeof(path), "%s/capacity", SYSFS);
     if ((v = read_int(path)) >= 0) bat_capacity = v;
-    snprintf(path, sizeof(path), "%s/capacity_level", SYSFS);
-    read_str(path, bat_capacity_level, sizeof(bat_capacity_level));
-    snprintf(path, sizeof(path), "%s/health", SYSFS);
-    read_str(path, bat_health, sizeof(bat_health));
-    snprintf(path, sizeof(path), "%s/technology", SYSFS);
-    read_str(path, bat_technology, sizeof(bat_technology));
-    snprintf(path, sizeof(path), "%s/charge_type", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_charge_type = v;
-    snprintf(path, sizeof(path), "%s/time_to_full_now", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_time_to_full = v;
-    snprintf(path, sizeof(path), "%s/charge_counter", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_charge_counter = v;
-    snprintf(path, sizeof(path), "%s/manufacturer", SYSFS);
-    read_str(path, bat_manufacturer, sizeof(bat_manufacturer));
-    snprintf(path, sizeof(path), "%s/model_name", SYSFS);
-    read_str(path, bat_model_name, sizeof(bat_model_name));
-    snprintf(path, sizeof(path), "%s/voltage_ocv", SYSFS);
-    if ((v = read_int(path)) >= 0) voltage_ocv = v;
-    snprintf(path, sizeof(path), "%s/current_avg", SYSFS);
-    if ((v = read_int(path)) >= 0) current_avg = v;
-    snprintf(path, sizeof(path), "%s/constant_charge_current", SYSFS);
-    if ((v = read_int(path)) >= 0) constant_charge_current = v;
-    snprintf(path, sizeof(path), "%s/constant_charge_voltage", SYSFS);
-    if ((v = read_int(path)) >= 0) constant_charge_voltage = v;
-    snprintf(path, sizeof(path), "%s/capacity_error_margin", SYSFS);
-    if ((v = read_int(path)) >= 0) capacity_error_margin = v;
-    snprintf(path, sizeof(path), "%s/time_to_empty_now", SYSFS);
-    if ((v = read_int(path)) >= 0) time_to_empty = v;
-    snprintf(path, sizeof(path), "%s/present", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_present = v;
-    snprintf(path, sizeof(path), "%s/internal_resistance", SYSFS);
-    if ((v = read_int(path)) >= 0) internal_resistance = v;
-    snprintf(path, sizeof(path), "%s/charge_now", SYSFS);
-    if ((v = read_int(path)) >= 0) charge_now = v;
-    snprintf(path, sizeof(path), "%s/charge_term_current", SYSFS);
-    if ((v = read_int(path)) >= 0) charge_term_current = v;
-    snprintf(path, sizeof(path), "%s/constant_charge_current_max", SYSFS);
-    if ((v = read_int(path)) >= 0) constant_charge_current_max = v;
-    snprintf(path, sizeof(path), "%s/constant_charge_voltage_max", SYSFS);
-    if ((v = read_int(path)) >= 0) constant_charge_voltage_max = v;
-    snprintf(path, sizeof(path), "%s/temp_max", SYSFS);
-    if ((v = read_int(path)) >= 0) temp_max = v;
-    snprintf(path, sizeof(path), "%s/temp_min", SYSFS);
-    if ((v = read_int(path)) >= 0) temp_min = v;
-    snprintf(path, sizeof(path), "%s/charger_temp", SYSFS);
-    if ((v = read_int(path)) >= 0) charger_temp = v;
-    snprintf(path, sizeof(path), "%s/charge_done", SYSFS);
-    if ((v = read_int(path)) >= 0) charge_done = v;
-    snprintf(path, sizeof(path), "%s/input_voltage_settled", SYSFS);
-    if ((v = read_int(path)) >= 0) input_voltage_settled = v;
-    snprintf(path, sizeof(path), "%s/safety_timer_expired", SYSFS);
-    if ((v = read_int(path)) >= 0) safety_timer_expired = v;
-    snprintf(path, sizeof(path), "%s/calibrate", SYSFS);
-    if ((v = read_int(path)) >= 0) calibrate = v;
-    snprintf(path, sizeof(path), "%s/temp_ambient", SYSFS);
-    if ((v = read_int(path)) >= 0) temp_ambient = v;
+    snprintf(path, sizeof(path), "%s/temp", SYSFS);
+    if ((v = read_int(path)) >= 0) bat_temp = v;
+    snprintf(path, sizeof(path), "%s/voltage_now", SYSFS);
+    if ((v = read_int(path)) >= 0) bat_volt = v;
+    snprintf(path, sizeof(path), "%s/current_now", SYSFS);
+    if ((v = read_int(path)) >= 0) bat_curr = v;
+    snprintf(path, sizeof(path), "%s/status", SYSFS);
+    read_str(path, bat_status, sizeof(bat_status));
+    snprintf(path, sizeof(path), "%s/cycle_count", SYSFS);
+    if ((v = read_int(path)) >= 0) cycle_count = v;
+    snprintf(path, sizeof(path), "%s/charge_full", SYSFS);
+    if ((v = read_int(path)) >= 0) charge_full_mah = v / 1000;
+    /* bms/capacity_raw 高精度 */
+    snprintf(path, sizeof(path), "%s/bms/capacity_raw", SYSFS);
+    if ((v = read_int(path)) < 0) { snprintf(path, sizeof(path), "%s/capacity_raw", SYSFS); v = read_int(path); }
+    if (v >= 0) capacity_disp = v; else capacity_disp = bat_capacity * 100;
+    /* USB */
+    usb_online = read_int(SYSFS_USB "/online");
+    bat_input_current_limit = read_int(SYSFS_USB "/input_current_limit");
+    usb_curr_cache = read_int(SYSFS_USB "/current_now");
+    read_str(SYSFS_USB "/real_type", proto_name, sizeof(proto_name));
+    if (proto_name[0] == 0) read_str(SYSFS_USB "/type", proto_name, sizeof(proto_name));
+    pd_type = read_int(SYSFS_USB "/pd_type");
+    usb_power_max = read_int(SYSFS_USB "/power_max");
+    if (usb_power_max < 0) usb_power_max = read_int(SYSFS_USB "/max_power");
+    /* 功率 */
+    int vol_mv = bat_volt > 0 ? bat_volt : 0;
+    int cur_ma = bat_curr;
+    if (vol_mv > 0 && cur_ma != 0) power_mw = vol_mv * cur_ma / 1000;
+    if (vol_mv > 0 && cur_ma < 0) {
+        int remain = bat_capacity >= 0 ? (charge_limit > 0 ? charge_limit - bat_capacity : 100 - bat_capacity) : 0;
+        if (remain > 0 && cur_ma != 0) {
+            int cmA = -cur_ma; /* 充电电流为正 */
+            if (cmA > 0) est_full_min = (int)((long long)remain * charge_full_mah * 60 / cmA / 100);
+        }
+    }
+    /* 健康度 */
+    if (cycle_count > 0 && charge_full_mah > 0) {
+        float loss = (5380.0f - charge_full_mah) / cycle_count;
+        if (loss > 0.001f) {
+            int est = (int)((charge_full_mah * 0.6f - 5380.0f * 0.6f) / loss);
+            if (est < 0) est = 0;
+            est_cycles_left = est;
+        }
+        float health_f = (float)charge_full_mah / 5380.0f * 100.0f;
+        if (health_f > 100) health_f = 100;
+        if (health_f < 0) health_f = 0;
+        health = (int)(health_f * 10 + 0.5f) / 10.0f;
+        if (health >= 95) strcpy(health_rating, "优秀");
+        else if (health >= 85) strcpy(health_rating, "良好");
+        else if (health >= 70) strcpy(health_rating, "一般");
+        else if (health >= 60) strcpy(health_rating, "较差");
+        else strcpy(health_rating, "需更换");
+    }
+    slow_update_battery();
     snprintf(path, sizeof(path), "%s/temp", SYSFS);
     if ((v = read_int(path)) >= 0) bat_temp = v / 10;
     snprintf(path, sizeof(path), "%s/voltage_now", SYSFS);
@@ -296,10 +334,12 @@ static void apply_control(void) {
         if (write_str(path, "0") < 0) log_event("写input_suspend失败(关闭)");
         temp_suspended = 0; return;
     }
-    if (bat_capacity >= charge_limit) {
-        if (write_str(path, "1") < 0) log_event("写input_suspend失败(到上限)");
-    } else if (bat_capacity <= charge_limit - resume_delta) {
-        if (write_str(path, "0") < 0) log_event("写input_suspend失败(恢复充电)");
+    int new_suspend = -1;
+    if (bat_capacity >= charge_limit) new_suspend = 1;
+    else if (bat_capacity <= charge_limit - resume_delta) new_suspend = 0;
+    if (new_suspend >= 0 && new_suspend != last_suspend_val) {
+        if (write_str(path, new_suspend ? "1" : "0") < 0) log_event("写input_suspend失败");
+        last_suspend_val = new_suspend;
     }
 }
 static void load_config(void) {
