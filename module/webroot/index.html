@@ -18,7 +18,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 .tab { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; padding:4px 2px; font-size:10px; font-weight:500; line-height:1.2; cursor:pointer; color:var(--txt2); transition:color .2s; }
 .tab .ti { font-size:21px; line-height:1; }
 .tab.active { background:none; color:var(--accent); font-weight:600; }
-.banner { border-radius:14px; padding:13px 16px; margin-bottom:14px; font-size:14px; display:flex; align-items:center; gap:10px; justify-content:space-between; }
+.banner { min-height:22px; border-radius:14px; padding:13px 16px; margin-bottom:14px; font-size:14px; display:flex; align-items:center; gap:10px; justify-content:space-between; }
 .banner.charging { background:rgba(74,222,128,.12); border:1px solid rgba(74,222,128,.3); }
 .banner.suspended { background:rgba(251,191,36,.12); border:1px solid rgba(251,191,36,.3); }
 .banner.temp { background:rgba(248,113,113,.12); border:1px solid rgba(248,113,113,.3); }
@@ -27,7 +27,10 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 .banner.idle { background:rgba(100,116,139,.08); border:1px solid #334155; }
 .big-cap { background:var(--card); border-radius:var(--r); padding:22px; margin-bottom:14px; }
 .big-cap .val { font-size:46px; font-weight:700; letter-spacing:-1.6px; }
+@keyframes shimmer { 0%{opacity:.4} 50%{opacity:1} 100%{opacity:.4} }
 .big-cap .bar { height:8px; background:var(--card2); border-radius:99px; margin-top:14px; overflow:hidden; }
+.big-cap.loading .val { animation:shimmer 1.5s ease-in-out infinite; }
+.big-cap.loading .bar .fill { animation:shimmer 1.5s ease-in-out infinite; }
 .big-cap .fill { height:100%; border-radius:99px; transition:width .6s cubic-bezier(.4,0,.2,1); }
 .big-cap .info { display:flex; justify-content:space-between; margin-top:10px; font-size:12px; color:var(--txt2); }
 .temp-item { min-height:44px; }
@@ -71,7 +74,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.2.38</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.39</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'"><span class="ti">📊</span><span>仪表盘</span></div>
@@ -80,13 +83,13 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="tab" :class="{active: tab==='stats'}" @click="tab='stats'"><span class="ti">📈</span><span>统计</span></div>
   </div>
 
-  <div x-show="tab==='dash'">
+  <div x-show="tab==='dash'" x-transition:enter.duration.200ms.opacity>
     <div class="banner" :class="bannerClass()" x-show="true">
       <span x-text="loaded ? bannerText() : '⏳ 读取中...'"></span>
       <span x-show="s.alerted" style="color:var(--red);font-weight:700;margin-left:8px" x-text="t('alert_high')"></span>
     </div>
 
-    <div class="big-cap">
+    <div class="big-cap" :class="loaded ? '' : 'loading'">
       <div class="val" :style="'color:' + capColor()" x-text="capDisplay()"></div>
       <div class="bar"><div class="fill" :style="'width:' + s.capacity + '%;background:' + capColor()"></div></div>
       <div class="info"><span x-text="s.status"></span><span x-text="s.voltage ? (s.voltage/1000).toFixed(2) + 'V' : '—'"></span></div>
@@ -156,7 +159,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     </div>
   </div>
 
-<div x-show="tab==='set'">
+<div x-show="tab==='set'" x-transition:enter.duration.200ms.opacity>
     <div class="panel">
       <h2>⚙️ 充电控制</h2>
       <div class="row">
@@ -246,7 +249,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
   
   </div>
 
-<div x-show="tab==='stats'">
+<div x-show="tab==='stats'" x-transition:enter.duration.200ms.opacity>
     <div class="panel">
       <h2>🔋 充电统计</h2>
       <div class="row">
@@ -284,7 +287,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     </div>
   </div>
 
-<div x-show="tab==='log'">
+<div x-show="tab==='log'" x-transition:enter.duration.200ms.opacity>
     <div class="panel">
       <h2>📜 运行日志</h2>
       <div class="log-box" x-text="logContent || '暂无日志'"></div>
