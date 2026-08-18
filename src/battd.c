@@ -444,7 +444,7 @@ static int in_night_window(void) {
     return h < night_end_h;
 }
 
-static void apply_night_mode(void) {
+static void apply_night_mode(void) { static time_t nl = 0; time_t tn = time(NULL); if (tn - nl < 30) return; nl = tn;
     if (!night_enabled) return;
     /* 手动暂停时，夜间模式让位用户 */
     if (paused) return;
@@ -455,7 +455,7 @@ static void apply_night_mode(void) {
     }
 }
 
-static void high_temp_alert(void) {
+static void high_temp_alert(void) { static time_t hl = 0; time_t tn = time(NULL); if (tn - hl < 10) return; hl = tn;
     if (bat_temp >= 50 && !alerted_high) {
         alerted_high = 1;
         log_event("⚠️ high temp alert");
@@ -514,6 +514,7 @@ static void get_top_uid(void) {
 }
 
 static void push_history(void) {
+    { time_t tn = time(NULL); static time_t hist_last = 0; if (tn - hist_last < 60) return; hist_last = tn; }
     time_t now = time(NULL);
     if (!history_enabled) return;
     if (now - last_save < 60) return;
@@ -992,8 +993,15 @@ int main(void) {
 
     time_t last_poll = 0;
     while (running) {
+        time_t now = time(NULL);
+        /* select 等待剩余时间，避免频繁唤醒 */
+        int wait_sec = 1;
+        if (now - last_poll < interval) {
+            int remain = interval - (now - last_poll);
+            if (remain > 0 && remain <= 5) wait_sec = remain;
+        }
         fd_set rfds; FD_ZERO(&rfds); FD_SET(srv, &rfds);
-        struct timeval tv = { 1, 0 };
+        struct timeval tv = { wait_sec, 0 };
         int s = select(srv+1, &rfds, NULL, NULL, &tv);
         if (s < 0) { sleep(1); continue; }
         if (s > 0 && FD_ISSET(srv, &rfds)) {
@@ -1001,7 +1009,7 @@ int main(void) {
             int cfd = accept(srv, (struct sockaddr*)&cli, &cli_len);
             if (cfd >= 0) { handle_client(cfd); close(cfd); }
         }
-        time_t now = time(NULL);
+        now = time(NULL);
         if (now - last_poll >= (time_t)interval) {
             last_poll = now; update_battery(); push_history();
             apply_control(); apply_night_mode(); high_temp_alert(); get_top_uid();
