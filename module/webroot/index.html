@@ -10,7 +10,7 @@
 * { margin:0; padding:0; box-sizing:border-box; font-family:system-ui,-apple-system,sans-serif; }
 :root { --bg:#0d0d0f; --card:#1c1c1e; --card2:#2c2c2e; --navbg:rgba(28,28,30,.86); --line:rgba(255,255,255,.09); --txt:#f2f2f7; --txt2:#8e8e93; --accent:#0a84ff; --green:#32d74b; --red:#ff453a; --orange:#ff9f0a; --amber:#ffd60a; --blue:#0a84ff; --gray:#5a5a5e; --r:18px; }
 :root[data-theme="1"] { --bg:#f2f2f7; --card:#ffffff; --card2:#f2f2f7; --navbg:rgba(255,255,255,.86); --line:rgba(0,0,0,.08); --txt:#1c1c1e; --txt2:#8e8e93; --accent:#007aff; --green:#34c759; --red:#ff3b30; --orange:#ff9500; --amber:#ffcc00; --blue:#007aff; --gray:#c7c7cc; }
-body { background:var(--bg); color:var(--txt); min-height:100vh; padding-bottom:100px; -webkit-font-smoothing:antialiased; }
+body { background:var(--bg); color:var(--txt); min-height:100vh; padding-bottom:100px; -webkit-font-smoothing:antialiased; transition:background .2s, color .2s; }
 .container { max-width:560px; margin:0 auto; padding:14px 16px; }
 h1 { font-size:28px; font-weight:700; letter-spacing:-.6px; margin:6px 0 18px; display:flex; align-items:center; gap:10px; }
 h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(--txt2); border-radius:20px; padding:3px 9px; }
@@ -71,7 +71,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.2.37</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.38</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'"><span class="ti">📊</span><span>仪表盘</span></div>
@@ -390,7 +390,14 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
       const p = new URLSearchParams(obj);
       await this.fetchJson(this.API_BASE + '/api/limit', { method:'POST', body: p.toString(), headers:{'Content-Type':'application/x-www-form-urlencoded'} });
       document.documentElement.setAttribute('data-theme', String(this.s.theme));
-      if ('theme' in obj && this.chart) { this.chart.destroy(); this.chart = null; this.loadHistory(); }
+      if ('theme' in obj && this.chart) {
+        const cs = getComputedStyle(document.documentElement);
+        const t = (n) => cs.getPropertyValue(n).trim();
+        ['y','y1','x'].forEach(a => { this.chart.options.scales[a].grid.color = t('--line'); this.chart.options.scales[a].ticks.color = t('--txt2'); });
+        this.chart.options.plugins.legend.labels.color = t('--txt');
+        ['backgroundColor','borderColor','titleColor','bodyColor'].forEach((k,i) => { this.chart.options.plugins.tooltip[k] = [t('--card'),t('--line'),t('--txt'),t('--txt2')][i]; });
+        this.chart.update('none');
+      }
     },
     async loadTopUid() {
       const d = await this.fetchJson(this.API_BASE + '/api/topuid');
