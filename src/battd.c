@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.48"
+#define VERSION "v1.2.49"
 
 static volatile int running = 1;
 static int charge_limit = 80;

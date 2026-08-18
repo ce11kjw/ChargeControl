@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>电池管家</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
 <style>
@@ -74,19 +75,19 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.2.48</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.49</span></h1>
 
   <div class="tabs">
-    <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'"><span class="ti">📊</span><span>仪表盘</span></div>
-    <div class="tab" :class="{active: tab==='set'}" @click="tab='set'"><span class="ti">⚙️</span><span>设置</span></div>
-    <div class="tab" :class="{active: tab==='log'}" @click="tab='log'"><span class="ti">📜</span><span>日志</span></div>
-    <div class="tab" :class="{active: tab==='stats'}" @click="tab='stats'"><span class="ti">📈</span><span>统计</span></div>
+    <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'"><span class="ti"><i class="fa-solid fa-gauge-high"></i></span><span>仪表盘</span></div>
+    <div class="tab" :class="{active: tab==='set'}" @click="tab='set'"><span class="ti"><i class="fa-solid fa-gear"></i></span><span>设置</span></div>
+    <div class="tab" :class="{active: tab==='log'}" @click="tab='log'"><span class="ti"><i class="fa-solid fa-file-lines"></i></span><span>日志</span></div>
+    <div class="tab" :class="{active: tab==='stats'}" @click="tab='stats'"><span class="ti"><i class="fa-solid fa-chart-line"></i></span><span>统计</span></div>
   </div>
 
   <div x-show="tab==='dash'" x-transition:enter.duration.350ms.opacity>
     <div class="banner" :class="bannerClass()" x-show="true">
       <span x-text="loaded ? bannerText() : '⏳ 读取中...'"></span>
-      <span x-show="s.alerted" style="color:var(--red);font-weight:700;margin-left:8px" x-text="t('alert_high')"></span>
+      <span x-show="s.alerted" style="color:var(--red);font-weight:700;margin-left:8px" x-html="t('alert_high')"></span>
     </div>
 
     <div class="big-cap" :class="loaded ? '' : 'loading'">
@@ -120,7 +121,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     </div>
 
     <div class="panel">
-      <h2>🔋 电池健康</h2>
+      <h2><i class="fa-solid fa-heart-pulse" style="margin-right:6px"></i>电池健康</h2>
       <div class="meta">
         <div>满充 <span x-text="s.charge_full_mah + 'mAh'"></span> / 设计 <span>5380mAh</span> · 剩余约 <span x-text="s.est_cycles_left > 0 ? s.est_cycles_left : '—'"></span> 次 (至60%)</div>
 
@@ -140,7 +141,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     </div>
 
     <div class="panel">
-      <h2>🌡️ 温度监控</h2>
+      <h2><i class="fa-solid fa-temperature-high" style="margin-right:6px"></i>温度监控</h2>
       <div class="temp-grid">
       <div class="temp-item"><div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.soc_temp)"></span><span class="n">SoC</span></div><span class="v" :style="'color:' + tempColor(s.soc_temp)" x-text="s.soc_temp > 0 ? s.soc_temp + '°' : '—'"></span></div>
       <div class="temp-item"><div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.gpu_temp)"></span><span class="n">GPU</span></div><span class="v" :style="'color:' + tempColor(s.gpu_temp)" x-text="s.gpu_temp > 0 ? s.gpu_temp + '°' : '—'"></span></div>
@@ -150,7 +151,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     </div>
 
     <div class="panel">
-      <h2>⚡ 充电详情</h2>
+      <h2><i class="fa-solid fa-bolt" style="margin-right:6px"></i>充电详情</h2>
       <div class="temp-grid">
         <div class="temp-item"><span class="n">充电协议</span><span class="v" x-text="s.proto_name || '—'"></span></div>
         <div class="temp-item"><span class="n">协商功率</span><span class="v" x-text="s.power_max ? s.power_max + 'W' : '—'"></span></div>
@@ -166,7 +167,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     </div>
 
     <div class="panel" style="margin-top:16px">
-      <h2>📊 趋势</h2>
+      <h2><i class="fa-solid fa-chart-line" style="margin-right:6px"></i>趋势</h2>
       <div id="chartWrap"><canvas id="chart"></canvas></div>
       <div class="info" style="justify-content:center;padding-top:8px;font-size:12px" x-text="lastUpdate"></div>
     </div>
@@ -174,12 +175,12 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 
 <div x-show="tab==='set'" x-transition:enter.duration.350ms.opacity>
     <div class="panel">
-      <h2>⚙️ 充电控制</h2>
+      <h2><i class="fa-solid fa-battery-three-quarters" style="margin-right:6px"></i>充电控制</h2>
       <div class="row">
         <span class="lbl">启用充电限制</span>
         <div class="toggle" :class="s.limit_enabled ? 'on' : ''" @click="toggleEnabled()"></div>
       </div>
-      <div style="font-size:13px;color:var(--txt2);padding:4px 0 6px">高级设置</div>
+      <div style="font-size:13px;color:var(--txt2);padding:4px 0 6px"><i class="fa-solid fa-sliders" style="margin-right:4px"></i>高级设置</div>
       <div>
         <div class="row"><span class="lbl">充电上限 <b x-text="s.charge_limit + '%'"></b></span>
           <input type="range" class="slider" min="20" max="100" x-model.number="s.charge_limit" @change="save()"></div>
@@ -189,12 +190,12 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
           <input type="range" class="slider" min="1" max="20" x-model.number="s.resume_delta" @change="save()"></div>
         <div class="row"><span class="lbl">轮询间隔 <b x-text="s.interval + 's'"></b></span>
           <input type="range" class="slider" min="1" max="60" x-model.number="s.interval" @change="save()"></div>
-        <button class="btn" @click="save()">保存设置</button>
+        <button class="btn" @click="save()"><i class="fa-solid fa-floppy-disk" style="margin-right:4px"></i>保存设置</button>
       </div>
     </div>
 
     <div class="panel">
-      <h2>🔋 手动充满</h2>
+      <h2><i class="fa-solid fa-battery-full" style="margin-right:6px"></i>手动充满</h2>
       <div class="row">
         <span class="lbl" x-text="'30分钟超时' + (s.full_once && fullRemain() > 0 ? ' · 剩余 ' + fullRemain() + ' 秒' : '')"></span>
       </div>
@@ -202,7 +203,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     </div>
 
     <div class="panel">
-      <h2>⏯ 手动暂停/恢复</h2>
+      <h2><i class="fa-solid fa-pause" style="margin-right:6px"></i>手动暂停/恢复</h2>
       <div class="row">
         <span class="lbl" x-text="s.control_state === 'temp_protect' ? '🌡️ 温度保护中（自动）' : (s.paused ? '已暂停充电' : '充电未被暂停')"></span>
       </div>
@@ -210,7 +211,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     </div>
 
     <div class="panel">
-      <h2 x-text="t('night')"></h2>
+      <h2 x-html="t('night')"></h2>
       <div class="row"><span class="lbl">开始</span>
         <input type="number" class="inp" x-model.number="s.ns" min="0" max="23" @change="setExtras({ns: $event.target.value})">
         <span class="lbl">结束</span>
@@ -220,24 +221,24 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     </div>
 
     <div class="panel">
-      <h2 x-text="t('scene')"></h2>
+      <h2 x-html="t('scene')"></h2>
       <div class="row"><span class="lbl" x-text="s.scene==1?t('scene_gaming'):s.scene==2?t('scene_sleep'):s.scene==3?t('scene_trip'):t('scene_custom')"></span></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-        <button class="btn" @click="applyScene(1)">🎮 游戏</button>
-        <button class="btn" @click="applyScene(2)">😴 睡眠</button>
-        <button class="btn" @click="applyScene(3)">✈️ 出差</button>
-        <button class="btn gray" @click="applyScene(0)">⚙️ 自定义</button>
+        <button class="btn" @click="applyScene(1)"><i class="fa-solid fa-gamepad" style="margin-right:4px"></i>游戏</button>
+        <button class="btn" @click="applyScene(2)"><i class="fa-regular fa-moon" style="margin-right:4px"></i>睡眠</button>
+        <button class="btn" @click="applyScene(3)"><i class="fa-solid fa-plane" style="margin-right:4px"></i>出差</button>
+        <button class="btn gray" @click="applyScene(0)"><i class="fa-solid fa-gear" style="margin-right:4px"></i>自定义</button>
       </div>
     </div>
     <div class="panel">
-      <h2 x-text="t('webhook')"></h2>
+      <h2 x-html="t('webhook')"></h2>
       <div class="row">
         <input type="text" style="width:100%;background:var(--card2);border:none;color:var(--txt);border-radius:12px;padding:11px;font-size:13px" placeholder="https://..." x-model="webhookUrl" @change="setExtras({webhook: webhookUrl})">
       </div>
-      <div class="row" style="font-size:11px;color:var(--txt2)" x-text="t('webhook_hint')"></div>
+      <div class="row" style="font-size:11px;color:var(--txt2)" x-html="t('webhook_hint')"></div>
     </div>
     <div class="panel">
-      <h2>📜 历史记录</h2>
+      <h2><i class="fa-solid fa-clock-rotate-left" style="margin-right:6px"></i>历史记录</h2>
       <div class="row">
         <span class="lbl">保留历史（趋势图数据）</span>
         <div class="toggle" :class="s.history_enabled ? 'on' : ''" @click="toggleHistory()"></div>
@@ -264,7 +265,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 
 <div x-show="tab==='stats'" x-transition:enter.duration.350ms.opacity>
     <div class="panel">
-      <h2>🔋 充电统计</h2>
+      <h2><i class="fa-solid fa-chart-simple" style="margin-right:6px"></i>充电统计</h2>
       <div class="row">
         <span class="lbl">本次充电</span>
         <span style="font-size:13px;color:var(--txt2)" x-text="sessText()"></span>
@@ -288,8 +289,8 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     </div>
 
     <div class="panel">
-      <h2 x-text="t('topuid')"></h2>
-      <div x-show="s.topUid.length === 0" style="color:var(--txt2);font-size:12px" x-text="t('topuid_loading')"></div>
+      <h2 x-html="t('topuid')"></h2>
+      <div x-show="s.topUid.length === 0" style="color:var(--txt2);font-size:12px" x-html="t('topuid_loading')"></div>
       <template x-for="(u, i) in s.topUid" :key="i">
         <div style="display:flex;align-items:center;gap:8px;background:var(--card2);padding:10px 12px;border-radius:12px;margin-bottom:4px">
           <span style="font-size:11px;color:var(--txt2);width:18px" x-text="(i+1)+'.'"></span>
@@ -302,12 +303,12 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 
 <div x-show="tab==='log'" x-transition:enter.duration.350ms.opacity>
     <div class="panel">
-      <h2>📜 运行日志</h2>
+      <h2><i class="fa-solid fa-file-lines" style="margin-right:6px"></i>运行日志</h2>
       <div class="log-box" x-text="logContent || '暂无日志'"></div>
-      <button class="btn gray" @click="refreshLog()" style="margin-top:8px">🔄 刷新日志</button>
+      <button class="btn gray" @click="refreshLog()" style="margin-top:8px"><i class="fa-solid fa-rotate" style="margin-right:4px"></i>刷新日志</button>
       <button class="btn gray" @click="exportLog()" style="margin-top:8px">⬇️ 导出全部（配置+日志+历史）</button>
-      <button class="btn gray" @click="checkUpdate()" style="margin-top:8px">🔄 检查更新</button>
-      <button x-show="latestVer" class="btn" @click="applyUpdate()" style="margin-top:8px">⬇️ 下载并安装 {{ latestVer }}</button>
+      <button class="btn gray" @click="checkUpdate()" style="margin-top:8px"><i class="fa-solid fa-rotate" style="margin-right:4px"></i>检查更新</button>
+      <button x-show="latestVer" class="btn" @click="applyUpdate()" style="margin-top:8px"><i class="fa-solid fa-download" style="margin-right:4px"></i>下载并安装 {{ latestVer }}</button>
       <div class="info" style="font-size:12px;color:var(--txt2);margin-top:8px" x-text="updateMsg"></div>
     </div>
   </div>
@@ -317,7 +318,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 function app() {
   return {
     API_BASE: 'http://127.0.0.1:8800',
-    i18n: {zh: {night:'🌙 夜间模式', scene:'🎮 快捷场景', webhook:'🔔 WebHook', topuid:'🏆 耗电排行', lang:'🌐 语言', theme:'🎨 主题', scene_gaming:'🎮 游戏 (70%)', scene_sleep:'😴 睡眠 (夜间模式)', scene_trip:'✈️ 出差 (停充)', scene_custom:'⚙️ 自定义', webhook_hint:'WebHook URL (温度>50°C 触发)', topuid_loading:'加载中...', alert_high:'⚠️ 高温告警中'}, en: {night:'🌙 Night Mode', scene:'🎮 Scenes', webhook:'🔔 WebHook', topuid:'🏆 Top Power', lang:'🌐 Language', theme:'🎨 Theme', scene_gaming:'🎮 Gaming (70%)', scene_sleep:'😴 Sleep (Night)', scene_trip:'✈️ Trip (Pause)', scene_custom:'⚙️ Custom', webhook_hint:'WebHook URL (triggered temp>50°C)', topuid_loading:'Loading...', alert_high:'⚠️ High Temp Alert'}},
+    i18n: {zh: {night:'<i class="fa-regular fa-moon" style="margin-right:6px"></i>夜间模式', scene:'<i class="fa-solid fa-gamepad" style="margin-right:6px"></i>快捷场景', webhook:'<i class="fa-solid fa-bell" style="margin-right:6px"></i>WebHook', topuid:'<i class="fa-solid fa-trophy" style="margin-right:6px"></i>耗电排行', lang:'<i class="fa-solid fa-language" style="margin-right:6px"></i>语言', theme:'<i class="fa-solid fa-palette" style="margin-right:6px"></i>主题', scene_gaming:'<i class="fa-solid fa-gamepad" style="margin-right:4px"></i>游戏 (70%)', scene_sleep:'<i class="fa-regular fa-moon" style="margin-right:4px"></i>睡眠 (夜间模式)', scene_trip:'<i class="fa-solid fa-plane" style="margin-right:4px"></i>出差 (停充)', scene_custom:'<i class="fa-solid fa-gear" style="margin-right:4px"></i>自定义', webhook_hint:'WebHook URL (温度>50°C 触发)', topuid_loading:'加载中...', alert_high:'<i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>高温告警中'}, en: {night:'<i class="fa-regular fa-moon" style="margin-right:6px"></i>Night Mode', scene:'<i class="fa-solid fa-gamepad" style="margin-right:6px"></i>Scenes', webhook:'<i class="fa-solid fa-bell" style="margin-right:6px"></i>WebHook', topuid:'<i class="fa-solid fa-trophy" style="margin-right:6px"></i>Top Power', lang:'<i class="fa-solid fa-language" style="margin-right:6px"></i>Language', theme:'<i class="fa-solid fa-palette" style="margin-right:6px"></i>Theme', scene_gaming:'<i class="fa-solid fa-gamepad" style="margin-right:4px"></i>Gaming (70%)', scene_sleep:'<i class="fa-regular fa-moon" style="margin-right:4px"></i>Sleep (Night)', scene_trip:'<i class="fa-solid fa-plane" style="margin-right:4px"></i>Trip (Pause)', scene_custom:'<i class="fa-solid fa-gear" style="margin-right:4px"></i>Custom', webhook_hint:'WebHook URL (triggered temp>50°C)', topuid_loading:'Loading...', alert_high:'<i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>High Temp Alert'}},
     t(k) { return (this.i18n[this.s.lang?'en':'zh']||{})[k] || k; },
     tab: 'dash', 
     webhookUrl: '', whLoaded: false,
