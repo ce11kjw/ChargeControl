@@ -25,7 +25,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.55"
+#define VERSION "v1.2.58"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -76,7 +76,9 @@ static int capacity_error_margin = -1, time_to_empty = -1, bat_present = -1, int
 static int mem_total = -1, mem_avail = -1, mem_free = -1;
 static int storage_total = -1, storage_free = -1;
 static int uptime_secs = -1, cpu_cores = -1;
-static char kernel_ver[128] = "";
+static char kernel_ver[128] = "", cpu_model[128] = "", device_model[128] = "";
+static int wifi_rssi = -128, wifi_on = 0, mobile_on = 0;
+static char ip_addr[64] = "";
 static int charge_full_mah = 0, capacity_disp = 0, power_mw = 0, est_full_min = 0, est_cycles_left = 0;
 static char est_full_txt[32] = "";
 static float health_degrade = 0.0f;
@@ -169,6 +171,53 @@ static void slow_update_battery(void) {
     snprintf(path, sizeof(path), "%s/safety_timer_expired", SYSFS); if ((v = read_int(path)) >= 0) safety_timer_expired = v;
     snprintf(path, sizeof(path), "%s/calibrate", SYSFS); if ((v = read_int(path)) >= 0) calibrate = v;
     snprintf(path, sizeof(path), "%s/temp_ambient", SYSFS); if ((v = read_int(path)) >= 0) temp_ambient = v;
+    /* 系统信息（复用 30s 缓存）*/
+    {
+        FILE *mf = fopen("/proc/meminfo", "r");
+        if (mf) { char ml[256]; while (fgets(ml, sizeof(ml), mf)) {
+            if (sscanf(ml, "MemTotal: %d kB", &v) == 1) mem_total = v;
+            else if (sscanf(ml, "MemAvailable: %d kB", &v) == 1) mem_avail = v;
+            else if (sscanf(ml, "MemFree: %d kB", &v) == 1) mem_free = v;
+        } fclose(mf); }
+        struct statfs sf;
+        if (statfs("/data", &sf) == 0) {
+            storage_total = (int)((long long)sf.f_blocks * sf.f_bsize / (1024*1024));
+            storage_free = (int)((long long)sf.f_bfree * sf.f_bsize / (1024*1024));
+        }
+        FILE *uf = fopen("/proc/uptime", "r");
+        if (uf) { double up; if (fscanf(uf, "%lf", &up) == 1) uptime_secs = (int)up; fclose(uf); }
+        FILE *cf = fopen("/sys/devices/system/cpu/present", "r");
+        if (cf) { int a,b; if (fscanf(cf, "%d-%d", &a, &b) == 2) cpu_cores = b-a+1; fclose(cf); }
+        if (cpu_cores < 0) cpu_cores = 1;
+        FILE *vf = fopen("/proc/version", "r");
+        if (vf) { if (fgets(kernel_ver, sizeof(kernel_ver), vf)) {
+            char *sp = strstr(kernel_ver, "version "); if (sp) memmove(kernel_ver, sp+8, strlen(sp)-7);
+            char *nl = strchr(kernel_ver, '\n'); if (nl) *nl = 0;
+        } fclose(vf); }
+        FILE *cif = fopen("/proc/cpuinfo", "r");
+        if (cif) { char cl[256]; while (fgets(cl, sizeof(cl), cif)) {
+            char *p = strstr(cl, "Hardware"); if (p) { char *c = strchr(p, ':'); if (c) { c++; while(*c==' ') c++; snprintf(cpu_model, sizeof(cpu_model), "%s", c); break; } }
+        } fclose(cif); }
+        FILE *dmf = fopen("/proc/device-tree/model", "r");
+        if (dmf) { if (fgets(device_model, sizeof(device_model), dmf)) {
+            char *nl = strchr(device_model, '\n'); if (nl) *nl = 0;
+        } fclose(dmf); }
+        ip_addr[0] = 0; wifi_rssi = -128; wifi_on = 0; mobile_on = 0;
+        FILE *nf = fopen("/proc/net/route", "r");
+        if (nf) { char nl[256]; while (fgets(nl, sizeof(nl), nf)) {
+            char ifn[32]; unsigned dest; int met;
+            if (sscanf(nl, "%31s %X %*s %*d %*d %*d %*d %d", ifn, &dest, &met) >= 3 && dest == 0 && met == 0) strncpy(ip_addr, ifn, 63);
+        } fclose(nf); }
+        FILE *wf = fopen("/proc/net/wireless", "r");
+        if (wf) { char wl[256]; while (fgets(wl, sizeof(wl), wf)) {
+            char ifn[32]; int lk, lv;
+            if (sscanf(wl, "%31s: %*d %d. %d.", ifn, &lk, &lv) >= 3) { wifi_rssi = lv; wifi_on = 1; }
+        } fclose(wf); }
+        FILE *mif = fopen("/proc/net/dev", "r");
+        if (mif) { char ml[256]; while (fgets(ml, sizeof(ml), mif)) {
+            if (strstr(ml, "rmnet") || strstr(ml, "ccmni") || strstr(ml, "wwan")) { mobile_on = 1; break; }
+        } fclose(mif); }
+    }
 }
 
 static void update_temps(void) {
@@ -200,11 +249,11 @@ static void update_battery(void) {
     snprintf(path, sizeof(path), "%s/capacity", SYSFS);
     if ((v = read_int(path)) >= 0) bat_capacity = v;
     snprintf(path, sizeof(path), "%s/temp", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_temp = v;
+    if ((v = read_int(path)) >= 0) bat_temp = v / 10;
     snprintf(path, sizeof(path), "%s/voltage_now", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_volt = v;
+    if ((v = read_int(path)) >= 0) bat_volt = v / 1000;
     snprintf(path, sizeof(path), "%s/current_now", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_curr = v;
+    if ((v = read_int(path)) >= 0) bat_curr = v / 1000;
     snprintf(path, sizeof(path), "%s/status", SYSFS);
     read_str(path, bat_status, sizeof(bat_status));
     snprintf(path, sizeof(path), "%s/cycle_count", SYSFS);
@@ -219,6 +268,7 @@ static void update_battery(void) {
     usb_online = read_int(SYSFS_USB "/online");
     bat_input_current_limit = read_int(SYSFS_USB "/input_current_limit");
     usb_curr_cache = read_int(SYSFS_USB "/current_now");
+    usb_volt_cache = read_int(SYSFS_USB "/voltage_now");
     read_str(SYSFS_USB "/real_type", proto_name, sizeof(proto_name));
     if (proto_name[0] == 0) read_str(SYSFS_USB "/type", proto_name, sizeof(proto_name));
     pd_type = read_int(SYSFS_USB "/pd_type");
@@ -254,50 +304,6 @@ static void update_battery(void) {
         else strcpy(health_rating, "需更换");
     }
     slow_update_battery();
-    snprintf(path, sizeof(path), "%s/temp", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_temp = v / 10;
-    snprintf(path, sizeof(path), "%s/voltage_now", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_volt = v / 1000;
-    snprintf(path, sizeof(path), "%s/current_now", SYSFS);
-    if ((v = read_int(path)) >= 0) {
-        bat_curr = v / 1000;
-        if (bat_curr != 0 && bat_volt > 0) {
-            /* power_mw 由 handle_status 实时计算 */
-        }
-    }
-    snprintf(path, sizeof(path), "%s/status", SYSFS);
-    read_str(path, bat_status, sizeof(bat_status));
-
-    snprintf(path, sizeof(path), "%s/cycle_count", SYSFS);
-    if ((v = read_int(path)) >= 0) cycle_count = v;
-    int full = 0, design = 0;
-    snprintf(path, sizeof(path), "%s/charge_full", SYSFS);
-    if ((v = read_int(path)) >= 0) full = v;
-    snprintf(path, sizeof(path), "%s/charge_full_design", SYSFS);
-    if ((v = read_int(path)) >= 0) design = v;
-    if (design > 0) health = (full * 100) / design;
-
-    usb_online = read_int(SYSFS_USB "/online");
-    usb_power_max = read_int(SYSFS_USB "/power_max");
-    pd_type = read_int(SYSFS_USB "/pd_type");
-    bat_input_current_limit = read_int(SYSFS_USB "/input_current_limit");
-    usb_curr_cache = read_int(SYSFS_USB "/current_now");
-    usb_volt_cache = read_int(SYSFS_USB "/voltage_now");
-    char buf[64];
-    if (read_str(SYSFS_USB "/real_type", buf, sizeof(buf)) > 0)
-        strncpy(proto_name, buf, sizeof(proto_name)-1);
-    else if (read_str(SYSFS_USB "/type", buf, sizeof(buf)) > 0)
-        strncpy(proto_name, buf, sizeof(proto_name)-1);
-    else strcpy(proto_name, "未知");
-
-    if (!limit_enabled) strcpy(control_state, "disabled");
-    else if (temp_suspended) strcpy(control_state, "temp_protect");
-    else if (paused) strcpy(control_state, "paused");
-    else if (full_once) strcpy(control_state, "manual_full");
-    else if (bat_capacity >= charge_limit && strcmp(bat_status, "Charging") == 0) strcpy(control_state, "suspended");
-    else if (strcmp(bat_status, "Charging") == 0) strcpy(control_state, "charging");
-    else strcpy(control_state, "idle");
-    handle_charging_state();
 }
 
 static void apply_control(void) {
@@ -661,7 +667,7 @@ static void handle_status(int fd) {
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
-        "\"mem_total\":%d,\"mem_avail\":%d,\"mem_free\":%d,\"storage_total\":%d,\"storage_free\":%d,\"uptime_secs\":%d,\"cpu_cores\":%d,\"kernel_ver\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
+        "\"mem_total\":%d,\"mem_avail\":%d,\"mem_free\":%d,\"storage_total\":%d,\"storage_free\":%d,\"uptime_secs\":%d,\"cpu_cores\":%d,\"kernel_ver\":\"%s\",\"cpu_model\":\"%s\",\"device_model\":\"%s\",\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
@@ -671,7 +677,7 @@ static void handle_status(int fd) {
         power_mw, est_full_min, est_full_txt, health_degrade,
         usb_online, proto_name, pd_type, usb_power_max,
         control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
-        mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high);
+        mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, cpu_model, device_model, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high);
     /* 系统信息 */
     { int v = 0;
         FILE *mf = fopen("/proc/meminfo", "r");

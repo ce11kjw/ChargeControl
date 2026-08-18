@@ -75,7 +75,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.2.52</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.58</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'"><span class="ti"><i class="fa-solid fa-gauge-high"></i></span><span>仪表盘</span></div>
@@ -356,7 +356,7 @@ function app() {
     t(k) { return (this.i18n[this.s.lang?'en':'zh']||{})[k] || k; },
     tab: 'dash', 
     webhookUrl: '', whLoaded: false,
-    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, est_full_txt:'', health_degrade:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, lang:0, theme:0, webhookUrl:'' },
+    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, est_full_txt:'', health_degrade:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, lang:0, theme:0, webhookUrl:'', mem_total:0, mem_avail:0, mem_free:0, storage_total:0, storage_free:0, uptime_secs:0, cpu_cores:0, kernel_ver:'', cpu_model:'', device_model:'', wifi_rssi:-128, wifi_on:0, mobile_on:0, ip_addr:'', bat_technology:'', bat_capacity_level:'', bat_health:'', charge_type:-1, time_to_full:-1, charge_counter:-1, input_current_limit:-1, bat_manufacturer:'', bat_model_name:'', voltage_ocv:-1, current_avg:-1, temp_ambient:-1, constant_charge_current:-1, constant_charge_voltage:-1, capacity_error_margin:-1, time_to_empty:-1, bat_present:-1, internal_resistance:-1, charge_now:-1, charge_term_current:-1, constant_charge_current_max:-1, constant_charge_voltage_max:-1, temp_max:-1, temp_min:-1, charger_temp:-1, charge_done:-1, input_voltage_settled:-1, safety_timer_expired:-1, calibrate:-1 },
     logContent: '', lastUpdate: '', updateMsg: '', latestVer: '', timer: null, chart: null, fullTimer: null, loaded: false,
 
     async fetchJson(url, opts) { try { const r = await fetch(url, opts); return await r.json(); } catch (e) { return null; } },
