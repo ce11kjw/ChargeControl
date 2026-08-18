@@ -11,6 +11,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
 #include <sys/select.h>
 
 #define PORT        8800
@@ -24,7 +25,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.51"
+#define VERSION "v1.2.52"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -71,6 +72,10 @@ static int charger_temp = -1, charge_done = -1, input_voltage_settled = -1;
 static int safety_timer_expired = -1, calibrate = -1;
 static int constant_charge_current = -1, constant_charge_voltage = -1;
 static int capacity_error_margin = -1, time_to_empty = -1, bat_present = -1, internal_resistance = -1;
+static int mem_total = -1, mem_avail = -1, mem_free = -1;
+static int storage_total = -1, storage_free = -1;
+static int uptime_secs = -1, cpu_cores = -1;
+static char kernel_ver[128] = "";
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 static char bat_status[32] = "Unknown";
 static int soc_temp = -1, gpu_temp = -1, chg_temp = -1, case_temp = -1;
@@ -543,7 +548,7 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
 }
 
 static void handle_status(int fd) {
-    char body[6144];
+    char body[8192];
     update_temps();
     int charge_full = read_int(SYSFS "/charge_full") / 1000;
 
@@ -637,7 +642,7 @@ static void handle_status(int fd) {
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
-        "\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
+        "\"mem_total\":%d,\"mem_avail\":%d,\"mem_free\":%d,\"storage_total\":%d,\"storage_free\":%d,\"uptime_secs\":%d,\"cpu_cores\":%d,\"kernel_ver\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"top_n\":%d}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
@@ -647,7 +652,40 @@ static void handle_status(int fd) {
         power_mw, est_full_min,
         usb_online, proto_name, pd_type, usb_power_max,
         control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
-        bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high, top_count);
+        mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high, top_count);
+    /* 系统信息 */
+    {
+        FILE *mf = fopen("/proc/meminfo", "r");
+        if (mf) {
+            char ml[256];
+            while (fgets(ml, sizeof(ml), mf)) {
+                if (sscanf(ml, "MemTotal: %d kB", &v) == 1) mem_total = v;
+                else if (sscanf(ml, "MemAvailable: %d kB", &v) == 1) mem_avail = v;
+                else if (sscanf(ml, "MemFree: %d kB", &v) == 1) mem_free = v;
+            }
+            fclose(mf);
+        }
+        struct statfs sf;
+        if (statfs("/data", &sf) == 0) {
+            long long total = (long long)sf.f_blocks * sf.f_bsize / (1024*1024);
+            long long free = (long long)sf.f_bfree * sf.f_bsize / (1024*1024);
+            storage_total = (int)total; storage_free = (int)free;
+        }
+        FILE *uf = fopen("/proc/uptime", "r");
+        if (uf) { double up; if (fscanf(uf, "%lf", &up) == 1) uptime_secs = (int)up; fclose(uf); }
+        /* CPU 核心数 */
+        FILE *cf = fopen("/sys/devices/system/cpu/present", "r");
+        if (cf) { int a, b; if (fscanf(cf, "%d-%d", &a, &b) == 2) cpu_cores = b - a + 1; fclose(cf); }
+        if (cpu_cores < 0) cpu_cores = 1;
+        /* 内核版本 */
+        FILE *vf = fopen("/proc/version", "r");
+        if (vf) { fgets(kernel_ver, sizeof(kernel_ver), vf);
+            char *nl = strchr(kernel_ver, '\n'); if (nl) *nl = 0;
+            fclose(vf); }
+        /* 清理 kernel_ver 到只保留版本号部分 */
+        char *sp = strstr(kernel_ver, "version ");
+        if (sp) { memmove(kernel_ver, sp + 8, strlen(sp) - 7); }
+    }
     send_resp(fd, 200, "application/json", body);
 }
 
