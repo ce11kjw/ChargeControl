@@ -74,7 +74,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.2.41</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.42</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'"><span class="ti">📊</span><span>仪表盘</span></div>
@@ -294,6 +294,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       <button class="btn gray" @click="refreshLog()" style="margin-top:8px">🔄 刷新日志</button>
       <button class="btn gray" @click="exportLog()" style="margin-top:8px">⬇️ 导出全部（配置+日志+历史）</button>
       <button class="btn gray" @click="checkUpdate()" style="margin-top:8px">🔄 检查更新</button>
+      <button x-show="latestVer" class="btn" @click="applyUpdate()" style="margin-top:8px">⬇️ 下载并安装 {{ latestVer }}</button>
       <div class="info" style="font-size:12px;color:var(--txt2);margin-top:8px" x-text="updateMsg"></div>
     </div>
   </div>
@@ -308,7 +309,7 @@ function app() {
     tab: 'dash', 
     webhookUrl: '', whLoaded: false,
     s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, topUid:[], lang:0, theme:0, webhookUrl:'' },
-    logContent: '', lastUpdate: '', updateMsg: '', timer: null, chart: null, fullTimer: null, loaded: false,
+    logContent: '', lastUpdate: '', updateMsg: '', latestVer: '', timer: null, chart: null, fullTimer: null, loaded: false,
 
     async fetchJson(url, opts) { try { const r = await fetch(url, opts); return await r.json(); } catch (e) { return null; } },
 
@@ -474,8 +475,13 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
       this.updateMsg = '检查中...';
       const d = await this.fetchJson(this.API_BASE + '/api/update-check');
       if (!d) { this.updateMsg = '检查失败（网络不可用）'; return; }
-      if (d.update_available) this.updateMsg = '发现新版本 ' + d.latest + '（当前 ' + d.current + '）→ 前往 GitHub 下载';
+      if (d.update_available) { this.updateMsg = '发现新版本 ' + d.latest + '（当前 ' + d.current + '）'; this.latestVer = d.latest; }
       else this.updateMsg = '已是最新版本 ' + d.current + ' ✅';
+    },
+    async applyUpdate() {
+      this.updateMsg = '下载中...';
+      const d = await this.fetchJson(this.API_BASE + '/api/update-apply');
+      if (d && d.ok) { this.updateMsg = d.msg + ' ✅'; } else { this.updateMsg = '更新失败: ' + (d ? d.msg : '网络错误'); }
     },
 
 

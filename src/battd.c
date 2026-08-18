@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.41"
+#define VERSION "v1.2.42"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -685,6 +685,41 @@ static void handle_update_check(int fd) {
     send_resp(fd, 200, "application/json", resp);
 }
 
+static void handle_update_apply(int fd) {
+    /* 获取最新 release 下载 URL */
+    FILE *cf = popen("curl -s --max-time 8 https://api.github.com/repos/ce11kjw/ChargeControl/releases/latest", "r");
+    if (!cf) { send_resp(fd, 200, "application/json", "{\"ok\":false,\"msg\":\"network\"}"); return; }
+    char cbuf[4096]; size_t cl = fread(cbuf, 1, sizeof(cbuf)-1, cf); pclose(cf);
+    cbuf[cl] = '\0';
+    char *url = strstr(cbuf, "\"browser_download_url\":\"");
+    if (!url) { send_resp(fd, 200, "application/json", "{\"ok\":false,\"msg\":\"parse\"}"); return; }
+    url += 23; char dl_url[512]; int i = 0;
+    while (*url && *url != '"' && i < 511) dl_url[i++] = *url++;
+    dl_url[i] = '\0';
+    /* 下载 zip */
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "curl -sL --max-time 30 -o /tmp/chargecontrol_update.zip '%s' && "
+        "mkdir -p /tmp/chargecontrol_update && "
+        "unzip -qo /tmp/chargecontrol_update.zip -d /tmp/chargecontrol_update && "
+        "cp -f /tmp/chargecontrol_update/webroot/index.html " WEBROOT "/index.html && "
+        "cp -f /tmp/chargecontrol_update/bin/battd /data/adb/battery-manager/battd.new && "
+        "cp -f /tmp/chargecontrol_update/module.prop /data/adb/battery-manager/module.prop && "
+        "chmod 755 /data/adb/battery-manager/battd.new && "
+        "rm -rf /tmp/chargecontrol_update /tmp/chargecontrol_update.zip && "
+        "kill -TERM %d 2>/dev/null", getpid());
+    FILE *pf = popen(cmd, "r");
+    if (!pf) { send_resp(fd, 200, "application/json", "{\"ok\":false,\"msg\":\"exec\"}"); return; }
+    char res[256]; size_t rn = fread(res, 1, sizeof(res)-1, pf);
+    int st = pclose(pf);
+    (void)res; (void)rn;
+    if (st == 0) {
+        log_event("OTA 更新成功，daemon 重启中");
+        send_resp(fd, 200, "application/json", "{\"ok\":true,\"msg\":\"更新完成，服务重启中\"}");
+    } else {
+        send_resp(fd, 200, "application/json", "{\"ok\":false,\"msg\":\"download_fail\"}");
+    }
+}
+
 static void handle_export(int fd) {
     char buf[8192]; int n = 0;
     n += snprintf(buf+n, sizeof(buf)-n, "=== ChargeControl 导出 ===\n时间: %ld\n\n--- 配置 ---\n", (long)time(NULL));
@@ -771,6 +806,7 @@ static void handle_client(int fd) {
     }
     if (!strcmp(uri, "/api/export")) { handle_export(fd); return; }
     if (!strcmp(uri, "/api/update-check")) { handle_update_check(fd); return; }
+    if (!strcmp(uri, "/api/update-apply")) { handle_update_apply(fd); return; }
     if (!strcmp(uri, "/api/topuid")) {
         get_top_uid();
         char out[2560]; int n = 0;
