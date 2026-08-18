@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.44"
+#define VERSION "v1.2.45"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -699,15 +699,16 @@ static void handle_update_apply(int fd) {
     /* 下载 zip */
     char cmd[1024];
     int my_pid = (int)getpid();
-    snprintf(cmd, sizeof(cmd), "curl -sL --max-time 30 -o /tmp/chargecontrol_update.zip '%%s' && "
+    const char *wr = WEBROOT;
+    snprintf(cmd, sizeof(cmd), "curl -sL --max-time 30 -o /tmp/chargecontrol_update.zip '%s' && "
         "mkdir -p /tmp/chargecontrol_update && "
         "unzip -qo /tmp/chargecontrol_update.zip -d /tmp/chargecontrol_update && "
-        "cp -f /tmp/chargecontrol_update/webroot/index.html %%s/index.html && "
+        "cp -f /tmp/chargecontrol_update/webroot/index.html %s/index.html && "
         "cp -f /tmp/chargecontrol_update/bin/battd /data/adb/battery-manager/battd.new && "
         "cp -f /tmp/chargecontrol_update/module.prop /data/adb/battery-manager/module.prop && "
         "chmod 755 /data/adb/battery-manager/battd.new && "
         "rm -rf /tmp/chargecontrol_update /tmp/chargecontrol_update.zip && "
-        "kill -TERM %%d 2>/dev/null", dl_url, WEBROOT, my_pid);
+        "kill -TERM %d 2>/dev/null", dl_url, wr, my_pid);
     FILE *pf = popen(cmd, "r");
     if (!pf) { send_resp(fd, 200, "application/json", "{\"ok\":false,\"msg\":\"exec\"}"); return; }
     char res[256]; size_t rn = fread(res, 1, sizeof(res)-1, pf);
