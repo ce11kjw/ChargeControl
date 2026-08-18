@@ -25,7 +25,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.52"
+#define VERSION "v1.2.53"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -654,7 +654,7 @@ static void handle_status(int fd) {
         control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
         mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high, top_count);
     /* 系统信息 */
-    {
+    { int v = 0;
         FILE *mf = fopen("/proc/meminfo", "r");
         if (mf) {
             char ml[256];
@@ -679,7 +679,7 @@ static void handle_status(int fd) {
         if (cpu_cores < 0) cpu_cores = 1;
         /* 内核版本 */
         FILE *vf = fopen("/proc/version", "r");
-        if (vf) { fgets(kernel_ver, sizeof(kernel_ver), vf);
+        if (vf) { if (fgets(kernel_ver, sizeof(kernel_ver), vf)) {}
             char *nl = strchr(kernel_ver, '\n'); if (nl) *nl = 0;
             fclose(vf); }
         /* 清理 kernel_ver 到只保留版本号部分 */
