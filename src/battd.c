@@ -78,6 +78,8 @@ static int storage_total = -1, storage_free = -1;
 static int uptime_secs = -1, cpu_cores = -1;
 static char kernel_ver[128] = "";
 static int charge_full_mah = 0, capacity_disp = 0, power_mw = 0, est_full_min = 0, est_cycles_left = 0;
+static char est_full_txt[32] = "";
+static float health_degrade = 0.0f;
 static char health_rating[16] = "";
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 static char bat_status[32] = "Unknown";
@@ -479,40 +481,6 @@ static void high_temp_alert(void) { static time_t hl = 0; time_t tn = time(NULL)
     if (bat_temp < 45) alerted_high = 0;
 }
 
-static char top_uid[15][64];
-static double top_mah[15];
-static int top_count = 0;
-static time_t top_last = 0;
-
-static void get_top_uid(void) {
-    time_t t = time(NULL);
-    if (t - top_last < 60) return;
-    top_last = t;
-    top_count = 0;
-    FILE *f = popen("dumpsys batterystats --checkin 2>/dev/null", "r");
-    if (!f) return;
-    char line[512];
-    struct uidmah_t { int uid; double mah; char name[64]; } tmp[200];
-    int n = 0;
-    while (fgets(line, sizeof(line), f) && n < 200) {
-        int uid; double mah; char pk[64];
-        if (sscanf(line, "9,%d,l,pwi,uid,%lf,", &uid, &mah) == 2) {
-            if (mah > 0) { tmp[n].uid = uid; tmp[n].mah = mah; tmp[n].name[0] = 0; n++; }
-        }
-        if (sscanf(line, "9,0,i,uid,%d,%63[^,]", &uid, pk) == 2) {
-            for (int i = 0; i < n; i++) if (tmp[i].uid == uid) { strncpy(tmp[i].name, pk, 63); break; }
-        }
-    }
-    pclose(f);
-    for (int i = 0; i < n; i++) for (int j = i+1; j < n; j++)
-        if (tmp[j].mah > tmp[i].mah) { struct uidmah_t x = tmp[i]; tmp[i] = tmp[j]; tmp[j] = x; }
-    top_count = n < 10 ? n : 10;
-    for (int i = 0; i < top_count; i++) {
-        top_mah[i] = tmp[i].mah;
-        snprintf(top_uid[i], 64, "%s", tmp[i].name[0] ? tmp[i].name : "uid1000");
-    }
-}
-
 static void push_history(void) {
     { time_t tn = time(NULL); static time_t hist_last = 0; if (tn - hist_last < 60) return; hist_last = tn; }
     time_t now = time(NULL);
@@ -661,6 +629,16 @@ static void handle_status(int fd) {
         int cmA = power_mw * 1000 / (vol_mv > 0 ? vol_mv : 4000);
         if (cmA > 0) est_full_min = (remain * 60) / cmA;
     }
+    /* 充满预估文本 + 健康衰减率 */
+    if (est_full_min > 0) {
+        int h = est_full_min / 60, m = est_full_min % 60;
+        if (h > 0 && m > 0) snprintf(est_full_txt, sizeof(est_full_txt), "%d小时%d分", h, m);
+        else if (h > 0) snprintf(est_full_txt, sizeof(est_full_txt), "%d小时", h);
+        else snprintf(est_full_txt, sizeof(est_full_txt), "%d分", m);
+    } else strcpy(est_full_txt, "—");
+    health_degrade = 0.0f;
+    if (cycle_count > 0 && health > 0 && health < 100)
+        health_degrade = (100.0f - health) / cycle_count * 1000.0f; /* 每千次循环衰减% */
     const char *health_rating = "未知";
     if (health >= 90) health_rating = "优秀";
     else if (health >= 80) health_rating = "良好";
@@ -679,21 +657,21 @@ static void handle_status(int fd) {
         "\"soc_temp\":%d,\"gpu_temp\":%d,\"chg_temp\":%d,\"case_temp\":%d,"
         "\"cycle_count\":%d,\"health\":%d,\"health_rating\":\"%s\","
         "\"charge_full_mah\":%d,\"est_cycles_left\":%d,"
-        "\"power_mw\":%d,\"est_full_min\":%d,"
+        "\"power_mw\":%d,\"est_full_min\":%d,\"est_full_txt\":\"%s\",\"health_degrade\":%.1f,"
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
         "\"mem_total\":%d,\"mem_avail\":%d,\"mem_free\":%d,\"storage_total\":%d,\"storage_free\":%d,\"uptime_secs\":%d,\"cpu_cores\":%d,\"kernel_ver\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
-        "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"top_n\":%d}",
+        "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
         cycle_count, health, health_rating,
         charge_full, est_cycles_left,
-        power_mw, est_full_min,
+        power_mw, est_full_min, est_full_txt, health_degrade,
         usb_online, proto_name, pd_type, usb_power_max,
         control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
-        mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high, top_count);
+        mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high);
     /* 系统信息 */
     { int v = 0;
         FILE *mf = fopen("/proc/meminfo", "r");
@@ -768,7 +746,7 @@ static void handle_limit(int fd, const char *body) {
         }
         save_extras();
         free(copy);
-        save_config(); apply_control(); apply_night_mode(); high_temp_alert(); get_top_uid();
+        save_config(); apply_control(); apply_night_mode(); high_temp_alert();
         log_event("配置已更新");
     }
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
@@ -955,17 +933,6 @@ static void handle_client(int fd) {
     if (!strcmp(uri, "/api/export")) { handle_export(fd); return; }
     if (!strcmp(uri, "/api/update-check")) { handle_update_check(fd); return; }
     if (!strcmp(uri, "/api/update-apply")) { handle_update_apply(fd); return; }
-    if (!strcmp(uri, "/api/topuid")) {
-        get_top_uid();
-        char out[2560]; int n = 0;
-        n += snprintf(out+n, sizeof(out)-n, "{\"uids\":[");
-        for (int i = 0; i < top_count; i++) {
-            n += snprintf(out+n, sizeof(out)-n, "%s{\"n\":\"%s\",\"m\":%.2f}", i?",":"", top_uid[i], top_mah[i]);
-        }
-        n += snprintf(out+n, sizeof(out)-n, "]}");
-        send_resp(fd, 200, "application/json", out);
-        return;
-    }
     if (!strcmp(uri, "/api/history")) { char *j = history_json(); send_resp(fd, 200, "application/json", j); free(j); return; }
     if (!strcmp(method, "GET")) serve_file(fd, uri);
     else send_resp(fd, 405, "text/plain", "Method Not Allowed");
@@ -1012,7 +979,7 @@ int main(void) {
         now = time(NULL);
         if (now - last_poll >= (time_t)interval) {
             last_poll = now; update_battery(); push_history();
-            apply_control(); apply_night_mode(); high_temp_alert(); get_top_uid();
+            apply_control(); apply_night_mode(); high_temp_alert();
         }
     }
     log_event("ChargeControl 守护进程停止");
