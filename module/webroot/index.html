@@ -54,7 +54,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 .toggle.on { background:var(--green); }
 .toggle::after { content:''; position:absolute; top:2px; left:2px; width:27px; height:27px; background:#fff; border-radius:50%; transition:transform .35s cubic-bezier(.4,0,.2,1); box-shadow:0 2px 8px rgba(0,0,0,.25); }
 .toggle.on::after { transform:translateX(20px); }
-.temp-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+.temp-list { display:block; }
 .temp-item { display:flex; align-items:center; justify-content:space-between; background:var(--card2); border-radius:12px; padding:12px 14px; }
 .temp-item .n { font-size:13px; color:var(--txt2); }
 .temp-item .v { font-size:17px; font-weight:650; }
@@ -67,15 +67,14 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 .log-box { background:var(--card2); border:none; border-radius:12px; padding:12px; height:280px; overflow-y:auto; font-family:monospace; font-size:11px; line-height:1.6; color:var(--txt2); white-space:pre-wrap; }
 .health-box { display:flex; align-items:center; gap:12px; background:var(--card); border-radius:var(--r); padding:16px; margin-bottom:12px; }
 .health-box .big { font-size:36px; font-weight:800; }
-.health-box .meta { font-size:12px; color:var(--txt2); line-height:1.6; }
-  .slider { -webkit-appearance:none;appearance:none;height:5px;border-radius:99px;background:var(--card2);outline:none;vertical-align:middle; }
+.health-box   .slider { -webkit-appearance:none;appearance:none;height:5px;border-radius:99px;background:var(--card2);outline:none;vertical-align:middle; }
   .slider::-webkit-slider-thumb { -webkit-appearance:none;appearance:none;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer; }
   .slider::-moz-range-thumb { width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer; }
 </style>
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.2.58</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.2.59</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'"><span class="ti"><i class="fa-solid fa-gauge-high"></i></span><span>仪表盘</span></div>
@@ -122,41 +121,24 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 
     <div class="panel">
       <h2><i class="fa-solid fa-heart-pulse" style="margin-right:6px"></i>电池健康</h2>
-      <div class="meta">
-        <div>满充 <span x-text="s.charge_full_mah + 'mAh'"></span> / 设计 <span>5380mAh</span> · 剩余约 <span x-text="s.est_cycles_left > 0 ? s.est_cycles_left : '—'"></span> 次 (至60%)</div>
-
-        <div x-show="s.health > 0 && s.health < 80" style="color:var(--red);margin-top:4px">&#x26a0;&#xfe0f; 健康度低于80%</div>
-        <div x-show="s.temp > 0" style="color:var(--txt2);margin-top:4px">温度 <span x-text="s.temp + '°C'"></span> · 电压 <span x-text="s.voltage ? (s.voltage/1000).toFixed(3) + 'V' : '—'"></span></div>
-        <div x-show="s.current || s.power_mw" style="color:var(--txt2);margin-top:4px">电流 <span x-text="curDisplay()"></span> · 功率 <span x-text="powerDisplay()"></span></div>
-        <div style="color:var(--txt2);margin-top:4px" x-show="s.bat_technology || s.bat_manufacturer || s.bat_model_name">
-          <span x-show="s.bat_technology" x-text="s.bat_technology"></span>
-          <span x-show="s.bat_manufacturer"> · <span x-text="s.bat_manufacturer"></span></span>
-          <span x-show="s.bat_model_name"> · <span x-text="s.bat_model_name"></span></span>
-        </div>
-        <div style="color:var(--txt2);margin-top:4px" x-show="s.bat_health || s.bat_capacity_level">
-          <span x-show="s.bat_health">状态 <span x-text="s.bat_health"></span></span>
-          <span x-show="s.bat_capacity_level"> · 容量 <span x-text="s.bat_capacity_level"></span></span>
-        </div>
-        <div style="color:var(--txt2);margin-top:4px" x-show="s.bat_present >= 0 || s.temp_ambient > 0 || s.internal_resistance > 0">
-          <span x-show="s.bat_present >= 0">电池 <span x-text="s.bat_present ? '在位' : '缺失'"></span></span>
-          <span x-show="s.temp_ambient > 0"> · 环境温 <span x-text="(s.temp_ambient/10).toFixed(1) + '°C'"></span></span>
-          <span x-show="s.internal_resistance > 0"> · 内阻 <span x-text="(s.internal_resistance/1000).toFixed(0) + 'mΩ'"></span></span>
-        </div>
-        <div style="color:var(--txt2);margin-top:4px" x-show="s.health_degrade > 0">
-          健康衰减 <span style="color:var(--orange)" x-text="(s.health_degrade/10).toFixed(1) + '%/千次循环'"></span>
-          <span x-show="s.est_cycles_left > 0"> · 至60%约 <span x-text="s.est_cycles_left"></span> 次循环</span>
-        </div>
-        <div style="color:var(--txt2);margin-top:4px" x-show="s.temp_max > 0 || s.temp_min > 0">
-          <span x-show="s.temp_min > 0">最低 <span x-text="(s.temp_min/10).toFixed(1) + '°C'"></span></span>
-          <span x-show="s.temp_max > 0"> · 最高 <span x-text="(s.temp_max/10).toFixed(1) + '°C'"></span></span>
-          <span x-show="s.calibrate >= 0"> · 校准 <span x-text="s.calibrate ? '需校准' : '正常'"></span></span>
-        </div>
+      <div class="temp-list">
+        <div class="temp-item"><span class="n">健康度</span><span class="v" :style="s.health < 80 ? 'color:var(--red)' : 'color:var(--green)'" x-text="s.health > 0 ? s.health + '% ' + s.health_rating : '—'"></span></div>
+        <div class="temp-item" x-show="s.health > 0 && s.health < 80" style="color:var(--red)"><span class="n">&#x26a0; 建议</span><span class="v">低于80% 换电池</span></div>
+        <div class="temp-item"><span class="n">满充/设计</span><span class="v" x-text="(s.charge_full_mah ? s.charge_full_mah : '—') + ' / 5380mAh'"></span></div>
+        <div class="temp-item"><span class="n">剩余寿命</span><span class="v" x-text="s.est_cycles_left > 0 ? s.est_cycles_left + ' 次循环' : '—'"></span></div>
+        <div class="temp-item"><span class="n">衰减率</span><span class="v" x-text="s.health_degrade > 0 ? (s.health_degrade/10).toFixed(1) + '%/千次' : '—'"></span></div>
+        <div class="temp-item"><span class="n">温度/电压</span><span class="v" x-text="(s.temp > 0 ? s.temp + '°C' : '—') + ' / ' + (s.voltage ? (s.voltage/1000).toFixed(3) + 'V' : '—')"></span></div>
+        <div class="temp-item"><span class="n">电流/功率</span><span class="v" x-text="(s.current ? curDisplay() : '—') + ' / ' + powerDisplay()"></span></div>
+        <div class="temp-item" x-show="s.bat_technology || s.bat_manufacturer || s.bat_model_name"><span class="n">电池</span><span class="v" style="font-size:13px" x-text="[s.bat_technology, s.bat_manufacturer, s.bat_model_name].filter(Boolean).join(' ') || '—'"></span></div>
+        <div class="temp-item" x-show="s.bat_health || s.bat_capacity_level"><span class="n">状态/容量</span><span class="v" x-text="[s.bat_health, s.bat_capacity_level].filter(Boolean).join(' ') || '—'"></span></div>
+        <div class="temp-item" x-show="s.bat_present >= 0 || s.temp_ambient > 0 || s.internal_resistance > 0"><span class="n">在位/环境/内阻</span><span class="v" style="font-size:13px" x-text="[(s.bat_present>=0?(s.bat_present?'在位':'缺失'):''), (s.temp_ambient>0?(s.temp_ambient/10).toFixed(1)+'°C':''), (s.internal_resistance>0?(s.internal_resistance/1000).toFixed(0)+'mΩ':'')].filter(Boolean).join(' ') || '—'"></span></div>
+        <div class="temp-item" x-show="s.temp_min > 0 || s.temp_max > 0 || s.calibrate >= 0"><span class="n">限温/校准</span><span class="v" x-text="[(s.temp_min>0?(s.temp_min/10).toFixed(1)+'°C':''), (s.temp_max>0?(s.temp_max/10).toFixed(1)+'°C':''), (s.calibrate>=0?(s.calibrate?'需校准':'正常'):'')].filter(Boolean).join(' / ') || '—'"></span></div>
       </div>
     </div>
 
     <div class="panel">
       <h2><i class="fa-solid fa-temperature-high" style="margin-right:6px"></i>温度监控</h2>
-      <div class="temp-grid">
+      <div class="temp-list">
       <div class="temp-item"><div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.soc_temp)"></span><span class="n">SoC</span></div><span class="v" :style="'color:' + tempColor(s.soc_temp)" x-text="s.soc_temp > 0 ? s.soc_temp + '°' : '—'"></span></div>
       <div class="temp-item"><div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.gpu_temp)"></span><span class="n">GPU</span></div><span class="v" :style="'color:' + tempColor(s.gpu_temp)" x-text="s.gpu_temp > 0 ? s.gpu_temp + '°' : '—'"></span></div>
       <div class="temp-item"><div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.chg_temp)"></span><span class="n">充电IC</span></div><span class="v" :style="'color:' + tempColor(s.chg_temp)" x-text="s.chg_temp > 0 ? s.chg_temp + '°' : '—'"></span></div>
@@ -166,39 +148,23 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 
     <div class="panel">
       <h2><i class="fa-solid fa-bolt" style="margin-right:6px"></i>充电详情</h2>
-      <div class="temp-grid">
-        <div class="temp-item"><span class="n">充电协议</span><span class="v" x-text="s.proto_name || '—'"></span></div>
-        <div class="temp-item"><span class="n">协商功率</span><span class="v" x-text="s.power_max ? s.power_max + 'W' : '—'"></span></div>
-        <div class="temp-item"><span class="n">PD版本</span><span class="v" x-text="s.pd_type ? 'PD' + s.pd_type : '—'"></span></div>
-        <div class="temp-item"><span class="n">连接状态</span><span class="v" :style="s.usb_online ? 'color:var(--green)' : ''" x-text="s.usb_online ? '已连接' : '未连接'"></span></div>
-        <div class="temp-item"><span class="n">实时电流</span><span class="v" :style="s.current < 0 ? 'color:var(--green)' : (s.current > 0 ? 'color:var(--orange)' : '')" x-text="curDisplay()"></span></div>
-        <div class="temp-item"><span class="n">旁路充电</span><span class="v" x-text="(s.bypass_ok ? (s.bypass_on ? '已激活' : '未激活') : '不支持')" :style="s.bypass_on ? 'color:var(--green)' : ''"></span></div>
-        <div class="temp-item"><span class="n">充电类型</span><span class="v" x-text="['未知','N/A','Trickle','Fast','Standard','Adaptive','Custom','Long Life','Bypass'][s.charge_type+1] || '—'"></span></div>
-        <div class="temp-item"><span class="n">预计充满</span><span class="v" x-text="s.time_to_full > 0 ? Math.ceil(s.time_to_full/60) + '分' : (s.est_full_txt || '—')"></span></div>
-        <div class="temp-item"><span class="n">累计电量</span><span class="v" x-text="s.charge_counter > 0 ? (s.charge_counter/1000).toFixed(0) + 'mAh' : '—'"></span></div>
-        <div class="temp-item"><span class="n">输入限流</span><span class="v" x-text="s.input_current_limit > 0 ? (s.input_current_limit/1000).toFixed(0) + 'mA' : '—'"></span></div>
-        <div class="temp-item"><span class="n">恒流充电</span><span class="v" x-text="s.constant_charge_current > 0 ? (s.constant_charge_current/1000).toFixed(0) + 'mA' : '—'"></span></div>
-        <div class="temp-item"><span class="n">恒压充电</span><span class="v" x-text="s.constant_charge_voltage > 0 ? (s.constant_charge_voltage/1000000).toFixed(3) + 'V' : '—'"></span></div>
-        <div class="temp-item"><span class="n">开路电压</span><span class="v" x-text="s.voltage_ocv > 0 ? (s.voltage_ocv/1000).toFixed(3) + 'V' : '—'"></span></div>
-        <div class="temp-item"><span class="n">平均电流</span><span class="v" x-text="s.current_avg ? (s.current_avg/1000 > 0 ? '+' : '-') + Math.abs(s.current_avg/1000).toFixed(0) + 'mA' : '—'"></span></div>
-        <div class="temp-item"><span class="n">内阻</span><span class="v" x-text="s.internal_resistance > 0 ? (s.internal_resistance/1000).toFixed(0) + 'mΩ' : '—'"></span></div>
-        <div class="temp-item"><span class="n">误差范围</span><span class="v" x-text="s.capacity_error_margin >= 0 ? s.capacity_error_margin + '%' : '—'"></span></div>
-        <div class="temp-item"><span class="n">预计耗尽</span><span class="v" x-text="s.time_to_empty > 0 ? Math.ceil(s.time_to_empty/60) + '分' : '—'"></span></div>
-        <div class="temp-item"><span class="n">当前电量</span><span class="v" x-text="s.charge_now > 0 ? (s.charge_now/1000).toFixed(0) + 'mAh' : '—'"></span></div>
-        <div class="temp-item"><span class="n">终止电流</span><span class="v" x-text="s.charge_term_current > 0 ? (s.charge_term_current/1000).toFixed(0) + 'mA' : '—'"></span></div>
-        <div class="temp-item"><span class="n">最大充电电流</span><span class="v" x-text="s.constant_charge_current_max > 0 ? (s.constant_charge_current_max/1000).toFixed(0) + 'mA' : '—'"></span></div>
-        <div class="temp-item"><span class="n">最大充电电压</span><span class="v" x-text="s.constant_charge_voltage_max > 0 ? (s.constant_charge_voltage_max/1000000).toFixed(3) + 'V' : '—'"></span></div>
-        <div class="temp-item"><span class="n">充电器温度</span><span class="v" x-text="s.charger_temp > 0 ? (s.charger_temp/10).toFixed(1) + '°C' : '—'"></span></div>
-        <div class="temp-item"><span class="n">输入电压(稳定)</span><span class="v" x-text="s.input_voltage_settled > 0 ? (s.input_voltage_settled/1000).toFixed(3) + 'V' : '—'"></span></div>
-        <div class="temp-item"><span class="n">充电完成</span><span class="v" x-text="s.charge_done >= 0 ? (s.charge_done ? '是' : '否') : '—'"></span></div>
-        <div class="temp-item"><span class="n">安全计时器</span><span class="v" :style="s.safety_timer_expired > 0 ? 'color:var(--red)' : ''" x-text="s.safety_timer_expired >= 0 ? (s.safety_timer_expired ? '已超时' : '正常') : '—'"></span></div>
-        <div class="temp-item"><span class="n">校准状态</span><span class="v" x-text="s.calibrate >= 0 ? (s.calibrate ? '需校准' : '正常') : '—'"></span></div>
-      </div>
+      <div class="temp-list">
+        <div class="temp-item"><span class="n">充电协议</span><span class="v" x-text="s.proto_name || '—'"></span></div><div class="temp-item"><span class="n">协商功率</span><span class="v" x-text="s.power_max ? s.power_max + 'W' : '—'"></span></div><div class="temp-item"><span class="n">PD版本</span><span class="v" x-text="s.pd_type ? 'PD' + s.pd_type : '—'"></span></div><div class="temp-item"><span class="n">连接状态</span><span class="v" :style="s.usb_online ? 'color:var(--green)' : ''" x-text="s.usb_online ? '已连接' : '未连接'"></span></div><div class="temp-item"><span class="n">实时电流</span><span class="v" :style="s.current < 0 ? 'color:var(--green)' : (s.current > 0 ? 'color:var(--orange)' : '')" x-text="curDisplay()"></span></div><div class="temp-item"><span class="n">旁路充电</span><span class="v" x-text="(s.bypass_ok ? (s.bypass_on ? '已激活' : '未激活') : '不支持')" :style="s.bypass_on ? 'color:var(--green)' : ''"></span></div><div class="temp-item"><span class="n">充电类型</span><span class="v" x-text="['未知','N/A','Trickle','Fast','Standard','Adaptive','Custom','Long Life','Bypass'][s.charge_type+1] || '—'"></span></div><div class="temp-item"><span class="n">预计充满</span><span class="v" x-text="s.time_to_full > 0 ? Math.ceil(s.time_to_full/60) + '分' : (s.est_full_txt || '—')"></span></div><div class="temp-item"><span class="n">累计电量</span><span class="v" x-text="s.charge_counter > 0 ? (s.charge_counter/1000).toFixed(0) + 'mAh' : '—'"></span></div><div class="temp-item"><span class="n">输入限流</span><span class="v" x-text="s.input_current_limit > 0 ? (s.input_current_limit/1000).toFixed(0) + 'mA' : '—'"></span></div>
+        <details style="padding:9px 0 0;border-top:1px solid var(--line);margin-top:2px">
+          <summary style="font-size:13px;color:var(--accent);cursor:pointer;padding:6px 0;list-style:none;display:flex;align-items:center;justify-content:space-between; -webkit-tap-highlight-color:transparent;">
+            <span style="font-weight:600">高级数据</span>
+            <span class="chev" style="font-size:11px;color:var(--txt2)">展开</span>
+          </summary>
+          <div style="margin-top:2px">
+            <div class="temp-item"><span class="n">恒流充电</span><span class="v" x-text="s.constant_charge_current > 0 ? (s.constant_charge_current/1000).toFixed(0) + 'mA' : '—'"></span></div><div class="temp-item"><span class="n">恒压充电</span><span class="v" x-text="s.constant_charge_voltage > 0 ? (s.constant_charge_voltage/1000000).toFixed(3) + 'V' : '—'"></span></div><div class="temp-item"><span class="n">开路电压</span><span class="v" x-text="s.voltage_ocv > 0 ? (s.voltage_ocv/1000).toFixed(3) + 'V' : '—'"></span></div><div class="temp-item"><span class="n">平均电流</span><span class="v" x-text="s.current_avg ? (s.current_avg/1000 > 0 ? '+' : '-') + Math.abs(s.current_avg/1000).toFixed(0) + 'mA' : '—'"></span></div><div class="temp-item"><span class="n">内阻</span><span class="v" x-text="s.internal_resistance > 0 ? (s.internal_resistance/1000).toFixed(0) + 'mΩ' : '—'"></span></div><div class="temp-item"><span class="n">误差范围</span><span class="v" x-text="s.capacity_error_margin >= 0 ? s.capacity_error_margin + '%' : '—'"></span></div><div class="temp-item"><span class="n">预计耗尽</span><span class="v" x-text="s.time_to_empty > 0 ? Math.ceil(s.time_to_empty/60) + '分' : '—'"></span></div><div class="temp-item"><span class="n">当前电量</span><span class="v" x-text="s.charge_now > 0 ? (s.charge_now/1000).toFixed(0) + 'mAh' : '—'"></span></div><div class="temp-item"><span class="n">终止电流</span><span class="v" x-text="s.charge_term_current > 0 ? (s.charge_term_current/1000).toFixed(0) + 'mA' : '—'"></span></div><div class="temp-item"><span class="n">最大充电电流</span><span class="v" x-text="s.constant_charge_current_max > 0 ? (s.constant_charge_current_max/1000).toFixed(0) + 'mA' : '—'"></span></div><div class="temp-item"><span class="n">最大充电电压</span><span class="v" x-text="s.constant_charge_voltage_max > 0 ? (s.constant_charge_voltage_max/1000000).toFixed(3) + 'V' : '—'"></span></div><div class="temp-item"><span class="n">充电器温度</span><span class="v" x-text="s.charger_temp > 0 ? (s.charger_temp/10).toFixed(1) + '°C' : '—'"></span></div><div class="temp-item"><span class="n">输入电压(稳定)</span><span class="v" x-text="s.input_voltage_settled > 0 ? (s.input_voltage_settled/1000).toFixed(3) + 'V' : '—'"></span></div><div class="temp-item"><span class="n">充电完成</span><span class="v" x-text="s.charge_done >= 0 ? (s.charge_done ? '是' : '否') : '—'"></span></div><div class="temp-item"><span class="n">安全计时器</span><span class="v" :style="s.safety_timer_expired > 0 ? 'color:var(--red)' : ''" x-text="s.safety_timer_expired >= 0 ? (s.safety_timer_expired ? '已超时' : '正常') : '—'"></span></div><div class="temp-item"><span class="n">校准状态</span><span class="v" x-text="s.calibrate >= 0 ? (s.calibrate ? '需校准' : '正常') : '—'"></span></div>
+          </div>
+        </details>
+      </div></div>
     </div>
 
     <div class="panel">
       <h2><i class="fa-solid fa-microchip" style="margin-right:6px"></i>系统信息</h2>
-      <div class="temp-grid">
+      <div class="temp-list">
         <div class="temp-item"><span class="n">内存</span><span class="v" x-text="s.mem_avail > 0 ? (s.mem_avail/1024).toFixed(1) + '/' + (s.mem_total/1024).toFixed(1) + 'GB' : '—'"></span></div>
         <div class="temp-item"><span class="n">存储(/data)</span><span class="v" x-text="s.storage_free > 0 ? (s.storage_free/1024).toFixed(1) + '/' + (s.storage_total/1024).toFixed(1) + 'GB' : '—'"></span></div>
         <div class="temp-item"><span class="n">CPU核心</span><span class="v" x-text="s.cpu_cores > 0 ? s.cpu_cores + '核' : '—'"></span></div>
