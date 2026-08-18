@@ -24,7 +24,7 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.45"
+#define VERSION "v1.2.46"
 
 static volatile int running = 1;
 static int charge_limit = 80;
@@ -697,7 +697,7 @@ static void handle_update_apply(int fd) {
     while (*url && *url != '"' && i < 511) dl_url[i++] = *url++;
     dl_url[i] = '\0';
     /* 下载 zip */
-    char cmd[1024];
+    char cmd[2048];
     int my_pid = (int)getpid();
     const char *wr = WEBROOT;
     snprintf(cmd, sizeof(cmd), "curl -sL --max-time 30 -o /tmp/chargecontrol_update.zip '%s' && "
