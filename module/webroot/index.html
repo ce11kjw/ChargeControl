@@ -201,8 +201,11 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
         <div class="temp-item"><span class="n">运行时间</span><span class="v" x-text="s.uptime_secs > 0 ? Math.floor(s.uptime_secs/86400) + '天' + Math.floor((s.uptime_secs%86400)/3600) + '时' : '—'"></span></div>
         <div class="temp-item"><span class="n">空闲内存</span><span class="v" x-text="s.mem_free > 0 ? (s.mem_free/1024).toFixed(1) + 'GB' : '—'"></span></div>
         <div class="temp-item"><span class="n">内核版本</span><span class="v" style="font-size:13px;font-weight:500" x-text="s.kernel_ver || '—'"></span></div>
-      </div>
-    </div>
+        <div class="temp-item"><span class="n">CPU型号</span><span class="v" style="font-size:13px;font-weight:500" x-text="s.cpu_model || '—'"></span></div>
+        <div class="temp-item"><span class="n">设备型号</span><span class="v" style="font-size:13px;font-weight:500" x-text="s.device_model || '—'"></span></div>
+        <div class="temp-item"><span class="n">WiFi信号</span><span class="v" :style="s.wifi_on ? 'color:var(--green)' : ''" x-text="s.wifi_on ? (s.wifi_rssi + 'dBm') : '关闭'"></span></div>
+        <div class="temp-item"><span class="n">移动网络</span><span class="v" :style="s.mobile_on ? 'color:var(--green)' : ''" x-text="s.mobile_on ? '已连接' : '未连接'"></span></div>
+        <div class="temp-item"><span class="n">网关接口</span><span class="v" style="font-size:13px;font-weight:500" x-text="s.ip_addr || '—'"></span></div>
 
     <div class="panel" style="margin-top:16px">
       <h2><i class="fa-solid fa-chart-line" style="margin-right:6px"></i>趋势</h2>
