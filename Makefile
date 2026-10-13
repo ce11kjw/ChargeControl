@@ -16,6 +16,6 @@ clean:
 package: $(TARGET)
 	rm -f $(OUTPUT)
 	cp $(TARGET) $(MODULE_DIR)/bin/battd
-	cd $(MODULE_DIR) && zip -r ../$(OUTPUT) .
+	cd $(MODULE_DIR) && zip -r ../$(OUTPUT) . -x '*.bak' -x '*.v*' -x '*.old'
 
 .PHONY: all clean package

@@ -25,11 +25,13 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.2.64"
+#define VERSION "v1.3.0"
 
 static volatile int running = 1;
 static int charge_limit = 80;
 static int temp_limit = 45;
+static int chg_temp_limit = 60;     /* 新增：充电IC 温度上限（实测 MTK 充电时可达 67°C）*/
+static int chg_temp_suspended = 0;  /* 新增：充电IC 过温标志 */
 static int resume_delta = 5;
 static int interval = 5;
 static int limit_enabled = 1;
@@ -82,13 +84,26 @@ static int uptime_secs = -1, cpu_cores = -1;
 static char kernel_ver[128] = "", cpu_model[128] = "", device_model[128] = "";
 static int wifi_rssi = -128, wifi_on = 0, mobile_on = 0;
 static char ip_addr[64] = "";
-static int charge_full_mah = 0, capacity_disp = 0, power_mw = 0, est_full_min = 0, est_cycles_left = 0;
+static int charge_full_mah = 0, design_mah = 5380, capacity_disp = 0, power_mw = 0, est_full_min = 0, est_cycles_left = 0;
+static int soh_native = -1;   /* bms/soh 原生健康度 */
 static char est_full_txt[32] = "";
 static float health_degrade = 0.0f;
 static char health_rating[16] = "";
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 static char bat_status[32] = "Unknown";
 static int soc_temp = -1, gpu_temp = -1, chg_temp = -1, case_temp = -1;
+/* ★ 新增：MTK/PD 扩展字段 */
+static int pd_pdo_count = 0;           /* PD 能力档位数 */
+static int pd_pdo_max_mv = 0;          /* PD 最高电压(mV) */
+static int pd_pdo_max_ma = 0;          /* PD 最大电流(mA) */
+static char pd_svid[16] = "";          /* 适配器厂商标识 */
+static char pd_state[24] = "";         /* PD 状态机状态 */
+static int cc_limit_supported = 0;     /* charge_control_limit 是否可用 */
+static int cc_limit_val = -1;          /* MTK 原生电量上限原值 */
+static int power_path_en = -1;         /* en_power_path 旁路电源路径 */
+static int jeita_index = -1;           /* JEITA 温控档位 */
+static int soh_delta_x10 = 0;          /* SOH 相对首次记录的变化(x10) */
+static int soh_first = -1;             /* 首次记录的 SOH */
 static int cycle_count = -1, health = -1;
 static int usb_online = 0, usb_power_max = 0, pd_type = 0;
 static int usb_curr_cache = 0, usb_volt_cache = 0;
@@ -223,26 +238,86 @@ static void slow_update_battery(void) {
     }
 }
 
+/* ★ 新增：读取 PD 协议真值 + MTK 原生能力（不写，仅探测） */
+static void read_pd_and_mtk(void) {
+    char buf[64];
+    /* PD 能力档位 pdo1..pdo7（原始 hex，解析出最高电压/电流） */
+    pd_pdo_count = 0; pd_pdo_max_mv = 0; pd_pdo_max_ma = 0;
+    for (int i = 1; i <= 7; i++) {
+        char path[128];
+        snprintf(path, sizeof(path), "/sys/class/Charging_Adapter/pd_adapter/pdo%d", i);
+        if (read_str(path, buf, sizeof(buf)) <= 0) continue;
+        unsigned int v = (unsigned int)strtoul(buf, NULL, 16);
+        if (v == 0) continue;
+        pd_pdo_count++;
+        /* PDO 解析（USB-PD 规范）：固定电压 PDO 的 bits 9:0 电压(50mV/LSB), bits 19:10 电流(10mA/LSB) */
+        unsigned int mv = (v & 0x3FF) * 50;
+        unsigned int ma = ((v >> 10) & 0x3FF) * 10;
+        if ((int)mv > pd_pdo_max_mv) { pd_pdo_max_mv = mv; pd_pdo_max_ma = ma; }
+    }
+    if (read_str("/sys/class/Charging_Adapter/pd_adapter/adapter_svid", pd_svid, sizeof(pd_svid)) <= 0)
+        strcpy(pd_svid, "");
+    if (read_str("/sys/class/Charging_Adapter/pd_adapter/current_state", pd_state, sizeof(pd_state)) <= 0)
+        strcpy(pd_state, "");
+    /* MTK JEITA 温控档位 */
+    int v = read_int("/sys/class/power_supply/usb/jeita_chg_index");
+    jeita_index = v;
+    /* MTK 原生电量上限 charge_control_limit（只读探测） */
+    v = read_int("/sys/class/power_supply/battery/charge_control_limit");
+    if (v >= 0) { cc_limit_supported = 1; cc_limit_val = v; }
+    /* MTK 电源路径 en_power_path（旁路的另一种实现，只读探测） */
+    v = read_int("/proc/mtk_battery_cmd/en_power_path");
+    if (v >= 0) power_path_en = v;
+    /* ★ SOH 变化追踪（首次记录后对比） */
+    if (soh_native > 0) {
+        if (soh_first < 0) {
+            soh_first = soh_native;
+            soh_delta_x10 = 0;
+        } else {
+            soh_delta_x10 = (soh_native - soh_first) * 10;
+        }
+    }
+}
+
 static void update_temps(void) {
     time_t tn = time(NULL);
     if (tn - temps_last < 5) return;  /* 5s 节流 */
     temps_last = tn;
     soc_temp = -1; gpu_temp = -1; chg_temp = -1; case_temp = -1;
-    for (int i = 0; i < 20; i++) {
+    /* 扫描上限从 20 扩到 96：MTK/高通多平台关键温度常位于 zone34+ (GPU/充电IC/机身) */
+    for (int i = 0; i < 96; i++) {
         char tzpath[128]; snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/type", THERMAL, i);
         char tname[64];
         if (read_str(tzpath, tname, sizeof(tname)) <= 0) continue;
         snprintf(tzpath, sizeof(tzpath), "%s/thermal_zone%d/temp", THERMAL, i);
         int tval = read_int(tzpath);
         if (tval < 0) continue;
+        /* 值域过滤：剔除未初始化传感器的垃圾值
+         * 实测 MTK 上 vtskin / camera 系列常报 -274000，cp 系列报 300，mtk-charger 报 0
+         * 允许 -30.000C ~ 150.000C */
+        if (tval < -30000 || tval > 150000) continue;
         if (soc_temp < 0 && (strstr(tname, "soc_max") || strstr(tname, "tsens") || strstr(tname, "cpu-therm") || strstr(tname, "cpu_max") || strstr(tname, "cpuss") || strstr(tname, "cpu_therm") || strstr(tname, "soc_therm")))
             soc_temp = tval / 1000;
         else if (gpu_temp < 0 && (strstr(tname, "gpu1") || strstr(tname, "gpu-therm") || strstr(tname, "gpu_therm") || strstr(tname, "gpu-max") || strstr(tname, "gpu_max") || strstr(tname, "gpu-thermal") || strstr(tname, "gpu_thermal")))
             gpu_temp = tval / 1000;
-        else if (chg_temp < 0 && (strstr(tname, "mtk-master-charger") || strstr(tname, "usb-therm") || strstr(tname, "bq") || strstr(tname, "smb") || strstr(tname, "charger-thermal") || strstr(tname, "charger_thermal")))
+        else if (chg_temp < 0 && (strstr(tname, "mtk-master-charger") || strstr(tname, "usb-therm") || strstr(tname, "bq") || strstr(tname, "smb") || strstr(tname, "charger-thermal") || strstr(tname, "charger_thermal") || strstr(tname, "charger1_therm") || strstr(tname, "charger2_therm")))
             chg_temp = tval / 1000;
-        else if (case_temp < 0 && (strstr(tname, "X7_therm") || strstr(tname, "charger2") || strstr(tname, "case") || strstr(tname, "skin") || strstr(tname, "quiet_therm") || strstr(tname, "shell") || strstr(tname, "frame") || strstr(tname, "back_therm")))
+        else if (case_temp < 0 && (strstr(tname, "X7_therm") || strstr(tname, "case") || strstr(tname, "skin") || strstr(tname, "quiet_therm") || strstr(tname, "shell") || strstr(tname, "frame") || strstr(tname, "back_therm")))
             case_temp = tval / 1000;
+    }
+    /* ★ 充电IC 温度优先直读 power_supply（比遍历 thermal 快且准，实测 MTK: 670=67°C） */
+    if (chg_temp <= 0) {
+        int v = read_int("/sys/class/power_supply/mtk-master-charger/temp");
+        if (v > 0) chg_temp = v / 10;
+    }
+    if (chg_temp <= 0) {
+        int v = read_int(SYSFS "/charger_temp");
+        if (v > 0) chg_temp = v / 10;
+    }
+    /* ★ 机身温度兜底：读 MTK 的 X7_therm 已含，若仍空则试 battery 附近的 thermal */
+    if (case_temp <= 0) {
+        int v = read_int(SYSFS "/temp");
+        if (v > 0) case_temp = v / 10;   /* 电池温度兜底 */
     }
 }
 
@@ -252,7 +327,7 @@ static void update_battery(void) {
     snprintf(path, sizeof(path), "%s/capacity", SYSFS);
     if ((v = read_int(path)) >= 0) bat_capacity = v;
     snprintf(path, sizeof(path), "%s/temp", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_temp = v / 10;
+    if ((v = read_int(path)) >= 0) bat_temp = (v > 200) ? v / 10 : v;  /* 自适应 0.1C 或直读 C */
     snprintf(path, sizeof(path), "%s/voltage_now", SYSFS);
     if ((v = read_int(path)) >= 0) bat_volt = v / 1000;
     snprintf(path, sizeof(path), "%s/current_now", SYSFS);
@@ -263,6 +338,14 @@ static void update_battery(void) {
     if ((v = read_int(path)) >= 0) cycle_count = v;
     snprintf(path, sizeof(path), "%s/charge_full", SYSFS);
     if ((v = read_int(path)) >= 0) charge_full_mah = v / 1000;
+    /* ★ 动态读设计容量（替代硬编码 5380） */
+    snprintf(path, sizeof(path), "%s/charge_full_design", SYSFS);
+    if ((v = read_int(path)) > 0) design_mah = v / 1000;
+    /* ★ 读电芯原生 SOH（比自算准） */
+    snprintf(path, sizeof(path), "/sys/class/power_supply/bms/soh");
+    v = read_int(path);
+    if (v < 0) { snprintf(path, sizeof(path), "%s/soh", SYSFS); v = read_int(path); }
+    soh_native = v;
     /* bms/capacity_raw 高精度 */
     snprintf(path, sizeof(path), "%s/bms/capacity_raw", SYSFS);
     if ((v = read_int(path)) < 0) { snprintf(path, sizeof(path), "%s/capacity_raw", SYSFS); v = read_int(path); }
@@ -288,18 +371,25 @@ static void update_battery(void) {
             if (cmA > 0) est_full_min = (int)((long long)remain * charge_full_mah * 60 / cmA / 100);
         }
     }
-    /* 健康度 */
-    if (cycle_count > 0 && charge_full_mah > 0) {
-        float loss = (5380.0f - charge_full_mah) / cycle_count;
-        if (loss > 0.001f) {
-            int est = (int)((charge_full_mah * 0.6f - 5380.0f * 0.6f) / loss);
-            if (est < 0) est = 0;
-            est_cycles_left = est;
-        }
-        float health_f = (float)charge_full_mah / 5380.0f * 100.0f;
+    /* 健康度：优先电芯原生 bms/soh，回退到自算 */
+    if (soh_native > 0 && soh_native <= 100) {
+        health = soh_native;
+    } else if (cycle_count > 0 && charge_full_mah > 0 && design_mah > 0) {
+        float health_f = (float)charge_full_mah / (float)design_mah * 100.0f;
         if (health_f > 100) health_f = 100;
         if (health_f < 0) health_f = 0;
         health = (int)(health_f * 10 + 0.5f) / 10.0f;
+    }
+    /* 剩余循环估算（用真实设计容量，不再硬编码） */
+    if (cycle_count > 0 && charge_full_mah > 0 && design_mah > 0) {
+        float loss = (float)(design_mah - charge_full_mah) / cycle_count;
+        if (loss > 0.001f) {
+            int est = (int)((charge_full_mah * 0.6f - design_mah * 0.6f) / loss);
+            if (est < 0) est = 0;
+            est_cycles_left = est;
+        }
+    }
+    if (health > 0) {
         if (health >= 95) strcpy(health_rating, "优秀");
         else if (health >= 85) strcpy(health_rating, "良好");
         else if (health >= 70) strcpy(health_rating, "一般");
@@ -324,6 +414,21 @@ static void apply_control(void) {
             if (write_str(path, "0") < 0) log_event("写input_suspend失败(恢复)");
         }
         temp_suspended = 0;
+    }
+    /* ★ 新增：充电IC 过温保护（电池温度正常但充电IC 过热时也停充，防烧） */
+    if (chg_temp > 0 && chg_temp >= chg_temp_limit) {
+        if (write_str(path, "1") < 0) log_event("写input_suspend失败(充电IC过温)");
+        if (!chg_temp_suspended) log_event("充电IC过温保护触发");
+        chg_temp_suspended = 1;
+        return;
+    }
+    if (chg_temp_suspended) {
+        if (!paused && chg_temp > 0 && chg_temp < chg_temp_limit - 5) {
+            if (write_str(path, "0") < 0) log_event("写input_suspend失败(IC恢复)");
+            chg_temp_suspended = 0;
+        } else {
+            return;   /* 未降到恢复线以下，保持停充 */
+        }
     }
     if (paused) {
         if (write_str(path, "1") < 0) log_event("写input_suspend失败(暂停)");
@@ -375,6 +480,7 @@ static void load_config(void) {
         const char *k = line, *v = eq + 1;
         if (!strcmp(k, "charge_limit")) charge_limit = atoi(v);
         else if (!strcmp(k, "temp_limit")) temp_limit = atoi(v);
+        else if (!strcmp(k, "chg_temp_limit")) chg_temp_limit = atoi(v);
         else if (!strcmp(k, "resume_delta")) resume_delta = atoi(v);
         else if (!strcmp(k, "interval")) interval = atoi(v);
         else if (!strcmp(k, "enabled")) limit_enabled = atoi(v);
@@ -386,6 +492,7 @@ static void save_config(void) {
     FILE *f = fopen(CONFIG, "w"); if (!f) return;
     fprintf(f, "charge_limit=%d\n", charge_limit);
     fprintf(f, "temp_limit=%d\n", temp_limit);
+    fprintf(f, "chg_temp_limit=%d\n", chg_temp_limit);
     fprintf(f, "resume_delta=%d\n", resume_delta);
     fprintf(f, "interval=%d\n", interval);
     fprintf(f, "enabled=%d\n", limit_enabled);
@@ -418,7 +525,7 @@ static void load_extras(void) {
     if ((q = strstr(buf, "\"scene\":"))) scene = atoi(q + 8);
     if ((q = strstr(buf, "\"lang\":"))) lang = atoi(q + 7);
     if ((q = strstr(buf, "\"theme\":"))) theme = atoi(q + 8);
-    if ((q = strstr(buf, "\"bypass_soft\":"))) bypass_soft = atoi(q + 13);
+    if ((q = strstr(buf, "\"bypass_soft\":"))) bypass_soft = atoi(q + 14); /* 修 off-by-one: "bypass_soft": 长度=14 */
 }
 static void save_extras(void) {
     FILE *f = fopen("/data/adb/battery-manager/extras.json", "w");
@@ -552,7 +659,9 @@ static char *history_json(void) {
     FILE *f = fopen(HISTORY, "r"); if (!f) return strdup("[]");
     fseek(f, 0, SEEK_END); long sz = ftell(f); rewind(f);
     if (sz <= 0 || sz > (1<<20)) { fclose(f); return strdup("[]"); }
-    char *buf = malloc(sz + 1); size_t rd = fread(buf, 1, sz, f); fclose(f);
+    char *buf = malloc(sz + 1);
+    if (!buf) { fclose(f); return strdup("[]"); }   /* ★ NULL 检查 */
+    size_t rd = fread(buf, 1, sz, f); fclose(f);
     buf[rd] = '\0';
     int nl = 0; for (char *s = buf; *s; s++) if (*s == '\n') nl++;
     int keep = nl > HIST_MAX ? nl - HIST_MAX : 0;
@@ -561,7 +670,9 @@ static char *history_json(void) {
     for (char *p = start; *p; p++) if (*p == '\n') *p = ',';
     size_t blen = strlen(start);
     if (blen > 0 && start[blen-1] == ',') start[blen-1] = '\0', blen--;
-    char *out = malloc(blen + 3); out[0] = '[';
+    char *out = malloc(blen + 3);
+    if (!out) { free(buf); return strdup("[]"); }   /* ★ NULL 检查 */
+    out[0] = '[';
     memcpy(out+1, start, blen); out[blen+1] = ']'; out[blen+2] = '\0';
     free(buf); return out;
 }
@@ -580,6 +691,7 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
 static void handle_status(int fd) {
     char body[8192];
     update_temps();
+    read_pd_and_mtk();
     int charge_full = read_int(SYSFS "/charge_full") / 1000;
 
     /* 自身进程信息 */
@@ -683,7 +795,7 @@ static void handle_status(int fd) {
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
         "\"mem_total\":%d,\"mem_avail\":%d,\"mem_free\":%d,\"storage_total\":%d,\"storage_free\":%d,\"uptime_secs\":%d,\"cpu_cores\":%d,\"kernel_ver\":\"%s\",\"cpu_model\":\"%s\",\"device_model\":\"%s\",\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
-        "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d}",
+        "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
@@ -692,7 +804,10 @@ static void handle_status(int fd) {
         power_mw, est_full_min, est_full_txt, health_degrade,
         usb_online, proto_name, pd_type, usb_power_max,
         control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
-        mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, cpu_model, device_model, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high);
+        mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, cpu_model, device_model, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high,
+        pd_pdo_count, pd_pdo_max_mv, pd_pdo_max_ma, pd_svid, pd_state,
+        cc_limit_supported, cc_limit_val, power_path_en, jeita_index,
+        soh_native, soh_first, soh_delta_x10, design_mah, chg_temp_limit);
     /* 系统信息 */
     { int v = 0;
         FILE *mf = fopen("/proc/meminfo", "r");
@@ -732,6 +847,7 @@ static void handle_status(int fd) {
 static void handle_limit(int fd, const char *body) {
     if (body) {
         char *copy = strdup(body); char *save = NULL;
+        if (!copy) { send_resp(fd, 200, "application/json", "{\"ok\":false}"); return; }
         for (char *tok = strtok_r(copy, "&", &save); tok; tok = strtok_r(NULL, "&", &save)) {
             char *eq = strchr(tok, '='); if (!eq) continue;
             *eq = '\0'; char key[64], val[512];
@@ -740,6 +856,7 @@ static void handle_limit(int fd, const char *body) {
             const char *dec = val;
             if (!strcmp(key, "charge_limit")) { int x = atoi(dec); if (x >= 20 && x <= 100) charge_limit = x; }
             else if (!strcmp(key, "temp_limit")) { int x = atoi(dec); if (x >= 30 && x <= 60) temp_limit = x; }
+            else if (!strcmp(key, "chg_temp_limit")) { int x = atoi(dec); if (x >= 40 && x <= 90) chg_temp_limit = x; }
             else if (!strcmp(key, "resume_delta")) { int x = atoi(dec); if (x >= 1 && x <= 20) resume_delta = x; }
             else if (!strcmp(key, "interval")) { int x = atoi(dec); if (x >= 1 && x <= 60) interval = x; }
             else if (!strcmp(key, "enabled")) limit_enabled = atoi(dec);
@@ -858,14 +975,23 @@ static void handle_update_apply(int fd) {
     char cmd[2048];
     int my_pid = (int)getpid();
     const char *wr = WEBROOT;
-    snprintf(cmd, sizeof(cmd), "curl -sL --max-time 30 -o /tmp/chargecontrol_update.zip '%s' && "
+    /* ★ 修复 OTA 链：下载 → 校验 → 备份 → 原子替换(.new 必须 rename) → 后台重启新进程 → 退出自己 */
+    snprintf(cmd, sizeof(cmd),
+        "curl -sL --max-time 60 -o /tmp/chargecontrol_update.zip '%s' && "
         "mkdir -p /tmp/chargecontrol_update && "
         "unzip -qo /tmp/chargecontrol_update.zip -d /tmp/chargecontrol_update && "
+        "test -s /tmp/chargecontrol_update/bin/battd && "
         "cp -f /tmp/chargecontrol_update/webroot/index.html %s/index.html && "
-        "cp -f /tmp/chargecontrol_update/bin/battd /data/adb/battery-manager/battd.new && "
         "cp -f /tmp/chargecontrol_update/module.prop /data/adb/battery-manager/module.prop && "
+        /* 备份旧版，便于回滚 */
+        "cp -f /data/adb/battery-manager/battd /data/adb/battery-manager/battd.bak && "
+        /* 新二进制先落 .new，chmod 后再原子 rename（关键：原代码只写 .new 从不改名） */
+        "cp -f /tmp/chargecontrol_update/bin/battd /data/adb/battery-manager/battd.new && "
         "chmod 755 /data/adb/battery-manager/battd.new && "
+        "mv -f /data/adb/battery-manager/battd.new /data/adb/battery-manager/battd && "
         "rm -rf /tmp/chargecontrol_update /tmp/chargecontrol_update.zip && "
+        /* 关键：先 fork 一个后台 shell，等本进程退出后拉起新版本 */
+        "(sleep 2; /data/adb/battery-manager/battd >/dev/null 2>&1 &) ; "
         "kill -TERM %d 2>/dev/null", dl_url, wr, my_pid);
     FILE *pf = popen(cmd, "r");
     if (!pf) { send_resp(fd, 200, "application/json", "{\"ok\":false,\"msg\":\"exec\"}"); return; }

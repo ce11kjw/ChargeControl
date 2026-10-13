@@ -76,4 +76,20 @@ cp "$MODPATH/batt.conf" /data/adb/battery-manager/batt.conf
 mkdir -p /data/adb/battery-manager/webroot
 cp -r "$MODPATH/webroot/." /data/adb/battery-manager/webroot/
 
+# 复制 supervisor（保证 battd 常驻）
+cp "$MODPATH/supervisor.sh" /data/adb/battery-manager/supervisor.sh 2>/dev/null
+chmod 755 /data/adb/battery-manager/supervisor.sh 2>/dev/null
+
+ui_print "- MTK 扩展节点探测"
+for f in charge_control_limit night_charging smart_chg; do
+  v=$(R $BAT/$f)
+  if [ -n "$v" ]; then ui_print "  [Y] $f = $v"; else ui_print "  [N] $f"; fi
+done
+if [ -e /proc/mtk_battery_cmd/en_power_path ]; then
+  ui_print "  [Y] mtk_battery_cmd/en_power_path = $(R /proc/mtk_battery_cmd/en_power_path) (旁路电源路径)"
+fi
+if [ -e /sys/class/power_supply/bms/soh ]; then
+  ui_print "  [Y] bms/soh = $(R /sys/class/power_supply/bms/soh) (原生健康度)"
+fi
+
 ui_print "- 安装完成，请重启"
