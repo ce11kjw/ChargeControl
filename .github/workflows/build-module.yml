@@ -1,0 +1,66 @@
+name: Build Module
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu zip unzip file
+
+      - name: Read version from module.prop
+        id: ver
+        run: |
+          V=$(grep '^version=' module/module.prop | cut -d= -f2)
+          C=$(grep '^versionCode=' module/module.prop | cut -d= -f2)
+          echo "version=$V" >> $GITHUB_OUTPUT
+          echo "code=$C" >> $GITHUB_OUTPUT
+          echo "→ $V ($C)"
+
+      - name: Build battd (aarch64 static)
+        run: |
+          aarch64-linux-gnu-gcc -static -O2 -s -o src/battd src/battd.c
+          file src/battd
+
+      - name: Build module zip
+        run: |
+          cp src/battd module/bin/battd
+          rm -f "ChargeControl-${{ steps.ver.outputs.version }}.zip"
+          cd module && zip -r "../ChargeControl-${{ steps.ver.outputs.version }}.zip" . \
+            -x '*.bak' -x '*.v*' -x '*.old'
+          cd ..
+
+      - name: Verify
+        run: |
+          ZIP="ChargeControl-${{ steps.ver.outputs.version }}.zip"
+          unzip -l "$ZIP"
+          sha256sum "$ZIP" | tee "$ZIP.sha256"
+          file module/bin/battd | grep -q aarch64 && echo "✅ aarch64 OK"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChargeControl-${{ steps.ver.outputs.version }}
+          path: |
+            ChargeControl-*.zip
+            ChargeControl-*.zip.sha256
+
+      - name: Create / update Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ChargeControl-*.zip
+            ChargeControl-*.zip.sha256
+          generate_release_notes: false
