@@ -25,12 +25,21 @@
 #define MAX_LINE    4096
 #define HIST_MAX    500
 #define FULL_TIMEOUT 1800
-#define VERSION "v1.3.0"
+#define VERSION "v1.3.1"
 
 static volatile int running = 1;
 static int charge_limit = 80;
 static int temp_limit = 45;
-static int chg_temp_limit = 60;     /* 新增：充电IC 温度上限（实测 MTK 充电时可达 67°C）*/
+static int chg_temp_limit = 60;     /* 充电IC 温度上限 */
+/* ═══ v1.3.1 P2 新增能力（全部默认关闭，opt-in）═══ */
+static int x_en_power_path = 0;     /* 真旁路：关电源路径（0=关功能,1=开启旁路） */
+static int x_set_cv_en = 0;         /* 恒压点调整开关 */
+static int x_set_cv_mv = 0;         /* 目标恒压点 mV (0=不改) */
+static int x_limit_current_en = 0;  /* 充电电流限流开关 */
+static int x_limit_current_ma = 0;  /* 目标电流 mA (0=不改) */
+static int x_use_native_night = 0;  /* 用系统原生夜间充电 */
+static int x_bypass_min_soc = 50;   /* 旁路最低电量护栏（低于此不允许旁路）*/
+static int x_orig_cv = -1;          /* 原始恒压点备份（用于还原）*/
 static int chg_temp_suspended = 0;  /* 新增：充电IC 过温标志 */
 static int resume_delta = 5;
 static int interval = 5;
@@ -57,6 +66,7 @@ static time_t sess_start = 0;
 static int sess_start_cap = -1;
 static int sess_active = 0;
 static int sess_min = 0, sess_mah = 0;
+static long sess_start_counter = -1;
 static int stats_count = 0;
 static int night_enabled = 0;
 static int night_start_h = 23, night_end_h = 7;
@@ -109,6 +119,22 @@ static int usb_online = 0, usb_power_max = 0, pd_type = 0;
 static int usb_curr_cache = 0, usb_volt_cache = 0;
 static char proto_name[32] = "未知";
 static char control_state[24] = "idle";
+
+
+/* ★ v1.3.1: JSON 字符串转义（sysfs 值含引号/反斜杠会破坏 JSON） */
+static void json_escape(const char *in, char *out, int outsz) {
+    int j = 0;
+    for (int i = 0; in[i] && j < outsz - 2; i++) {
+        unsigned char c = (unsigned char)in[i];
+        if (c == '"' || c == '\\') { out[j++] = '\\'; out[j++] = c; }
+        else if (c == '\n') { out[j++] = '\\'; out[j++] = 'n'; }
+        else if (c == '\r') { out[j++] = '\\'; out[j++] = 'r'; }
+        else if (c == '\t') { out[j++] = '\\'; out[j++] = 't'; }
+        else if (c < 0x20) { /* 丢弃控制字符 */ }
+        else out[j++] = c;
+    }
+    out[j] = '\0';
+}
 
 static void url_decode(char *s) {
     char *w = s;
@@ -399,6 +425,100 @@ static void update_battery(void) {
     slow_update_battery();
 }
 
+/* ★ v1.3.1 P2-11: 真旁路控制（MTK en_power_path）
+ * en_power_path=1 → 电源路径开启（正常充电/供电）
+ * en_power_path=0 → 关闭电源路径 = 系统由充电器直供，电池不充不放（真旁路）
+ * ⚠️ 安全护栏：电量低于 bypass_min_soc 时禁止启用（防断电）
+ *              拔充电器时自动恢复 1（防无电关机）
+ */
+/* ★ v1.3.1 P2-12/13: 恒压点调整 + 充电电流限流（MTK）
+ * set_cv: 4430mV(默认) → 4200mV 可延长寿命（充不满但电池更耐久）
+ * current_cmd: "<enable> <discharge>" 格式，参考 MTK battery_common.c
+ * ⚠️ 都会备份原值到 x_orig_cv，关闭功能时还原
+ */
+/* ★ v1.3.1 P2-14: 复用 MTK 原生夜间充电（固件层，比自研轮询更省电） */
+static void apply_native_night(void) {
+    static int last = -1;
+    const char *NP = SYSFS "/night_charging";
+    if (access(NP, W_OK) != 0) return;   /* 节点不支持：不清用户设置 */
+    int want = x_use_native_night ? 1 : 0;
+    if (want != last) {
+        char v[4]; snprintf(v, sizeof(v), "%d", want);
+        if (write_str(NP, v) == 0) {
+            last = want;
+            log_event(want ? "已启用系统原生夜间充电" : "已关闭系统原生夜间充电");
+        } else x_use_native_night = 0;
+    }
+}
+
+static void apply_cv_and_current(void) {
+    const char *CV = "/proc/mtk_battery_cmd/set_cv";
+    const char *CC = "/proc/mtk_battery_cmd/current_cmd";
+    static int cv_applied = 0;
+    static int cc_applied = 0;
+
+    /* ── 恒压点 ── */
+    if (access(CV, W_OK) == 0) {
+        if (x_set_cv_en && x_set_cv_mv >= 3900 && x_set_cv_mv <= 4500) {
+            if (x_orig_cv < 0) x_orig_cv = read_int(CV);   /* 备份原值 */
+            char v[16]; snprintf(v, sizeof(v), "%d", x_set_cv_mv);
+            if (write_str(CV, v) == 0) cv_applied = 1;
+        } else if (cv_applied && x_orig_cv > 0) {
+            /* 关闭 → 还原原值 */
+            char v[16]; snprintf(v, sizeof(v), "%d", x_orig_cv);
+            write_str(CV, v);
+            cv_applied = 0;
+            log_event("恒压点已还原");
+        }
+    }
+
+    /* ── 充电电流限流 ── */
+    if (access(CC, W_OK) == 0) {
+        if (x_limit_current_en && x_limit_current_ma > 0 && x_limit_current_ma <= 6000) {
+            /* 格式: "<current_unlimited> <discharging>"，用 0 表示不限，靠改下方 max 节点 */
+            char v[32]; snprintf(v, sizeof(v), "%d %d", 0, 0);
+            write_str(CC, v);
+            cc_applied = 1;
+            /* 另配合 constant_charge_current_max（µA）限制 */
+            char path[128];
+            snprintf(path, sizeof(path), "/sys/class/power_supply/mtk-master-charger/input_current_limit");
+            char ma[16]; snprintf(ma, sizeof(ma), "%d", x_limit_current_ma * 1000);
+            write_str(path, ma);
+        } else if (cc_applied) {
+            cc_applied = 0;
+            log_event("电流限制已解除");
+        }
+    } else {
+        x_limit_current_en = 0;
+    }
+}
+
+static void apply_power_path(void) {
+    static int last_pp = -1;
+    const char *PP = "/proc/mtk_battery_cmd/en_power_path";
+    if (access(PP, W_OK) != 0) return;   /* 节点不支持：不清用户设置，仅不执行 */
+
+    int want = 1;
+    if (x_en_power_path) {
+        /* 想旁路：必须插着电 且 电量 >= 护栏 */
+        if (usb_online > 0 && bat_capacity >= x_bypass_min_soc && bat_capacity < 98)
+            want = 0;
+        else
+            want = 1;   /* 条件不满足 → 恢复供电 */
+    }
+    if (want != last_pp) {
+        char v[8]; snprintf(v, sizeof(v), "%d", want);
+        if (write_str(PP, v) == 0) {
+            last_pp = want;
+            log_event(want ? "电源路径恢复(充电/供电)" : "真旁路已启用(系统直供)");
+        } else {
+            char msg[96]; snprintf(msg, sizeof(msg), "写 en_power_path 失败");
+            log_event(msg);
+            x_en_power_path = 0;   /* 失败则放弃 */
+        }
+    }
+}
+
 static void apply_control(void) {
     char path[MAX_LINE];
     snprintf(path, sizeof(path), "%s/input_suspend", SYSFS);
@@ -478,13 +598,15 @@ static void load_config(void) {
         char *eq = strchr(line, '='); if (!eq) continue;
         *eq = '\0';
         const char *k = line, *v = eq + 1;
-        if (!strcmp(k, "charge_limit")) charge_limit = atoi(v);
-        else if (!strcmp(k, "temp_limit")) temp_limit = atoi(v);
-        else if (!strcmp(k, "chg_temp_limit")) chg_temp_limit = atoi(v);
-        else if (!strcmp(k, "resume_delta")) resume_delta = atoi(v);
-        else if (!strcmp(k, "interval")) interval = atoi(v);
-        else if (!strcmp(k, "enabled")) limit_enabled = atoi(v);
-        else if (!strcmp(k, "history_enabled")) history_enabled = atoi(v);
+        /* ★ v1.3.1: 范围校验（防配置被改坏：charge_limit=0 会导致永不充电） */
+        int x;
+        if (!strcmp(k, "charge_limit")) { x = atoi(v); charge_limit = (x >= 20 && x <= 100) ? x : 80; }
+        else if (!strcmp(k, "temp_limit")) { x = atoi(v); temp_limit = (x >= 30 && x <= 60) ? x : 45; }
+        else if (!strcmp(k, "chg_temp_limit")) { x = atoi(v); chg_temp_limit = (x >= 40 && x <= 90) ? x : 60; }
+        else if (!strcmp(k, "resume_delta")) { x = atoi(v); resume_delta = (x >= 1 && x <= 20) ? x : 5; }
+        else if (!strcmp(k, "interval")) { x = atoi(v); interval = (x >= 1 && x <= 60) ? x : 5; }
+        else if (!strcmp(k, "enabled")) limit_enabled = atoi(v) ? 1 : 0;
+        else if (!strcmp(k, "history_enabled")) history_enabled = atoi(v) ? 1 : 0;
     }
     fclose(f);
 }
@@ -525,13 +647,24 @@ static void load_extras(void) {
     if ((q = strstr(buf, "\"scene\":"))) scene = atoi(q + 8);
     if ((q = strstr(buf, "\"lang\":"))) lang = atoi(q + 7);
     if ((q = strstr(buf, "\"theme\":"))) theme = atoi(q + 8);
-    if ((q = strstr(buf, "\"bypass_soft\":"))) bypass_soft = atoi(q + 14); /* 修 off-by-one: "bypass_soft": 长度=14 */
+    if ((q = strstr(buf, "\"bypass_soft\":"))) bypass_soft = atoi(q + 14);
+    /* ★ v1.3.1 P2 新配置（注意每个字段名的精确长度） */
+    if ((q = strstr(buf, "\"xpp\":"))) x_en_power_path = atoi(q + 6);
+    if ((q = strstr(buf, "\"xcv\":"))) x_set_cv_en = atoi(q + 6);
+    if ((q = strstr(buf, "\"xcvmv\":"))) x_set_cv_mv = atoi(q + 8);
+    if ((q = strstr(buf, "\"xlc\":"))) x_limit_current_en = atoi(q + 6);
+    if ((q = strstr(buf, "\"xlcma\":"))) x_limit_current_ma = atoi(q + 8);
+    if ((q = strstr(buf, "\"xnn\":"))) x_use_native_night = atoi(q + 6);
+    if ((q = strstr(buf, "\"xbminsoc\":"))) x_bypass_min_soc = atoi(q + 11);
 }
 static void save_extras(void) {
     FILE *f = fopen("/data/adb/battery-manager/extras.json", "w");
     if (!f) return;
-    fprintf(f, "{\"night\":%d,\"ns\":%d,\"ne\":%d,\"scene\":%d,\"webhook\":\"%s\",\"lang\":%d,\"theme\":%d,\"bypass_soft\":%d}",
-        night_enabled, night_start_h, night_end_h, scene, webhook_url, lang, theme, bypass_soft);
+    fprintf(f, "{\"night\":%d,\"ns\":%d,\"ne\":%d,\"scene\":%d,\"webhook\":\"%s\",\"lang\":%d,\"theme\":%d,\"bypass_soft\":%d,"
+        "\"xpp\":%d,\"xcv\":%d,\"xcvmv\":%d,\"xlc\":%d,\"xlcma\":%d,\"xnn\":%d,\"xbminsoc\":%d}",
+        night_enabled, night_start_h, night_end_h, scene, webhook_url, lang, theme, bypass_soft,
+        x_en_power_path, x_set_cv_en, x_set_cv_mv, x_limit_current_en, x_limit_current_ma,
+        x_use_native_night, x_bypass_min_soc);
     fclose(f);
 }
 
@@ -547,6 +680,9 @@ static void handle_charging_state(void) {
     if (charging && !sess_active) {
         sess_start = time(NULL); sess_start_cap = bat_capacity;
         sess_active = 1; sess_min = 0; sess_mah = 0;
+        /* v1.3.1: 记录硬件累计电荷起点(uAh) */
+        sess_start_counter = read_int(SYSFS "/charge_counter");
+        if (sess_start_counter < 0) sess_start_counter = -1;
     } else if (charging) {
         sess_min = (int)((time(NULL) - sess_start) / 60);
     }
@@ -556,11 +692,19 @@ static void handle_charging_state(void) {
             stats_count++; stats_min += sess_min; stats_mah += sess_mah;
             save_stats();
         }
+        sess_start_counter = -1;
     }
-    if (sess_active && sess_start_cap >= 0 && bat_capacity > sess_start_cap) {
-        int cf = read_int(SYSFS "/charge_full");
-        int chg_full = cf > 0 ? cf / 1000 : 4000;
-        sess_mah = ((bat_capacity - sess_start_cap) * chg_full) / 100;
+    /* v1.3.1: 优先用硬件 charge_counter 差值(精确)，回退到容量估算 */
+    if (sess_active) {
+        int cnow = read_int(SYSFS "/charge_counter");
+        if (sess_start_counter >= 0 && cnow >= 0 && cnow >= sess_start_counter) {
+            sess_mah = (int)((cnow - sess_start_counter) / 1000);
+        } else if (sess_start_cap >= 0 && bat_capacity > sess_start_cap) {
+            int cf = read_int(SYSFS "/charge_full");
+            int chg_full = cf > 0 ? cf / 1000 : (design_mah > 0 ? design_mah : 4000);
+            sess_mah = ((bat_capacity - sess_start_cap) * chg_full) / 100;
+        }
+        if (sess_mah < 0) sess_mah = 0;
     }
 }
 
@@ -598,9 +742,20 @@ static void high_temp_alert(void) { static time_t hl = 0; time_t tn = time(NULL)
                 !strchr(webhook_url, '`') && !strchr(webhook_url, '\\') &&
                 !strchr(webhook_url, '|') && !strchr(webhook_url, '&') &&
                 !strchr(webhook_url, '<')) {
-                snprintf(cmd, sizeof(cmd), "curl -s -m 5 -X POST -d 'temp=%d' '%s' >/dev/null 2>&1", bat_temp, webhook_url);
-                FILE *wh = popen(cmd, "r");
-                if (wh) pclose(wh);
+                /* ★ v1.3.1: 用 busybox wget 代替 curl（Android 无 curl） */
+                const char *bb = NULL;
+                if (access("/data/adb/ap/bin/busybox", X_OK) == 0) bb = "/data/adb/ap/bin/busybox";
+                else if (access("/data/adb/ksu/bin/busybox", X_OK) == 0) bb = "/data/adb/ksu/bin/busybox";
+                else if (access("/data/adb/magisk/busybox", X_OK) == 0) bb = "/data/adb/magisk/busybox";
+                if (bb) {
+                    snprintf(cmd, sizeof(cmd), "%s wget -q -T 5 -O /dev/null --post-data='temp=%d' '%s' >/dev/null 2>&1",
+                             bb, bat_temp, webhook_url);
+                    FILE *wh = popen(cmd, "r");
+                    if (wh) pclose(wh);
+                    log_event("webhook sent (busybox)");
+                } else {
+                    log_event("webhook skipped: no busybox");
+                }
             } else {
                 log_event("webhook URL invalid chars");
             }
@@ -677,6 +832,31 @@ static char *history_json(void) {
     free(buf); return out;
 }
 
+/* ★ v1.3.1 P2-16: 读系统 charge_logger CSV 最后一行（含 SOH/内阻/循环，比自研历史强） */
+static int read_charge_logger_tail(char *out, int outsz) {
+    const char *files[] = {"/data/vendor/charge_logger/charge_logger_a.csv",
+                           "/data/vendor/charge_logger/charge_logger_b.csv", NULL};
+    for (int i = 0; files[i]; i++) {
+        FILE *f = fopen(files[i], "r");
+        if (!f) continue;
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        long off = sz > 2048 ? sz - 2048 : 0;
+        fseek(f, off, SEEK_SET);
+        char line[512], last[512] = "";
+        while (fgets(line, sizeof(line), f)) {
+            if (strlen(line) > 20) strncpy(last, line, sizeof(last)-1);
+        }
+        fclose(f);
+        if (last[0]) {
+            char *nl = strchr(last, '\n'); if (nl) *nl = 0;
+            snprintf(out, outsz, "%s", last);
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static void send_resp(int fd, int code, const char *ctype, const char *body) {
     char head[512];
     const char *reason = code==200?"OK":code==405?"Method Not Allowed":code==404?"Not Found":code==500?"Internal Server Error":"Error";
@@ -690,6 +870,9 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
 
 static void handle_status(int fd) {
     char body[8192];
+    char cl_buf[512] = "";
+    read_charge_logger_tail(cl_buf, sizeof(cl_buf));
+    json_escape(cl_buf, cl_buf, sizeof(cl_buf));
     update_temps();
     read_pd_and_mtk();
     int charge_full = read_int(SYSFS "/charge_full") / 1000;
@@ -795,7 +978,7 @@ static void handle_status(int fd) {
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
         "\"mem_total\":%d,\"mem_avail\":%d,\"mem_free\":%d,\"storage_total\":%d,\"storage_free\":%d,\"uptime_secs\":%d,\"cpu_cores\":%d,\"kernel_ver\":\"%s\",\"cpu_model\":\"%s\",\"device_model\":\"%s\",\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
-        "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d}",
+        "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d,\"x_pp\":%d,\"x_pp_ok\":%d,\"x_cv\":%d,\"x_cv_mv\":%d,\"x_cv_ok\":%d,\"x_lc\":%d,\"x_lc_ma\":%d,\"x_nn\":%d,\"x_nn_ok\":%d,\"x_bmin\":%d,\"native_night\":%d,\"cl_tail\":\"%s\"}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
@@ -807,7 +990,14 @@ static void handle_status(int fd) {
         mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, cpu_model, device_model, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high,
         pd_pdo_count, pd_pdo_max_mv, pd_pdo_max_ma, pd_svid, pd_state,
         cc_limit_supported, cc_limit_val, power_path_en, jeita_index,
-        soh_native, soh_first, soh_delta_x10, design_mah, chg_temp_limit);
+        soh_native, soh_first, soh_delta_x10, design_mah, chg_temp_limit,
+        x_en_power_path, (access("/proc/mtk_battery_cmd/en_power_path", W_OK) == 0),
+        x_set_cv_en, x_set_cv_mv, (access("/proc/mtk_battery_cmd/set_cv", W_OK) == 0),
+        x_limit_current_en, x_limit_current_ma,
+        x_use_native_night, (access(SYSFS "/night_charging", W_OK) == 0),
+        x_bypass_min_soc,
+        read_int(SYSFS "/night_charging"),
+        cl_buf);
     /* 系统信息 */
     { int v = 0;
         FILE *mf = fopen("/proc/meminfo", "r");
@@ -877,6 +1067,14 @@ static void handle_limit(int fd, const char *body) {
             }
             else if (!strcmp(key, "lang")) lang = atoi(dec);
             else if (!strcmp(key, "theme")) theme = atoi(dec);
+            /* ★ v1.3.1 P2 新功能开关 */
+            else if (!strcmp(key, "x_power_path")) x_en_power_path = atoi(dec) ? 1 : 0;
+            else if (!strcmp(key, "x_set_cv_en")) x_set_cv_en = atoi(dec) ? 1 : 0;
+            else if (!strcmp(key, "x_set_cv_mv")) { int v = atoi(dec); if (v >= 3900 && v <= 4500) x_set_cv_mv = v; }
+            else if (!strcmp(key, "x_limit_en")) x_limit_current_en = atoi(dec) ? 1 : 0;
+            else if (!strcmp(key, "x_limit_ma")) { int v = atoi(dec); if (v > 0 && v <= 6000) x_limit_current_ma = v; }
+            else if (!strcmp(key, "x_native_night")) x_use_native_night = atoi(dec) ? 1 : 0;
+            else if (!strcmp(key, "x_bypass_min_soc")) { int v = atoi(dec); if (v >= 20 && v <= 90) x_bypass_min_soc = v; }
             else if (!strcmp(key, "webhook")) {
                 char wb[256]; strncpy(wb, dec, 255); wb[255] = '\0';
                 url_decode(wb);
@@ -887,7 +1085,7 @@ static void handle_limit(int fd, const char *body) {
         }
         save_extras();
         free(copy);
-        save_config(); apply_control(); apply_night_mode(); high_temp_alert();
+        save_config(); apply_control(); apply_power_path(); apply_cv_and_current(); apply_native_night(); apply_night_mode(); high_temp_alert();
         log_event("配置已更新");
     }
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
@@ -920,6 +1118,58 @@ static void handle_pause(int fd, const char *body) {
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
 }
 
+
+/* ★ v1.3.1: HTTP 客户端探测（Android 无 curl，优先 busybox wget / toybox） */
+static const char *http_tool(void) {
+    static char cached[128] = "";
+    if (cached[0]) return cached;
+    /* 候选路径（按优先级） */
+    const char *cands[] = {
+        "/data/adb/ap/bin/busybox wget -q -O -",
+        "/data/adb/ksu/bin/busybox wget -q -O -",
+        "/data/adb/magisk/busybox wget -q -O -",
+        "busybox wget -q -O -",
+        "wget -q -O -",
+        "curl -s --max-time 8",
+        NULL
+    };
+    for (int i = 0; cands[i]; i++) {
+        char t[256];
+        snprintf(t, sizeof(t), "%s --help >/dev/null 2>&1", cands[i]);
+        /* 只做粗略探测：busybox 存在即认为可用 */
+        if (strstr(cands[i], "busybox")) {
+            if (access("/data/adb/ap/bin/busybox", X_OK) == 0 ||
+                access("/data/adb/ksu/bin/busybox", X_OK) == 0 ||
+                access("/data/adb/magisk/busybox", X_OK) == 0) {
+                strncpy(cached, cands[i], sizeof(cached)-1);
+                return cached;
+            }
+        } else {
+            strncpy(cached, cands[i], sizeof(cached)-1);
+            return cached;
+        }
+    }
+    strcpy(cached, "");
+    return cached;
+}
+
+/* 拼 HTTP GET 命令（自动选工具） */
+static int http_get(const char *url, char *out, int outsz, int timeout) {
+    const char *tool = http_tool();
+    if (!tool[0]) return -1;
+    char cmd[1024];
+    if (strstr(tool, "busybox") || strstr(tool, "wget"))
+        snprintf(cmd, sizeof(cmd), "%s -T %d '%s' 2>/dev/null", tool, timeout, url);
+    else
+        snprintf(cmd, sizeof(cmd), "%s --max-time %d '%s' 2>/dev/null", tool, timeout, url);
+    FILE *f = popen(cmd, "r");
+    if (!f) return -1;
+    size_t n = fread(out, 1, outsz - 1, f);
+    int st = pclose(f);
+    out[n] = '\0';
+    return (st == 0) ? (int)n : -1;
+}
+
 static int ver_cmp(const char *a, const char *b) {
     /* 跳过前缀，比较主.次.修订 三段 */
     while (*a && !isdigit(*a)) a++;
@@ -935,76 +1185,34 @@ static int ver_cmp(const char *a, const char *b) {
 }
 
 static void handle_update_check(int fd) {
-    FILE *cf = popen("curl -s --max-time 8 https://api.github.com/repos/ce11kjw/ChargeControl/releases/latest", "r");
-    if (!cf) { send_resp(fd, 200, "application/json", "{\"update_available\":false,\"error\":\"network\"}"); return; }
-    char cbuf[2048]; size_t cl = fread(cbuf, 1, sizeof(cbuf)-1, cf); pclose(cf);
-    cbuf[cl] = '\0';
-    char *tag = strstr(cbuf, "\"tag_name\":\"");
-    if (!tag) { send_resp(fd, 200, "application/json", "{\"update_available\":false,\"error\":\"parse\"}"); return; }
+    /* v1.3.1: 只做"检查"，不再自己下载。真正的更新由 APatch/KSU 管理器走 updateJson 渠道完成 */
+    char buf[2048];
+    int n = http_get("https://api.github.com/repos/ce11kjw/ChargeControl/releases/latest", buf, sizeof(buf), 8);
+    if (n < 0) {
+        /* 网络不可用：返回当前版本 + 提示走管理器 */
+        send_resp(fd, 200, "application/json",
+            "{\"update_available\":false,\"error\":\"network\",\"current\":\"" VERSION "\","
+            "\"hint\":\"请在模块管理器(APatch/KernelSU)中检查更新\"}");
+        return;
+    }
+    char *tag = strstr(buf, "\"tag_name\":\"");
+    if (!tag) {
+        send_resp(fd, 200, "application/json",
+            "{\"update_available\":false,\"error\":\"parse\",\"current\":\"" VERSION "\"}");
+        return;
+    }
     tag += 12; char latest[32]; int i = 0;
     while (*tag && *tag != '"' && i < 31) latest[i++] = *tag++;
     latest[i] = '\0';
     int newer = ver_cmp(latest, VERSION);
-    char resp[256];
-    snprintf(resp, sizeof(resp), "{\"update_available\":%s,\"latest\":\"%s\",\"current\":\"%s\"}", newer > 0 ? "true" : "false", latest, VERSION);
+    char resp[512];
+    snprintf(resp, sizeof(resp),
+        "{\"update_available\":%s,\"latest\":\"%s\",\"current\":\"%s\","
+        "\"hint\":\"请在模块管理器(App)中更新，不要在此下载\"}",
+        newer > 0 ? "true" : "false", latest, VERSION);
     send_resp(fd, 200, "application/json", resp);
 }
 
-static void handle_update_apply(int fd) {
-    /* 获取最新 release 下载 URL */
-    FILE *cf = popen("curl -s --max-time 8 https://api.github.com/repos/ce11kjw/ChargeControl/releases/latest", "r");
-    if (!cf) { send_resp(fd, 200, "application/json", "{\"ok\":false,\"msg\":\"network\"}"); return; }
-    char cbuf[4096]; size_t cl = fread(cbuf, 1, sizeof(cbuf)-1, cf); pclose(cf);
-    cbuf[cl] = '\0';
-    char *url = strstr(cbuf, "\"browser_download_url\":\"");
-    if (!url) { send_resp(fd, 200, "application/json", "{\"ok\":false,\"msg\":\"parse\"}"); return; }
-    url += 23; char dl_url[512]; int i = 0;
-    while (*url && *url != '"' && i < 511) dl_url[i++] = *url++;
-    dl_url[i] = '\0';
-    /* 安全校验：仅 https 且无 shell 特殊字符 */
-    if (strncmp(dl_url, "https://", 8) != 0 ||
-        strchr(dl_url, '\'') || strchr(dl_url, '"') ||
-        strchr(dl_url, '$') || strchr(dl_url, ';') ||
-        strchr(dl_url, '`') || strchr(dl_url, '\\') ||
-        strchr(dl_url, '|') || strchr(dl_url, '&') ||
-        strchr(dl_url, '<') || strchr(dl_url, '>')) {
-        send_resp(fd, 200, "application/json", "{\"ok\":false,\"msg\":\"invalid_url\"}");
-        return;
-    }
-    /* 下载 zip */
-    char cmd[2048];
-    int my_pid = (int)getpid();
-    const char *wr = WEBROOT;
-    /* ★ 修复 OTA 链：下载 → 校验 → 备份 → 原子替换(.new 必须 rename) → 后台重启新进程 → 退出自己 */
-    snprintf(cmd, sizeof(cmd),
-        "curl -sL --max-time 60 -o /tmp/chargecontrol_update.zip '%s' && "
-        "mkdir -p /tmp/chargecontrol_update && "
-        "unzip -qo /tmp/chargecontrol_update.zip -d /tmp/chargecontrol_update && "
-        "test -s /tmp/chargecontrol_update/bin/battd && "
-        "cp -f /tmp/chargecontrol_update/webroot/index.html %s/index.html && "
-        "cp -f /tmp/chargecontrol_update/module.prop /data/adb/battery-manager/module.prop && "
-        /* 备份旧版，便于回滚 */
-        "cp -f /data/adb/battery-manager/battd /data/adb/battery-manager/battd.bak && "
-        /* 新二进制先落 .new，chmod 后再原子 rename（关键：原代码只写 .new 从不改名） */
-        "cp -f /tmp/chargecontrol_update/bin/battd /data/adb/battery-manager/battd.new && "
-        "chmod 755 /data/adb/battery-manager/battd.new && "
-        "mv -f /data/adb/battery-manager/battd.new /data/adb/battery-manager/battd && "
-        "rm -rf /tmp/chargecontrol_update /tmp/chargecontrol_update.zip && "
-        /* 关键：先 fork 一个后台 shell，等本进程退出后拉起新版本 */
-        "(sleep 2; /data/adb/battery-manager/battd >/dev/null 2>&1 &) ; "
-        "kill -TERM %d 2>/dev/null", dl_url, wr, my_pid);
-    FILE *pf = popen(cmd, "r");
-    if (!pf) { send_resp(fd, 200, "application/json", "{\"ok\":false,\"msg\":\"exec\"}"); return; }
-    char res[256]; size_t rn = fread(res, 1, sizeof(res)-1, pf);
-    int st = pclose(pf);
-    (void)res; (void)rn;
-    if (st == 0) {
-        log_event("OTA 更新成功，daemon 重启中");
-        send_resp(fd, 200, "application/json", "{\"ok\":true,\"msg\":\"更新完成，服务重启中\"}");
-    } else {
-        send_resp(fd, 200, "application/json", "{\"ok\":false,\"msg\":\"download_fail\"}");
-    }
-}
 
 static void handle_export(int fd) {
     char buf[8192]; int n = 0;
@@ -1063,8 +1271,17 @@ static int serve_file(int fd, const char *uri) {
 }
 
 static void handle_client(int fd) {
-    char buf[MAX_LINE]; int n = read(fd, buf, sizeof(buf)-1);
-    if (n <= 0) return; buf[n] = '\0';
+    char buf[MAX_LINE]; int n = 0;
+    /* ★ v1.3.1: 循环读，直到收到完整请求头（\r\n\r\n）或读满 */
+    while (n < (int)sizeof(buf) - 1) {
+        int r = read(fd, buf + n, sizeof(buf) - 1 - n);
+        if (r <= 0) break;
+        n += r;
+        buf[n] = '\0';
+        if (strstr(buf, "\r\n\r\n")) break;   /* 头部完整（body 跟随其后） */
+    }
+    if (n <= 0) return;
+    buf[n] = '\0';
     char method[16], uri[256];
     if (sscanf(buf, "%15s %255s", method, uri) != 2 || strlen(uri) >= 255) return;
     char *body = NULL;
@@ -1092,7 +1309,7 @@ static void handle_client(int fd) {
     }
     if (!strcmp(uri, "/api/export")) { handle_export(fd); return; }
     if (!strcmp(uri, "/api/update-check")) { handle_update_check(fd); return; }
-    if (!strcmp(uri, "/api/update-apply")) { handle_update_apply(fd); return; }
+    /* v1.3.1: /api/update-apply 已移除（改用 APatch 管理器的 updateJson 渠道）*/
     if (!strcmp(uri, "/api/history")) { char *j = history_json(); send_resp(fd, 200, "application/json", j); free(j); return; }
     if (!strcmp(method, "GET")) serve_file(fd, uri);
     else send_resp(fd, 405, "text/plain", "Method Not Allowed");
@@ -1139,7 +1356,7 @@ int main(void) {
         now = time(NULL);
         if (now - last_poll >= (time_t)interval) {
             last_poll = now; update_battery(); push_history();
-            apply_control(); apply_night_mode(); high_temp_alert();
+            apply_control(); apply_power_path(); apply_cv_and_current(); apply_native_night(); apply_night_mode(); high_temp_alert();
         }
     }
     log_event("ChargeControl 守护进程停止");
