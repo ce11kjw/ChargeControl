@@ -22,9 +22,16 @@ class ChargeControlViewModel : ViewModel() {
     var busy by mutableStateOf(false); private set
     var lastMsg by mutableStateOf(""); private set
 
-    private var pollJob: Job? = null
+    /* ★ v1.5.0 充电曲线 & 校准 */
+    var curve by mutableStateOf<List<ChargeControlApi.CurvePoint>>(emptyList()); private set
+    var sessions by mutableStateOf<List<ChargeControlApi.ChargeSession>>(emptyList()); private set
+    var cal by mutableStateOf<ChargeControlApi.CalState?>(null); private set
+    var curveLoading by mutableStateOf(false); private set
 
-    init { startPolling() }
+    private var pollJob: Job? = null
+    private var curveJob: Job? = null
+
+    init { startPolling(); startCurvePolling() }
 
     fun startPolling() {
         pollJob?.cancel()
@@ -38,7 +45,62 @@ class ChargeControlViewModel : ViewModel() {
         }
     }
 
-    override fun onCleared() { pollJob?.cancel(); super.onCleared() }
+    /**
+     * 充电曲线轮询（30s）——比状态轮询慢，因为模块本身就是 30s 采样一次。
+     * 单独一条协程，避免影响 3s 的状态刷新节奏。
+     */
+    fun startCurvePolling() {
+        curveJob?.cancel()
+        curveJob = viewModelScope.launch {
+            while (true) {
+                refreshCurve()
+                delay(30_000)
+            }
+        }
+    }
+
+    suspend fun refreshCurve() {
+        curveLoading = true
+        val c = ChargeControlApi.fetchCurve()
+        if (c.isNotEmpty()) curve = c
+        val s = ChargeControlApi.fetchSessions()
+        if (s.isNotEmpty()) sessions = s
+        cal = ChargeControlApi.fetchCalibrate()
+        curveLoading = false
+    }
+
+    /** 校准：start / abort */
+    fun calibrate(action: String) {
+        busy = true
+        viewModelScope.launch {
+            val ok = ChargeControlApi.postCalibrate(action)
+            lastMsg = if (ok) {
+                if (action == "start") "校准已启动 ✓" else "校准已中止 ✓"
+            } else "操作失败 ✗"
+            busy = false
+            cal = ChargeControlApi.fetchCalibrate()
+        }
+    }
+
+    /** 当前阶段（0未充 1预充 2CC 3CV 4满）——取最后一条采样 */
+    val currentStage: Int get() = curve.lastOrNull()?.stage ?: 0
+    val stageText: String
+        get() = when (currentStage) {
+            1 -> "预充电"
+            2 -> "恒流 CC"
+            3 -> "恒压 CV"
+            4 -> "已充满"
+            else -> "未充电"
+        }
+
+    /** 曲线时间跨度（分钟） */
+    val curveSpanMin: Int
+        get() = if (curve.size < 2) 0
+                else ((curve.last().t - curve.first().t) / 60).toInt()
+
+    override fun onCleared() {
+        pollJob?.cancel(); curveJob?.cancel(); super.onCleared()
+    }
 
     // ═══ 便捷读取 ═══
     val limitEnabled get() = ChargeControlApi.jbool(status, "limit_enabled")

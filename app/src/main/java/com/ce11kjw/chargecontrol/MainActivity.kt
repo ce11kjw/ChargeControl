@@ -242,6 +242,8 @@ private val topTabIcons = listOf(
     R.drawable.ic_cyber_memory,
     R.drawable.ic_cyber_battery,
     R.drawable.ic_cyber_charge,
+    R.drawable.ic_cyber_curve,
+    R.drawable.ic_cyber_device,
 )
 
 /** Tab 标题国际化 — 在 Composable 内调用 stringResource 获取当前语言标题 */
@@ -253,7 +255,9 @@ private fun rememberTopTabs(): List<TopTabItem> {
         stringResource(R.string.tab_gpu),
         stringResource(R.string.tab_memory),
         stringResource(R.string.tab_battery),
-        stringResource(R.string.tab_charge)
+        stringResource(R.string.tab_charge),
+        stringResource(R.string.tab_curve),
+        stringResource(R.string.tab_device)
     )
     return titles.mapIndexed { i, title -> TopTabItem(title, topTabIcons[i]) }
 }
@@ -776,6 +780,8 @@ private fun MainTabs(
                 3 -> MemoryScreen()
                 4 -> BatteryScreen()
                 5 -> com.ce11kjw.chargecontrol.ui.charge.ChargeControlScreen()
+                6 -> com.ce11kjw.chargecontrol.ui.curve.ChargingCurveScreen()
+                7 -> com.ce11kjw.chargecontrol.ui.device.DeviceInfoScreen()
             }
             } // end StaggeredPageProvider (per-page)
         }

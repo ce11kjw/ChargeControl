@@ -21,6 +21,9 @@ import java.net.URLEncoder
  *   POST /api/pause   — 暂停/恢复
  *   GET  /api/history — 历史
  *   GET  /api/log     — 日志
+ *   GET  /api/curve     — 充电曲线采样（v1.5.0）
+ *   GET  /api/sessions  — 历史充电会话索引（v1.5.0）
+ *   GET  /api/calibrate — 校准状态（v1.5.0）
  */
 object ChargeControlApi {
 
@@ -114,4 +117,144 @@ object ChargeControlApi {
         o?.optString(key, def) ?: def
     fun jdbl(o: JSONObject?, key: String, def: Double = 0.0): Double =
         o?.optDouble(key, def) ?: def
+
+    /* ═══════════ v1.5.0 充电曲线 / 会话 / 校准 ═══════════ */
+
+    /** 充电曲线采样点 */
+    data class CurvePoint(
+        val t: Long,      // 采样时间（秒）
+        val cap: Int,     // 电量 %
+        val mah: Int,     // 本次充入 mAh
+        val tmp: Int,     // 温度 °C
+        val cur: Int,     // 电流 mA
+        val volt: Int,    // 电压 mV
+        val stage: Int    // 0未充 1预充 2恒流CC 3恒压CV 4满
+    )
+
+    /** 一次历史充电会话 */
+    data class ChargeSession(
+        val start: Long,  // 起始时间（秒）
+        val durSec: Long, // 时长（秒）
+        val cap0: Int,    // 起始电量
+        val capMax: Int,  // 峰值电量
+        val mah: Int,     // 充入 mAh
+        val samples: Int  // 采样条数
+    )
+
+    /** 校准状态 */
+    data class CalState(
+        val state: Int,
+        val name: String,
+        val elapsedSec: Long,
+        val capNow: Int,
+        val capMax: Int,
+        val capMin: Int,
+        val fulfilled: Boolean,
+        val temp: Int,
+        val charging: Boolean
+    )
+
+    private fun getText(path: String, timeout: Int = READ_TIMEOUT): String? =
+        try {
+            val conn = (URL(BASE + path).openConnection() as HttpURLConnection).apply {
+                connectTimeout = CONNECT_TIMEOUT; readTimeout = timeout; requestMethod = "GET"
+            }
+            if (conn.responseCode != 200) { conn.disconnect(); null }
+            else conn.inputStream.bufferedReader().use(BufferedReader::readText).also { conn.disconnect() }
+        } catch (e: Throwable) {
+            Log.w(TAG, "GET $path failed: ${e.message}")
+            null
+        }
+
+    /**
+     * 拉取充电曲线。
+     * 模块每 30s 写一条采样，最多返回 1440 条（约 12 小时）。
+     */
+    suspend fun fetchCurve(): List<CurvePoint> = withContext(Dispatchers.IO) {
+        val text = getText("/api/curve", 5000) ?: return@withContext emptyList()
+        try {
+            val arr = org.json.JSONArray(text)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    add(CurvePoint(
+                        t = o.optLong("t"),
+                        cap = o.optInt("c", -1),
+                        mah = o.optInt("mah"),
+                        tmp = o.optInt("tmp"),
+                        cur = o.optInt("i"),
+                        volt = o.optInt("v"),
+                        stage = o.optInt("st")
+                    ))
+                }
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "parse curve failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** 拉取历史充电会话索引 */
+    suspend fun fetchSessions(): List<ChargeSession> = withContext(Dispatchers.IO) {
+        val text = getText("/api/sessions", 5000) ?: return@withContext emptyList()
+        try {
+            val arr = org.json.JSONArray(text)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    add(ChargeSession(
+                        start = o.optLong("t"),
+                        durSec = o.optLong("dur"),
+                        cap0 = o.optInt("cap0"),
+                        capMax = o.optInt("capmax"),
+                        mah = o.optInt("mah"),
+                        samples = o.optInt("n")
+                    ))
+                }
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "parse sessions failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** 查询校准状态 */
+    suspend fun fetchCalibrate(): CalState? = withContext(Dispatchers.IO) {
+        val text = getText("/api/calibrate") ?: return@withContext null
+        try {
+            val o = JSONObject(text)
+            CalState(
+                state = o.optInt("state"),
+                name = o.optString("state_name", "idle"),
+                elapsedSec = o.optLong("elapsed_sec"),
+                capNow = o.optInt("cap_now", -1),
+                capMax = o.optInt("cap_max", -1),
+                capMin = o.optInt("cap_min", -1),
+                fulfilled = o.optInt("fulfilled") == 1,
+                temp = o.optInt("temp", -1),
+                charging = o.optInt("charging") == 1
+            )
+        } catch (e: Throwable) {
+            Log.w(TAG, "parse calibrate failed: ${e.message}")
+            null
+        }
+    }
+
+    /** 校准控制：start / abort */
+    suspend fun postCalibrate(action: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val conn = (URL("$BASE/api/calibrate").openConnection() as HttpURLConnection).apply {
+                connectTimeout = CONNECT_TIMEOUT; readTimeout = READ_TIMEOUT
+                requestMethod = "POST"; doOutput = true
+                setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            }
+            conn.outputStream.use { it.write("action=$action".toByteArray()) }
+            val ok = conn.responseCode == 200
+            conn.disconnect()
+            ok
+        } catch (e: Throwable) {
+            Log.w(TAG, "postCalibrate failed: ${e.message}")
+            false
+        }
+    }
 }

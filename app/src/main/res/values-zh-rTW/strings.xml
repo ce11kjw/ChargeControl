@@ -743,6 +743,8 @@
     <string name="tab_memory">記憶體</string>
     <string name="tab_battery">電池</string>
     <string name="tab_charge">充電</string>
+    <string name="tab_curve">充電曲線</string>
+    <string name="tab_device">裝置詳情</string>
 
     <!-- Settings 設定 -->
     <string name="settings_title">設定</string>

@@ -738,6 +738,8 @@
     <string name="tab_memory">内存</string>
     <string name="tab_battery">电池</string>
     <string name="tab_charge">充电</string>
+    <string name="tab_curve">充电曲线</string>
+    <string name="tab_device">设备详情</string>
 
     <!-- Settings 设置 -->
     <string name="settings_title">设置</string>

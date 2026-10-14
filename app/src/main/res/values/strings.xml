@@ -33,6 +33,8 @@
     <string name="tab_memory">Memory</string>
     <string name="tab_battery">Battery</string>
     <string name="tab_charge">Charge</string>
+    <string name="tab_curve">Curve</string>
+    <string name="tab_device">Device</string>
 
     <!-- ═══ Settings 设置 ═══ -->
     <string name="settings_title">Settings</string>
