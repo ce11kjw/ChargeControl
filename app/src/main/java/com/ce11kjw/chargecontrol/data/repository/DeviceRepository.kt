@@ -14,6 +14,8 @@ import com.ce11kjw.chargecontrol.AppSettings
 import com.ce11kjw.chargecontrol.RefreshPolicy
 import com.ce11kjw.chargecontrol.data.model.*
 import com.ce11kjw.chargecontrol.data.source.*
+import com.ce11kjw.chargecontrol.data.module.ChargeControlApi
+import com.ce11kjw.chargecontrol.data.module.ModuleDataAdapter
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
