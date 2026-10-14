@@ -917,7 +917,9 @@ private fun MainTabs(
         // ★ 修复(IV): Pager 改占 Column 剩余空间(weight(1f)), 避免与 64dp 头部叠加导致底部 ~64dp 内容被裁
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth().weight(1f), pageSpacing = 0.dp) { page ->
             // v4: 父层单弹簧 + CompositionLocal<State<Float>> 下发, 绘制层失效不重组
-            StaggeredPageProvider(pagerState = pagerState, page = page) {
+            // ★ ChargeControl: 性能开关 — 关闭时跳过交错动画（中端机切 Tab 卡顿主因）
+            val pageAnimOn = AppSettings.getInstance(this@MainActivity).pageAnimationEnabled
+            if (pageAnimOn) StaggeredPageProvider(pagerState = pagerState, page = page) {
             val navigate: (Int) -> Unit = remember(scope, pagerState) {
                 { target: Int -> scope.launch { pagerState.animateScrollToPage(target) }; Unit }
             }
@@ -934,7 +936,7 @@ private fun MainTabs(
                 )
                 8 -> DeviceScreen(onOpenHdrLab = onOpenHdrLab)
             }
-            } // end StaggeredPageProvider (per-page)
+            } // end if(pageAnimOn) StaggeredPageProvider
         }
     }
 }

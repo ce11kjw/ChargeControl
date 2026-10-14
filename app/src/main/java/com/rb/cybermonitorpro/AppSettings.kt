@@ -168,6 +168,13 @@ class AppSettings private constructor(context: Context) {
         get() = prefs.getString("accent_theme", "cyan") ?: "cyan"
         set(value) = prefs.edit { putString("accent_theme", value) }
 
+    // ── 性能：页面切换交错动画（默认关，Tab 切换零延迟）──
+    //   StaggeredPageTransition 每页跑弹簧+相位映射（作者迭代 5 轮的复杂热点），
+    //   中端机切 Tab 时掉帧明显。关闭后 HorizontalPager 直接切页，无动画。
+    var pageAnimationEnabled: Boolean
+        get() = prefs.getBoolean("page_animation_enabled", false)
+        set(value) = prefs.edit { putBoolean("page_animation_enabled", value) }
+
     // ── 性能：全局光照（默认关，省电提帧）──
     // 原默认 true，ChargingControl 改为 false（中低端机帧率提升明显）
 }
