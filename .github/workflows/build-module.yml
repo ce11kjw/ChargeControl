@@ -2,8 +2,14 @@ name: Build Module
 
 on:
   push:
+    # 必须同时声明 branches 与 tags，否则打 tag 不会触发
+    # （只写 branches 时 tag push 不匹配任何条件，v1.4.0 就因此漏发）
     branches: [ main ]
-    paths-ignore: ['**.md', 'LICENSE']
+    tags: [ 'v*' ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_dispatch:
 
 permissions:
