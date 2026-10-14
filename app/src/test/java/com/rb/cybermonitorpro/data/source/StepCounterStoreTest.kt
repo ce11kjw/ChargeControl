@@ -1,4 +1,4 @@
-package com.rb.cybermonitorpro.data.source
+package com.ce11kjw.chargecontrol.data.source
 
 import java.util.TimeZone
 import org.junit.Assert.assertEquals

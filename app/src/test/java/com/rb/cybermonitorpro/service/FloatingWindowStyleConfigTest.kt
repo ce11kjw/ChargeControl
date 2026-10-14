@@ -1,4 +1,4 @@
-package com.rb.cybermonitorpro.service
+package com.ce11kjw.chargecontrol.service
 
 import org.junit.Assert.assertEquals
 import org.junit.Before

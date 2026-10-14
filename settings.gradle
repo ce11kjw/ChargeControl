@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "DeviceInfoViewer"
+rootProject.name = "ChargeControl"
 include ':app'

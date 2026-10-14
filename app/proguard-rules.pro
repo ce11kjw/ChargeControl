@@ -29,7 +29,7 @@
 # 旧规则 -keep class org.koin.** 过宽, 挡住 Koin 库自身缩减。
 # 注册入口 appModule (AppModule.kt 顶层属性, 编译为 AppModuleKt) 显式保留;
 # Module 子类与 @Koin 注解注入点由下两条规则保留; Koin 库其余部分由可达性缩减。
--keep class com.rb.cybermonitorpro.di.AppModuleKt { *; }
+-keep class com.ce11kjw.chargecontrol.di.AppModuleKt { *; }
 -keep class * extends org.koin.core.module.Module { *; }
 -keepclassmembers class * {
     @org.koin.core.annotation.* <fields>;
@@ -55,12 +55,12 @@
 # 真正需 keep 的运行时目标只有两类:
 # 1) Gson 序列化模型 — ExportHelper 对 CpuInfo/GpuInfo/BatteryInfo/MemoryInfo/
 #    StorageInfo/SystemInfo 等做 toJson，运行时反射字段，须保留类与成员
--keep class com.rb.cybermonitorpro.data.model.** { *; }
+-keep class com.ce11kjw.chargecontrol.data.model.** { *; }
 # 2) 入口组件 — R8 读 manifest 已自动保留，显式声明以防边界情况
--keep class com.rb.cybermonitorpro.**.*Activity { *; }
--keep class com.rb.cybermonitorpro.**.*Service { *; }
--keep class com.rb.cybermonitorpro.**.*Receiver { *; }
--keep class com.rb.cybermonitorpro.**.*Provider { *; }
+-keep class com.ce11kjw.chargecontrol.**.*Activity { *; }
+-keep class com.ce11kjw.chargecontrol.**.*Service { *; }
+-keep class com.ce11kjw.chargecontrol.**.*Receiver { *; }
+-keep class com.ce11kjw.chargecontrol.**.*Provider { *; }
 # 其余项目代码 (UI/DataSource/Repository/ViewModel) 交由 R8 正常缩减。
 # ⚠️ 构建后须真机冒烟验证: 导出(JSON)/Koin 初始化/隐藏 API 反射采集。
 
@@ -68,7 +68,7 @@
 # native 符号名 = Java_<包名>_<类名>_<方法名>, 硬编码在 libcybervulkan.so 里。
 # 本项目虽 -dontobfuscate, 但 R8 的横向类合并 / 方法搬迁仍会改变归属类,
 # 导致运行时 UnsatisfiedLinkError。必须显式钉死类名与 native 方法名。
--keep class com.rb.cybermonitorpro.data.source.VulkanProbe {
+-keep class com.ce11kjw.chargecontrol.data.source.VulkanProbe {
     native <methods>;
 }
 
@@ -85,14 +85,14 @@
 # 仅被 GLSurfaceView 的 GL 线程以虚拟调用方式触发，R8 调用图不可见 → -optimize 会当
 # "未被调用"剥掉 → EGL/GL 初始化失败 → 主界面闪退（debug 不瘦身故正常）。
 # 故对整包 + 框架回调接口实现显式保留，禁止 R8 缩减/优化。
--keep class com.rb.cybermonitorpro.ui.nightlight.** { *; }
+-keep class com.ce11kjw.chargecontrol.ui.nightlight.** { *; }
 # ★ 现象A-4：-dontobfuscate 不阻止 R8 行内/类合并；MainActivity 的 Compose 入口
 #   (MainActivityKt) 与 ui.components.**（LineChart 的 hdrChartPatches 调用点、CyberIcons 等）
 #   虽非 GLSurfaceView 回调，但被 HDR 链路间接引用，行内后可能丢失可达性 → release 差异。
--keep class com.rb.cybermonitorpro.MainActivityKt { *; }
--keep class com.rb.cybermonitorpro.ui.components.** { *; }
--keep class com.rb.cybermonitorpro.ui.effects.CyberNightlightSwitch { *; }
--keep class com.rb.cybermonitorpro.ui.effects.NightlightBarSwitch { *; }
+-keep class com.ce11kjw.chargecontrol.MainActivityKt { *; }
+-keep class com.ce11kjw.chargecontrol.ui.components.** { *; }
+-keep class com.ce11kjw.chargecontrol.ui.effects.CyberNightlightSwitch { *; }
+-keep class com.ce11kjw.chargecontrol.ui.effects.NightlightBarSwitch { *; }
 -keepclassmembers class * implements android.opengl.GLSurfaceView$Renderer { *; }
 -keepclassmembers class * implements android.opengl.GLSurfaceView$EGLConfigChooser { *; }
 -keepclassmembers class * implements android.opengl.GLSurfaceView$EGLWindowSurfaceFactory { *; }

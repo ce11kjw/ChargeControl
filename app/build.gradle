@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace 'com.rb.cybermonitorpro'
+    namespace 'com.ce11kjw.chargecontrol'
     compileSdk 36   // AGP9 上限 36.1；BOM 2025.06.00 + 内置 Kotlin 2.2.10 要求 compileSdk ≥ 36；targetSdk 同步 36（Android 16，满足 2026-08-31 Play 目标 API 截止）
 
     // ★ 新增 (2026-08-07): NDK — Vulkan 真实扩展枚举探针 libcybervulkan.so
@@ -50,11 +50,11 @@ android {
     }
 
 defaultConfig {
-    applicationId "com.rb.cybermonitorpro"
+    applicationId "com.ce11kjw.chargecontrol"
     minSdk 21
     targetSdk 36   // Android 16 (API 36)；2026-08-31 Play 目标 API 截止。健康权限: 传感器详情页直读 TYPE_HEART_RATE 需 BODY_SENSORS(全版本有效, Play 上架需填"身体传感器"用途声明); 未使用 Health Connect / android.permission.health.*, 无需健康权限迁移; 仅前台使用, 不声明 BODY_SENSORS_BACKGROUND。
-    versionCode 20260823
-    versionName "6.0.606.0"
+    versionCode 1
+    versionName "1.0.0"
 
     // ★ 新增 (2026-08-07): 仅为 arm64-v8a 打包 native 探针。
     //   理由: 32 位设备已无新机，多打三份 ABI 会让 APK 无谓膨胀。
