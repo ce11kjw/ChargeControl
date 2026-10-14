@@ -122,7 +122,7 @@ fun ChargeControlScreen(vm: ChargeControlViewModel = androidx.lifecycle.viewmode
                         Text("充电限制", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
                         Text("达到上限后停止充电", fontSize = 11.sp, color = TextSecondary)
                     }
-                    CyberJoystickSwitch(checked = vm.limitEnabled) { vm.setLimitEnabled(it) }
+                    CyberJoystickSwitch(checked = vm.limitEnabled, onCheckedChange = { vm.setLimitEnabled(it) })
                 }
                 if (vm.limitEnabled) {
                     Spacer(Modifier.height(12.dp))
