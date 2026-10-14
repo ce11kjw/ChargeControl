@@ -1,5 +1,56 @@
 # Changelog
 
+## v1.8.0 (2026-10-14)
+
+### ✨ 新增：硬件 / 设备详情采集（60 个字段）
+供 App「设备详情」页走模块取数。**不含**相机、编解码器、DRM、
+SIM 详情等需要 Android Framework API 的部分（那类 App 侧保留自读）。
+
+**存储 / 内存**
+`dev_storage_type`(UFS 4.0/eMMC 5.1) / `dev_memory_type`(LPDDR5X) / `dev_mem_speed_mhz`
+
+**SoC**
+`dev_soc_chipname`(SM8650/MT6989) / `dev_soc_process`(4nm/3nm)
+
+**USB / 蓝牙 / WiFi**
+`dev_usb_version` / `dev_usb_typec` / `dev_usb_host`
+`dev_bt_ver` / `dev_wifi_standard`(Wi-Fi 7/6E/6) / `dev_wifi_6e` / `dev_wifi_ax` / `dev_wifi_be`
+
+**安全**
+`dev_selinux` / `dev_crypto_state` / `dev_crypto_type`
+`dev_tee_supported`(dev/tee0 或 libtrustonic 探测) / `dev_tee_ver`
+`dev_bootloader_locked` / `dev_openssl`
+
+**图形**
+`dev_gles` / `dev_vulkan_level` / `dev_hw_egl`
+
+**显示**
+`dev_display_type` / `dev_display_bit` / `dev_display_gamut` / `dev_display_series`
+
+**硬件能力探测**
+`dev_has_nfc`(/dev/nfc0) / `dev_has_ir`(/sys/class/consumerir)
+`dev_has_uwb`(/dev/uwb) / `dev_has_wireless_chg`(扫 power_supply)
+
+**屏幕**
+`dev_screen_w` / `dev_screen_h` / `dev_screen_density`
+三级回退：fb0/virtual_size → `dumpsys display` → fb0/modes
+
+**其他**
+`dev_thermal_zones` / `dev_thermal_types`（列出全部热区类型）
+`dev_serial` / `dev_audio_hires` / `dev_dual_sim` / `dev_sim_operator`
+
+### 🔧 重要修复：status JSON 缓冲区溢出风险
+`handle_status` 用的是 **8KB 栈缓冲区** `char body[8192]`，
+字段从 110 涨到 200+ 后已逼近上限（实测 JSON 4.6KB，
+但字符串字段最大值叠加可能超）。改为**堆分配 32KB** + 用完 free，
+既避免栈溢出也消除 GCC 截断告警。
+
+### 🧪 测试
+- 60 个新字段全部出现在 JSON 中，无崩溃，体量 4.6KB
+- `dev_display_type` 正确读到假 getprop 的值
+- `dev_screen_w/h` 正确读到容器 framebuffer（800x600）
+- 编译 -Wall -Wextra 零警告
+
 ## v1.7.0 (2026-10-14)
 
 ### ✨ 新增：OEM / 厂商信息采集（25 个字段）

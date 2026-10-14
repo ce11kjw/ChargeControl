@@ -120,6 +120,42 @@ static char sys_bootloader[64] = "";
 static char sys_soc_vendor[64] = "", sys_soc_model[64] = "";
 /* ═══ v1.6.0 GPU（供 App GPU 页走模块取数）═══ */
 /* ═══ v1.7.0 OEM / 厂商信息（对齐 App 的 OemInfo）═══ */
+/* ═══ v1.8.0 硬件 / 设备详情（对齐 App DeviceDetailInfo 中模块可取的部分）═══ */
+static char dev_storage_type[32] = "";      /* UFS 4.0 / UFS 3.1 / eMMC 5.1 */
+static char dev_memory_type[32] = "";       /* LPDDR5X / LPDDR5 / LPDDR4X */
+static int  dev_memory_speed_mhz = -1;
+static char dev_soc_chipname[64] = "";      /* SM8650 / MT6989 */
+static char dev_soc_process_node[16] = "";  /* 4nm / 3nm */
+static char dev_usb_version[24] = "";
+static int  dev_usb_typec = -1, dev_usb_host = -1;
+static char dev_bluetooth_ver[16] = "";
+static int  dev_wifi_6e = -1, dev_wifi_ax = -1, dev_wifi_be = -1;
+static char dev_wifi_standard[24] = "";
+static char dev_widevine_level[24] = "";
+static char dev_selinux[16] = "";
+static char dev_crypto_state[24] = "";      /* encrypted / unencrypted */
+static char dev_crypto_type[32] = "";       /* file / file-based */
+static int  dev_bootloader_locked = -1;
+static int  dev_tee_supported = -1;
+static char dev_tee_version[32] = "";
+static char dev_openssl[40] = "";
+static char dev_gles_version[16] = "";
+static char dev_vulkan_level[16] = "";
+static char dev_hardware_egl[64] = "";
+static char dev_serial[48] = "";
+static char dev_display_type[32] = "";
+static char dev_display_bit[16] = "";
+static char dev_display_gamut[32] = "";
+static char dev_display_series[64] = "";
+static int  dev_has_nfc = -1, dev_has_ir = -1, dev_has_uwb = -1, dev_has_wireless_chg = -1;
+static int  dev_screen_w = -1, dev_screen_h = -1;
+static int  dev_screen_density = -1;
+static int  dev_thermal_zones = 0;
+static char dev_thermal_types[512] = "";
+static char dev_audio_hires[16] = "";
+static int  dev_dual_sim = -1;
+static char dev_sim_operator[48] = "";
+
 static char oem_brand[64] = "";          /* Xiaomi / OPPO / vivo / Samsung / AOSP */
 static char oem_os_name[64] = "";        /* HyperOS / ColorOS / OriginOS / One UI */
 static char oem_os_version[64] = "";
@@ -855,6 +891,199 @@ static int prop_get(const char *key, char *out, int outsz) {
     }
     pclose(f);
     return out[0] ? (int)strlen(out) : -1;
+}
+
+/* ═══ v1.8.0 设备详情采集（5 分钟缓存）═══ */
+static void update_device_detail(void) {
+    time_t tn = time(NULL);
+    static time_t last = 0;
+    if (tn - last < 300) return;
+    last = tn;
+
+    char b[256];
+    /* 便捷宏：试多个 key，第一个非空即用 */
+    #define TRY_PROP(dst, ...) do { \
+        const char *ks[] = {__VA_ARGS__, NULL}; \
+        for (int _i = 0; ks[_i]; _i++) { \
+            if (prop_get(ks[_i], b, sizeof(b)) > 0 && b[0]) { \
+                snprintf(dst, sizeof(dst), "%.*s", (int)sizeof(dst)-1, b); break; } \
+        } } while (0)
+
+    #define TRY_INT(dst, ...) do { \
+        const char *ks[] = {__VA_ARGS__, NULL}; \
+        for (int _i = 0; ks[_i]; _i++) { \
+            if (prop_get(ks[_i], b, sizeof(b)) > 0 && b[0]) { \
+                dst = atoi(b); break; } \
+        } } while (0)
+
+    /* ── 存储 / 内存 ── */
+    TRY_PROP(dev_storage_type, "ro.boot.storage_type", "ro.vendor.storage_type", "ro.boot.hwstorage");
+    TRY_PROP(dev_memory_type,  "ro.boot.ddr_type", "ro.ddr_type", "ro.vendor.ddr_type");
+    TRY_INT (dev_memory_speed_mhz, "ro.boot.ddr_freq");
+
+    /* ── SoC ── */
+    TRY_PROP(dev_soc_chipname, "ro.soc.model", "ro.chipset", "ro.board.chipname", "ro.chipname", "ro.hardware.chipname");
+    TRY_PROP(dev_soc_process_node, "ro.soc.process_node", "ro.board.process_node");
+
+    /* ── USB ── */
+    TRY_PROP(dev_usb_version, "ro.boot.usb_speed", "ro.usb.speed", "persist.sys.usb.speed");
+    TRY_INT (dev_usb_typec, "ro.hardware.usb.typec");
+
+    /* ── 蓝牙 / WiFi ── */
+    TRY_PROP(dev_bluetooth_ver, "ro.vendor.bt.version", "ro.bluetooth.version", "ro.boot.bt.version", "persist.vendor.bt.version");
+    TRY_INT (dev_wifi_6e, "ro.vendor.wifi.6e_support", "ro.boot.wifi.6e");
+    TRY_INT (dev_wifi_ax, "ro.vendor.wifi.ax", "ro.boot.wifi.ax");
+    TRY_INT (dev_wifi_be, "ro.vendor.wifi.be_support", "ro.boot.wifi.be");
+    if (dev_wifi_be == 1)      snprintf(dev_wifi_standard, sizeof(dev_wifi_standard), "Wi-Fi 7");
+    else if (dev_wifi_6e == 1) snprintf(dev_wifi_standard, sizeof(dev_wifi_standard), "Wi-Fi 6E");
+    else if (dev_wifi_ax == 1) snprintf(dev_wifi_standard, sizeof(dev_wifi_standard), "Wi-Fi 6");
+
+    /* ── 显示 ── */
+    TRY_PROP(dev_display_type, "ro.vendor.display.type", "ro.display.type");
+    TRY_PROP(dev_display_bit, "ro.vendor.display.bit");
+    TRY_PROP(dev_display_gamut, "ro.vendor.display.gamut", "ro.vendor.display.color_mode");
+    TRY_PROP(dev_display_series, "ro.display.series");
+
+    /* ── 安全 ── */
+    TRY_PROP(dev_selinux, "ro.build.selinux");
+    TRY_PROP(dev_crypto_state, "ro.crypto.state");
+    TRY_PROP(dev_crypto_type, "ro.crypto.type");
+    TRY_PROP(dev_tee_version, "ro.tee.version");
+    TRY_INT (dev_bootloader_locked, "ro.boot.flash.locked");
+    TRY_PROP(dev_openssl, "ro.openssl.version", "ro.vendor.openssl.version");
+    /* TEE：有个版本号或有 trustedcore 即视为支持 */
+    dev_tee_supported = (dev_tee_version[0] != 0
+        || access("/dev/tee0", F_OK) == 0
+        || access("/vendor/lib64/libtrustonic", F_OK) == 0) ? 1 : 0;
+
+    /* ── 图形 ── */
+    TRY_PROP(dev_gles_version, "ro.gles.version", "ro.hardware.egl");
+    TRY_PROP(dev_vulkan_level, "ro.vulkan.api.level", "ro.hardware.vulkan");
+    TRY_PROP(dev_hardware_egl, "ro.hardware.egl");
+
+    /* ── 序列号 ── */
+    TRY_PROP(dev_serial, "ro.serialno", "ro.boot.serialno");
+
+    /* ── 音频 ── */
+    TRY_PROP(dev_audio_hires, "ro.vendor.audio.hi_res", "ro.vendor.audio.hires", "ro.audio.hi_res", "ro.boot.audio.hi_res");
+
+    /* ── SIM 双卡 ── */
+    TRY_INT(dev_dual_sim, "ro.telephony.sim.count", "persist.radio.multisim.config");
+    if (dev_dual_sim > 1) dev_dual_sim = 1;
+    TRY_PROP(dev_sim_operator, "gsm.sim.operator.alpha", "gsm.operator.alpha");
+
+    /* ── 硬件能力：优先 /sys、fallback getprop ── */
+    /* NFC */
+    if (access("/dev/nfc0", F_OK) == 0 || access("/dev/nfc", F_OK) == 0) dev_has_nfc = 1;
+    else {
+        if (prop_get("ro.boot.nfc", b, sizeof(b)) > 0 && b[0]) dev_has_nfc = atoi(b) ? 1 : 0;
+        else if (prop_get("ro.vendor.nfc", b, sizeof(b)) > 0 && b[0]) dev_has_nfc = atoi(b) ? 1 : 0;
+        else dev_has_nfc = 0;
+    }
+    /* 红外：小米用 /sys/class/consumerir */
+    if (access("/sys/class/consumerir", F_OK) == 0) dev_has_ir = 1;
+    else {
+        dev_has_ir = 0;
+        const char *ks[] = {"ro.consumerir.support", "ro.vendor.consumerir", NULL};
+        for (int i = 0; ks[i]; i++)
+            if (prop_get(ks[i], b, sizeof(b)) > 0 && b[0]) { dev_has_ir = atoi(b) ? 1 : 0; break; }
+    }
+    /* UWB */
+    dev_has_uwb = (access("/dev/uwb", F_OK) == 0
+        || access("/sys/class/uwb0", F_OK) == 0) ? 1 : 0;
+    /* 无线充电：读 power_supply 里的 wireless 设备 */
+    dev_has_wireless_chg = 0;
+    {
+        DIR *d = opendir("/sys/class/power_supply");
+        if (d) {
+            struct dirent *e;
+            while ((e = readdir(d))) {
+                if (strstr(e->d_name, "wireless") || strstr(e->d_name, "wlchg")) { dev_has_wireless_chg = 1; break; }
+            }
+            closedir(d);
+        }
+    }
+
+    #undef TRY_PROP
+    #undef TRY_INT
+}
+
+/* 屏幕分辨率 / 密度 / 热区统计（变化少，但屏可能旋转，30s 一次） */
+static void update_screen_and_thermal(void) {
+    time_t tn = time(NULL);
+    static time_t last = 0;
+    if (tn - last < 30) return;
+    last = tn;
+
+    /* ── 屏幕：/sys/class/graphics/fb0/{virtual_size,stride} 或 modes ── */
+    char buf[128];
+    dev_screen_w = dev_screen_h = -1;
+    if (read_str("/sys/class/graphics/fb0/virtual_size", buf, sizeof(buf)) > 0) {
+        int w = 0, h = 0;
+        if (sscanf(buf, "%d,%d", &w, &h) == 2) { dev_screen_w = w; dev_screen_h = h; }
+    }
+    if (dev_screen_w < 0) {
+        /* 退路：dumpsys（root 可用）取 DisplayDeviceInfo */
+        FILE *f = popen("/system/bin/dumpsys display 2>/dev/null | grep -m1 -e real -e deviceWidth", "r");
+        if (f) {
+            char l[512];
+            while (fgets(l, sizeof(l), f)) {
+                int w = 0, h = 0;
+                char *p = strstr(l, "real ");
+                if (p && sscanf(p, "real %dx%d", &w, &h) == 2) { dev_screen_w = w; dev_screen_h = h; break; }
+                p = strstr(l, "deviceWidth=");
+                if (p && sscanf(p, "deviceWidth=%d deviceHeight=%d", &w, &h) == 2) { dev_screen_w = w; dev_screen_h = h; break; }
+                p = strstr(l, "deviceWidth=");
+                if (p && sscanf(p, "deviceWidth=%d", &w) == 1) { dev_screen_w = w; }
+            }
+            pclose(f);
+        }
+    }
+    if (dev_screen_w < 0) {
+        /* 最后退路：读 /sys/class/graphics/fb0/modes */
+        if (read_str("/sys/class/graphics/fb0/modes", buf, sizeof(buf)) > 0) {
+            char *p = strchr(buf, ':');
+            if (p) { int w = 0, h = 0; if (sscanf(p + 1, "%dx%d", &w, &h) == 2) { dev_screen_w = w; dev_screen_h = h; } }
+        }
+    }
+
+    /* 密度：从 build.prop 的 ro.sf.lcd_density */
+    FILE *lf = fopen("/system/build.prop", "r");
+    if (lf) {
+        char l[256];
+        while (fgets(l, sizeof(l), lf)) {
+            if (strncmp(l, "ro.sf.lcd_density=", 18) == 0) { dev_screen_density = atoi(l + 18); break; }
+        }
+        fclose(lf);
+    }
+    if (dev_screen_density < 0) {
+        if (prop_get("ro.sf.lcd_density", buf, sizeof(buf)) > 0 && buf[0])
+            dev_screen_density = atoi(buf);
+    }
+
+    /* ── 热区统计：列出所有 zone 类型 ── */
+    dev_thermal_zones = 0;
+    dev_thermal_types[0] = 0;
+    {
+        DIR *d = opendir(THERMAL);
+        if (d) {
+            struct dirent *e;
+            int off = 0;
+            while ((e = readdir(d))) {
+                if (strncmp(e->d_name, "thermal_zone", 12) != 0) continue;
+                char pth[192];
+                snprintf(pth, sizeof(pth), "%s/%.150s/type", THERMAL, e->d_name);
+                char t[64];
+                if (read_str(pth, t, sizeof(t)) <= 0) continue;
+                dev_thermal_zones++;
+                if (off < (int)sizeof(dev_thermal_types) - 70) {
+                    off += snprintf(dev_thermal_types + off, sizeof(dev_thermal_types) - off,
+                                    "%s%s", off ? "," : "", t);
+                }
+            }
+            closedir(d);
+        }
+    }
 }
 
 /* ═══ v1.7.0 OEM 采集（5 分钟缓存，都是静态/半静态属性）═══ */
@@ -1945,7 +2174,10 @@ static void handle_status(int fd) {
         }
         snprintf(parts_json + off, sizeof(parts_json) - off, "]");
     }
-    char body[8192];
+    /* ★ v1.8.0: status JSON 字段已增至 200+，8KB 栈缓冲区不够。
+       改为堆分配 32KB（避免栈溢出，也消除 GCC 截断告警）。 */
+    char *body = malloc(32768);
+    if (!body) { send_resp(fd, 500, "text/plain", "oom"); return; }
     char cl_buf[512] = "";
     read_charge_logger_tail(cl_buf, sizeof(cl_buf));
     json_escape(cl_buf, cl_buf, sizeof(cl_buf));
@@ -2042,7 +2274,7 @@ static void handle_status(int fd) {
         if (loss_per_cycle > 0.001f)
             est_cycles_left = (int)((health - 60.0f) / loss_per_cycle);
     }
-    snprintf(body, sizeof(body),
+    snprintf(body, 32768,
         "{\"capacity\":%d,\"capacity_disp\":%d,\"temp\":%d,\"voltage\":%d,\"current\":%d,"
         "\"status\":\"%s\",\"limit_enabled\":%d,\"charge_limit\":%d,"
         "\"temp_limit\":%d,\"resume_delta\":%d,\"interval\":%d,"
@@ -2077,6 +2309,20 @@ static void handle_status(int fd) {
         "\"oem_perf_mode\":\"%s\",\"oem_power_save\":\"%s\",\"oem_ultra_power_save\":\"%s\","
         "\"oem_ai_engine\":\"%s\",\"oem_memory_fusion\":\"%s\",\"oem_thermal\":\"%s\","
         "\"oem_storage_boost\":\"%s\","
+        /* v1.8.0 硬件 / 设备详情 */
+        "\"dev_storage_type\":\"%s\",\"dev_memory_type\":\"%s\",\"dev_mem_speed_mhz\":%d,"
+        "\"dev_soc_chipname\":\"%s\",\"dev_soc_process\":\"%s\",\"dev_usb_version\":\"%s\","
+        "\"dev_usb_typec\":%d,\"dev_usb_host\":%d,\"dev_bt_ver\":\"%s\","
+        "\"dev_wifi_standard\":\"%s\",\"dev_wifi_6e\":%d,\"dev_wifi_ax\":%d,\"dev_wifi_be\":%d,"
+        "\"dev_widevine\":\"%s\",\"dev_selinux\":\"%s\",\"dev_crypto_state\":\"%s\",\"dev_crypto_type\":\"%s\","
+        "\"dev_tee_supported\":%d,\"dev_tee_ver\":\"%s\",\"dev_bootloader_locked\":%d,"
+        "\"dev_openssl\":\"%s\",\"dev_gles\":\"%s\",\"dev_vulkan_level\":\"%s\",\"dev_hw_egl\":\"%s\","
+        "\"dev_serial\":\"%s\",\"dev_display_type\":\"%s\",\"dev_display_bit\":\"%s\","
+        "\"dev_display_gamut\":\"%s\",\"dev_display_series\":\"%s\",\"dev_audio_hires\":\"%s\","
+        "\"dev_dual_sim\":%d,\"dev_sim_operator\":\"%s\","
+        "\"dev_has_nfc\":%d,\"dev_has_ir\":%d,\"dev_has_uwb\":%d,\"dev_has_wireless_chg\":%d,"
+        "\"dev_screen_w\":%d,\"dev_screen_h\":%d,\"dev_screen_density\":%d,"
+        "\"dev_thermal_zones\":%d,\"dev_thermal_types\":\"%s\","
         "\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d,\"x_pp\":%d,\"x_pp_ok\":%d,\"x_cv\":%d,\"x_cv_mv\":%d,\"x_cv_ok\":%d,\"x_lc\":%d,\"x_lc_ma\":%d,\"x_nn\":%d,\"x_nn_ok\":%d,\"x_bmin\":%d,\"native_night\":%d,\"cl_tail\":\"%s\"}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
@@ -2108,7 +2354,20 @@ static void handle_status(int fd) {
         oem_secure_boot, oem_verified_boot, oem_game_mode,
         oem_perf_mode, oem_power_save, oem_ultra_power_save,
         oem_ai_engine, oem_memory_fusion, oem_thermal_solution,
-        oem_storage_boost, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high,
+        oem_storage_boost,
+        dev_storage_type, dev_memory_type, dev_memory_speed_mhz,
+        dev_soc_chipname, dev_soc_process_node, dev_usb_version,
+        dev_usb_typec, dev_usb_host, dev_bluetooth_ver,
+        dev_wifi_standard, dev_wifi_6e, dev_wifi_ax, dev_wifi_be,
+        dev_widevine_level, dev_selinux, dev_crypto_state, dev_crypto_type,
+        dev_tee_supported, dev_tee_version, dev_bootloader_locked,
+        dev_openssl, dev_gles_version, dev_vulkan_level, dev_hardware_egl,
+        dev_serial, dev_display_type, dev_display_bit,
+        dev_display_gamut, dev_display_series, dev_audio_hires,
+        dev_dual_sim, dev_sim_operator,
+        dev_has_nfc, dev_has_ir, dev_has_uwb, dev_has_wireless_chg,
+        dev_screen_w, dev_screen_h, dev_screen_density,
+        dev_thermal_zones, dev_thermal_types, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high,
         pd_pdo_count, pd_pdo_max_mv, pd_pdo_max_ma, pd_svid, pd_state,
         cc_limit_supported, cc_limit_val, power_path_en, jeita_index,
         soh_native, soh_first, soh_delta_x10, design_mah, chg_temp_limit,
@@ -2153,6 +2412,7 @@ static void handle_status(int fd) {
         if (sp) { memmove(kernel_ver, sp + 8, strlen(sp) - 7); }
     }
     send_resp(fd, 200, "application/json", body);
+    free(body);
 }
 
 static void handle_limit(int fd, const char *body) {
@@ -2513,6 +2773,8 @@ int main(void) {
             update_gpu();
             gpu_temp_c = gpu_temp;   /* 复用 thermal 已采的 GPU 温度给 App */
             update_oem();
+            update_device_detail();
+            update_screen_and_thermal();
             push_history();
             apply_control(); apply_power_path(); apply_cv_and_current(); apply_native_night(); apply_night_mode(); high_temp_alert();
         }
