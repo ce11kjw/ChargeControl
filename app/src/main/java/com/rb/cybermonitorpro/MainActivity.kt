@@ -137,6 +137,15 @@ class MainActivity : ComponentActivity() {
         com.rb.cybermonitorpro.util.BackGestureCompat.logPredictiveBackDevOptionState(this)
         // ★ 首次启动权限引导: 一次性展示, 同意/稍后均 markShown 后切入主界面
         val needsFirstLaunch = AppFirstLaunch.shouldShow(this)
+        // ★ ChargeControl: 启动时应用用户选择的主题色
+        try {
+            val savedAccent = AppSettings.getInstance(this).accentTheme
+            com.rb.cybermonitorpro.ui.theme.applyAccentTheme(
+                com.rb.cybermonitorpro.ui.theme.AccentTheme.of(savedAccent)
+            )
+        } catch (e: Throwable) {
+            Log.e("MainActivity", "applyAccentTheme failed", e)
+        }
         try {
             // ★ 二分法通关: 用回完整 SystemMonitorApp（安全版 NeonHeaderDecoration）
             setContent {

@@ -58,7 +58,7 @@ class AppSettings private constructor(context: Context) {
     // false = 整体关闭指针跟随光照效果, 消除每帧径向渐变光栅开销 (低端设备省电提帧)
     // 由 GlobalLightSwitch 在运行期消费; 设置页开关即时生效, 无需重启
     var globalLightEnabled: Boolean
-        get() = prefs.getBoolean("global_light_enabled", true)
+        get() = prefs.getBoolean("global_light_enabled", false)
         set(value) = prefs.edit { putBoolean("global_light_enabled", value) }
 
     // ── CyberNightlight TurboXDR（局部 HDR 增亮：卡片描边 / 文字 / 图标 / 折线等贴片）──
@@ -161,4 +161,13 @@ class AppSettings private constructor(context: Context) {
     var appLanguage: String
         get() = prefs.getString("app_language", "system") ?: "system"
         set(value) = prefs.edit { putString("app_language", value) }
+
+    // ── 主题色（ChargeControl 新增）──
+    // 可选: cyan(默认) / purple / green / amber / rose / blue / steel
+    var accentTheme: String
+        get() = prefs.getString("accent_theme", "cyan") ?: "cyan"
+        set(value) = prefs.edit { putString("accent_theme", value) }
+
+    // ── 性能：全局光照（默认关，省电提帧）──
+    // 原默认 true，ChargingControl 改为 false（中低端机帧率提升明显）
 }

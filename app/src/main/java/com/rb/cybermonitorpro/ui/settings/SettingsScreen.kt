@@ -1,5 +1,7 @@
 package com.rb.cybermonitorpro.ui.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -28,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -44,6 +47,8 @@ import com.rb.cybermonitorpro.ui.components.FancySliderRotation
 import com.rb.cybermonitorpro.ui.effects.GlobalLightSwitch
 import com.rb.cybermonitorpro.ui.effects.CyberNightlightSwitch
 import com.rb.cybermonitorpro.ui.effects.NightlightBarSwitch
+import com.rb.cybermonitorpro.ui.theme.AccentTheme
+import com.rb.cybermonitorpro.ui.theme.applyAccentTheme
 import com.rb.cybermonitorpro.ui.theme.NeonPurple
 import com.rb.cybermonitorpro.ui.theme.NeonPurpleBright
 import com.rb.cybermonitorpro.ui.theme.NeonSteelBlue
@@ -102,6 +107,9 @@ fun SettingsScreen(viewModel: SettingsViewModel = koinViewModel()) {
 
         // ═══ 语言切换 ═══
         LanguageSettingsCard()
+
+        // ═══ 主题色（ChargeControl 新增）═══
+        AccentThemeSettingsCard()
 
         Text(stringResource(R.string.settings_module_refresh),
             fontSize = 14.sp,
@@ -644,5 +652,92 @@ private fun CyberNightlightBarSettingsCard() {
                 },
             )
         }
+    }
+}
+
+// ═══════ 主题色选择卡片（ChargeControl 新增）═══════
+
+@Composable
+private fun AccentThemeSettingsCard() {
+    val ctx = LocalContext.current
+    var showDialog by remember { mutableStateOf(false) }
+    val settings = remember(ctx) { AppSettings.getInstance(ctx) }
+    var current by remember { mutableStateOf(AccentTheme.of(settings.accentTheme)) }
+
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = NeonPurple.copy(alpha = 0.08f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 主题色圆点预览
+                Box(
+                    Modifier
+                        .size(20.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(current.primary))
+                )
+                Spacer(Modifier.size(8.dp))
+                Column {
+                    Text("主题色", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                    Text("更换界面强调色", fontSize = 11.sp, color = TextSecondary)
+                }
+            }
+            TextButton(onClick = {
+                HapticUtils.standardTap(ctx)
+                showDialog = true
+            }) {
+                Text(current.label, fontSize = 13.sp, color = NeonPurpleBright, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("主题色") },
+            text = {
+                Column {
+                    AccentTheme.entries.forEach { t ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    showDialog = false
+                                    settings.accentTheme = t.id
+                                    current = t
+                                    applyAccentTheme(t)   // 立即生效（var + mutableStateOf 触发重组）
+                                    HapticUtils.standardTap(ctx)
+                                }
+                                .padding(vertical = 10.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.size(24.dp).clip(RoundedCornerShape(50))
+                                    .background(Color(t.primary))
+                            )
+                            Spacer(Modifier.size(12.dp))
+                            Text(t.label, fontSize = 15.sp, color = TextPrimary,
+                                modifier = Modifier.weight(1f))
+                            if (t == current) {
+                                Icon(CyberIcons.Check, null, tint = NeonPurpleBright,
+                                    modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDialog = false }) { Text("关闭") }
+            }
+        )
     }
 }
