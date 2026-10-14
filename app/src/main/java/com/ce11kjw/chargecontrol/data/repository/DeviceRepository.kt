@@ -108,6 +108,12 @@ class DeviceRepository(context: Context) {
     val historyData = MutableLiveData<Map<String, List<HistoryDataPoint>>>(emptyMap())
 
     // ═══════ 协程调度 ═══════
+    /* ★ v1.9.0 纯模块取数：模块在线时全部数据来自 /api/status */
+    private var moduleStatus: org.json.JSONObject? = null
+    /** 模块最近一次拉取是否成功 —— 供 UI 显示「不可用」 */
+    @Volatile var moduleOnline: Boolean = false
+        private set
+
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     @Volatile private var monitoring = false
@@ -181,16 +187,37 @@ class DeviceRepository(context: Context) {
 
     fun loadStaticData() {
         scope.launch(Dispatchers.IO) { // ★ 修复(N3): 阻塞 I/O 跑 IO 线程池 (原 Default 占 CPU 线程)
-            runCatching { systemLiveData.postValue(systemDataSource.getSystemInfo()); healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "system") }
-                .onFailure { e -> Log.w(TAG, "系统信息采集失败", e); healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "system") }
-            runCatching { auxCollector.storageLiveData.postValue(StorageDataSource().getStorageInfo()) }
-                .onFailure { e -> Log.w(TAG, "存储信息采集失败", e) }
+            /* ★ v1.9.0: 静态数据也走模块（纯模块策略） */
+            val ms = refreshModuleStatus()
+
+            runCatching {
+                val info = if (ms != null) {
+                    com.ce11kjw.chargecontrol.data.model.SystemInfo().also {
+                        ModuleDataAdapter.fillSystemInfo(it, ms)
+                    }
+                } else com.ce11kjw.chargecontrol.data.model.SystemInfo()
+                systemLiveData.postValue(info)
+                healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "system")
+            }.onFailure { e -> Log.w(TAG, "系统信息采集失败", e); healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "system") }
+
+            runCatching {
+                val st = if (ms != null) ModuleDataAdapter.toStorageInfo(ms)
+                         else com.ce11kjw.chargecontrol.data.model.StorageInfo()
+                auxCollector.storageLiveData.postValue(st)
+            }.onFailure { e -> Log.w(TAG, "存储信息采集失败", e) }
             runCatching { sensorsLiveData.postValue(sensorDataSource.getAllSensors()); healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "sensors") }
                 .onFailure { e -> Log.w(TAG, "传感器列表采集失败", e); healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "sensors") }
             runCatching { deviceDetailLiveData.postValue(deviceDetailDataSource.collect()); healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "device") }
                 .onFailure { e -> Log.w(TAG, "设备详情采集失败", e); healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "device") }
-            runCatching { oemLiveData.postValue(oemDataSource.collect()); healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "oem") }
-                .onFailure { e -> Log.w(TAG, "OEM信息采集失败", e); healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "oem") }
+            runCatching {
+                val oem = if (ms != null) {
+                    com.ce11kjw.chargecontrol.data.model.OemInfo().also {
+                        ModuleDataAdapter.fillOemInfo(it, ms)
+                    }
+                } else com.ce11kjw.chargecontrol.data.model.OemInfo()
+                oemLiveData.postValue(oem)
+                healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "oem")
+            }.onFailure { e -> Log.w(TAG, "OEM信息采集失败", e); healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "oem") }
         }
     }
 
@@ -221,12 +248,29 @@ class DeviceRepository(context: Context) {
 
     // ═══════ 核心采集块 (写入 SharedFlow + LiveData + History) ═══════
 
+    /**
+     * ★ v1.9.0: 拉取模块状态。
+     * 所有采集 Block 都先调它 —— 一次 HTTP 拿到全部数据，
+     * 避免每个 Block 各请求一遍。
+     */
+    private suspend fun refreshModuleStatus(): org.json.JSONObject? {
+        val st = try { ChargeControlApi.fetchStatus() } catch (e: Throwable) { null }
+        moduleStatus = st
+        moduleOnline = ModuleDataAdapter.isUsable(st)
+        return if (moduleOnline) st else null
+    }
+
     private suspend fun collectCpuBlock() {
         try {
-            val cpu = cpuDataSource.getCpuInfo()
-            val perCoreUsage = cpuDataSource.getPerCoreUsage()
-            cpu.cores.forEach { core -> core.usagePercent = perCoreUsage[core.coreIndex] ?: Float.NaN }
-            cachedChip?.let { CpuCache.injectCpuInfo(it, cpu) }
+            /* ★ v1.9.0: 纯模块取数（模块不在则不发数据，UI 显示不可用） */
+            val ms = refreshModuleStatus()
+            val cpu = if (ms != null) {
+                ModuleDataAdapter.toCpuInfo(ms)
+            } else {
+                // 模块离线：发一个空 CpuInfo，UI 层据此显示「数据不可用」
+                com.ce11kjw.chargecontrol.data.model.CpuInfo()
+            }
+            if (ms != null) cachedChip?.let { CpuCache.injectCpuInfo(it, cpu) }
             _cpuFlow.emit(cpu); cpuLiveData.postValue(cpu)
             if (!cpu.temperatureCelsius.isNaN()) historyCache.addPoint("cpu_temp", cpu.temperatureCelsius)
             val maxFreq = cpu.cores.maxOfOrNull { it.currentFreqKHz } ?: 0L
@@ -242,8 +286,10 @@ class DeviceRepository(context: Context) {
 
     private suspend fun collectGpuBlock() {
         try {
-            val gpu = gpuDataSource.getGpuInfo()
-            cachedChip?.let { CpuCache.injectGpuInfo(it, gpu) }
+            val ms = moduleStatus ?: refreshModuleStatus()
+            val gpu = if (ms != null) ModuleDataAdapter.toGpuInfo(ms)
+                      else com.ce11kjw.chargecontrol.data.model.GpuInfo()
+            if (ms != null) cachedChip?.let { CpuCache.injectGpuInfo(it, gpu) }
             gpu.isThrottled = gpu.maxFreqKHz > 0 && gpu.frequencyKHz > 0 && gpu.frequencyKHz < gpu.maxFreqKHz * 0.7f
             _gpuFlow.emit(gpu); gpuLiveData.postValue(gpu)
             if (!gpu.loadPercentage.isNaN()) historyCache.addPoint("gpu_load", gpu.loadPercentage)
@@ -259,7 +305,9 @@ class DeviceRepository(context: Context) {
 
     private suspend fun collectMemoryBlock() {
         try {
-            val mem = memoryDataSource.getMemoryInfo()
+            val ms = moduleStatus ?: refreshModuleStatus()
+            val mem = if (ms != null) ModuleDataAdapter.toMemoryInfo(ms)
+                      else com.ce11kjw.chargecontrol.data.model.MemoryInfo()
             // 内存核心指标 (total/used/available/free/swap/zram) 始终来自 /proc/meminfo,
             // 几乎总是可用; dumpsys 仅用于 OOM 进程分类 (内存分布饼图) 的增强, 其不可用属于
             // 降级而非数据异常, 不应触发数据源 WARN (否则在无 DUMP 权限的三方 App 设备上会
@@ -275,7 +323,9 @@ class DeviceRepository(context: Context) {
 
     private suspend fun collectBatteryBlock() {
         try {
-            val bat = batteryDataSource.getBatteryInfo()
+            val ms = moduleStatus ?: refreshModuleStatus()
+            val bat = if (ms != null) ModuleDataAdapter.toBatteryInfo(ms)
+                      else com.ce11kjw.chargecontrol.data.model.BatteryInfo()
             _batteryFlow.emit(bat); batteryLiveData.postValue(bat)
             RefreshPolicy.isPowerSaveMode = bat.isPowerSaveMode
             if (!bat.temperatureCelsius.isNaN()) historyCache.addPoint("battery_temp", bat.temperatureCelsius)
