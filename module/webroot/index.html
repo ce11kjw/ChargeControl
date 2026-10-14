@@ -74,7 +74,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 </head>
 <body>
 <div class="container" x-data="app()" x-init="init()">
-  <h1>🔋 电池管家 <span class="badge">v1.3.1</span></h1>
+  <h1>🔋 电池管家 <span class="badge">v1.5.0</span></h1>
 
   <div class="tabs">
     <div class="tab" :class="{active: tab==='dash'}" @click="tab='dash'"><span class="ti"><i class="fa-solid fa-gauge-high"></i></span><span>仪表盘</span></div>
@@ -337,6 +337,37 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       </div>
     </div>
 
+    <!-- ★ v1.5.0 充电曲线：本次/最近一次充电的 电流+电量+阶段 -->
+    <div class="panel">
+      <h2><i class="fa-solid fa-bolt" style="margin-right:6px"></i>充电曲线</h2>
+      <div style="position:relative;height:200px"><canvas id="curveChart"></canvas></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--txt2)">
+        <span>x-text="curveInfo || '暂无充电采样数据（充电时每 30 秒记录一条）'"</span>
+      </div>
+    </div>
+
+    <!-- ★ v1.5.0 电池校准 -->
+    <div class="panel">
+      <h2><i class="fa-solid fa-scale-balanced" style="margin-right:6px"></i>电池校准</h2>
+      <div class="row">
+        <span class="lbl">状态</span>
+        <span style="font-size:13px;color:var(--txt)" x-text="calText()"></span>
+      </div>
+      <div class="row" x-show="cal.state">
+        <span class="lbl">电量范围</span>
+        <span style="font-size:13px;color:var(--txt2)" x-text="cal.cap_min + '% ~ ' + cal.cap_max + '%'"></span>
+      </div>
+      <div style="font-size:12px;color:var(--txt2);line-height:1.7;padding:6px 0">
+        校准 = 完整走一次「充满 → 静置 → 放到 10% → 再充满」，让电量计重新对齐。<br>
+        长期只充到 80% 会让电量计漂移，表现为「显示还有 30% 却突然关机」。<br>
+        <b>注意</b>：放电阶段请断充电器正常使用，模块不会主动放电；电量低于 5% 会自动中止。
+      </div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="btn" @click="calAction('start')" x-show="!cal.state">开始校准</button>
+        <button class="btn gray" @click="calAction('abort')" x-show="cal.state">中止校准</button>
+      </div>
+    </div>
+
   </div>
 
 <div x-show="tab==='detail'" x-transition:enter.duration.350ms.opacity>
@@ -378,6 +409,74 @@ function app() {
     webhookUrl: '', whLoaded: false,
     s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, est_full_txt:'', health_degrade:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, bypass_hw:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, lang:0, theme:0, webhookUrl:'', mem_total:0, mem_avail:0, mem_free:0, storage_total:0, storage_free:0, uptime_secs:0, cpu_cores:0, kernel_ver:'', cpu_model:'', device_model:'', wifi_rssi:-128, wifi_on:0, mobile_on:0, ip_addr:'', bat_technology:'', bat_capacity_level:'', bat_health:'', charge_type:-1, time_to_full:-1, charge_counter:-1, input_current_limit:-1, bat_manufacturer:'', bat_model_name:'', voltage_ocv:-1, current_avg:-1, temp_ambient:-1, constant_charge_current:-1, constant_charge_voltage:-1, capacity_error_margin:-1, time_to_empty:-1, bat_present:-1, internal_resistance:-1, charge_now:-1, charge_term_current:-1, constant_charge_current_max:-1, constant_charge_voltage_max:-1, temp_max:-1, temp_min:-1, charger_temp:-1, charge_done:-1, input_voltage_settled:-1, safety_timer_expired:-1, calibrate:-1, pd_pdo_count:0, pd_pdo_max_mv:0, pd_pdo_max_ma:0, pd_svid:'', pd_state:'', cc_limit_supported:0, cc_limit_val:-1, power_path_en:-1, jeita_index:-1, soh_native:-1, soh_first:-1, soh_delta_x10:0, design_mah:0, chg_temp_limit:60, x_pp:0, x_pp_ok:0, x_cv:0, x_cv_mv:0, x_cv_ok:0, x_lc:0, x_lc_ma:0, x_nn:0, x_nn_ok:0, x_bmin:50, native_night:0, cl_tail:'' },
     logContent: '', lastUpdate: '', updateMsg: '', latestVer: '', timer: null, chart: null, fullTimer: null, loaded: false,
+    /* ★ v1.5.0 */
+    curveChart: null, curveInfo: '', curveTimer: null,
+    cal: { state:0, state_name:'idle', elapsed_sec:0, cap_now:0, cap_max:0, cap_min:0, fulfilled:0, temp:0, charging:0 },
+
+    /* 阶段名映射 */
+    stageName(st) { return ['未充电','预充','恒流 CC','恒压 CV','已充满'][st] || '—'; },
+
+    async loadCurve() {
+      const d = await this.fetchJson(this.API_BASE + '/api/curve');
+      if (!Array.isArray(d) || !d.length) { this.curveInfo = ''; return; }
+      const labels = d.map(x => new Date(x.t * 1000).toLocaleTimeString());
+      const cur  = d.map(x => x.i);
+      const cap  = d.map(x => x.c);
+
+      if (!this.curveChart) {
+        const cs = getComputedStyle(document.documentElement);
+        const txt = cs.getPropertyValue('--txt2').trim();
+        const grid = cs.getPropertyValue('--line').trim();
+        const leg = cs.getPropertyValue('--txt').trim();
+        const bg = cs.getPropertyValue('--card').trim();
+        this.curveChart = new Chart(document.getElementById('curveChart'), {
+          type: 'line',
+          data: { labels, datasets: [
+            { label:'电流 mA', data:cur, borderColor:'#38bdf8', tension:.3, yAxisID:'y', pointRadius:0, borderWidth:2 },
+            { label:'电量 %', data:cap, borderColor:'#4ade80', tension:.3, yAxisID:'y1', pointRadius:0, borderWidth:2, borderDash:[4,3] }
+          ]},
+          options: {
+            responsive:true, maintainAspectRatio:false,
+            interaction:{ mode:'index', intersect:false },
+            scales:{
+              y:{ position:'left', grid:{color:grid}, ticks:{color:txt, maxTicksLimit:5}, title:{display:true,text:'mA',color:txt,font:{size:10}} },
+              y1:{ position:'right', min:0, max:100, grid:{display:false}, ticks:{color:txt} },
+              x:{ ticks:{color:txt, maxTicksLimit:6, maxRotation:0} }
+            },
+            plugins:{ legend:{ labels:{ color:leg, boxWidth:12, font:{size:10} } },
+              tooltip:{ backgroundColor:bg, borderColor:grid, borderWidth:1, titleColor:leg, bodyColor:txt } }
+          }
+        });
+      } else {
+        this.curveChart.data.labels = labels;
+        this.curveChart.data.datasets[0].data = cur;
+        this.curveChart.data.datasets[1].data = cap;
+        this.curveChart.update('none');
+      }
+      const last = d[d.length-1];
+      const dur = d.length > 1 ? Math.round((last.t - d[0].t)/60) : 0;
+      this.curveInfo = `${d.length} 条采样 · 跨度 ${dur} 分钟 · 当前阶段：${this.stageName(last.st)} · ${last.i} mA / ${last.v} mV`;
+    },
+
+    async loadCal() {
+      const d = await this.fetchJson(this.API_BASE + '/api/calibrate');
+      if (d) this.cal = d;
+    },
+
+    calText() {
+      const m = { idle:'未开始', charging_full:'充电至 100%', resting:'静置中（2 小时）',
+                  discharging:'放电至 10%', charging_up:'回充至满', done:'✅ 校准完成' };
+      return m[this.cal.state_name] || '未开始';
+    },
+
+    async calAction(a) {
+      await this.fetchJson(this.API_BASE + '/api/calibrate', {
+        method:'POST', body:'action=' + a,
+        headers:{'Content-Type':'application/x-www-form-urlencoded'}
+      });
+      await this.loadCal();
+    },
+
 
     async fetchJson(url, opts) { try { const r = await fetch(url, opts); return await r.json(); } catch (e) { return null; } },
 
@@ -584,9 +683,12 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
     tempColor(t) { if (t <= 0) return 'var(--gray)'; return t < 45 ? 'var(--green)' : t < 55 ? 'var(--orange)' : 'var(--red)'; },
 
     init() {
-      this.poll(); this.loadHistory(); document.documentElement.setAttribute('data-theme', String(this.s.theme));
+      this.poll(); this.loadHistory(); this.loadCurve(); this.loadCal();
+      document.documentElement.setAttribute('data-theme', String(this.s.theme));
       this.timer = setInterval(() => this.poll(), 3000);
       setInterval(() => this.loadHistory(), 30000);
+      /* ★ v1.5.0: 曲线只在「统计」页可见时刷新，省电省流量 */
+      setInterval(() => { if (this.tab === 'stats') { this.loadCurve(); this.loadCal(); } }, 30000);
       setInterval(() => { if (this.tab === 'log') this.refreshLog(); }, 10000);
     }
   };

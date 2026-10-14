@@ -100,6 +100,27 @@ static char est_full_txt[32] = "";
 static float health_degrade = 0.0f;
 static char health_rating[16] = "";
 static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
+
+/* ═══════════════ v1.5.0 充电曲线 & 校准 ═══════════════ */
+#define SESSIONS_IDX "/data/adb/battery-manager/sessions.json"
+#define SESSION_FILE "/data/adb/battery-manager/session.jsonl"
+#define CALIB_FILE   "/data/adb/battery-manager/calibrate.jsonl"
+
+/* 充电阶段：0=未充 1=预充 2=恒流CC 3=恒压CV 4=充满 */
+static int chg_stage = 0;
+static int prev_curr = 0;           /* 上一次电流，用于判断 CC/CV 拐点 */
+static int cc_peak = 0;             /* 本轮充电的电流峰值（CV 判据基准 + 迟滞） */
+static int prev_volt = 0;
+
+/* 校准状态机：0=idle 1=charging_full 2=resting 3=discharging 4=charging_up 5=done */
+static int cal_state = 0;
+static time_t cal_started = 0;
+static int cal_max_cap = -1;        /* 校准期间记录的最高/最低电量 */
+static int cal_min_cap = 101;
+static int cal_fulfilled = 0;       /* 是否已达 100% */
+
+static void save_cal_state(void);
+static void load_cal_state(void);
 static char bat_status[32] = "Unknown";
 static int soc_temp = -1, gpu_temp = -1, chg_temp = -1, case_temp = -1;
 /* ★ 新增：MTK/PD 扩展字段 */
@@ -368,6 +389,8 @@ static void update_temps(void) {
 }
 
 static void handle_charging_state(void);
+static void send_resp(int fd, int code, const char *ctype, const char *body);  /* v1.5.0 前向声明 */
+static void cal_log(const char *msg);                                          /* v1.5.0 前向声明 */
 static void update_battery(void) {
     char path[MAX_LINE]; int v;
     snprintf(path, sizeof(path), "%s/capacity", SYSFS);
@@ -790,6 +813,8 @@ static void handle_charging_state(void) {
     if (charging && !sess_active) {
         sess_start = time(NULL); sess_start_cap = bat_capacity;
         sess_active = 1; sess_min = 0; sess_mah = 0;
+        cc_peak = 0;   /* v1.5.0: 新一轮充电，重置 CC/CV 判据基准 */
+        cal_log("开始新的充电会话");
         /* v1.3.1: 记录硬件累计电荷起点(uAh) */
         sess_start_counter = read_int(SYSFS "/charge_counter");
         if (sess_start_counter < 0) sess_start_counter = -1;
@@ -874,6 +899,186 @@ static void high_temp_alert(void) { static time_t hl = 0; time_t tn = time(NULL)
     if (bat_temp < 45) alerted_high = 0;
 }
 
+/* ★ v1.5.0: 充电阶段识别
+   判据（按 MTK 锂电充电流程）：
+     - 未充电/放电           → 0
+     - 充电中且电量 <10%、电流小 → 1 预充(trickle)
+     - 充电中且电流基本稳定、电压上升 → 2 恒流 CC
+     - 充电中且电流明显下降、电压接近恒压点 → 3 恒压 CV
+     - status=Full 或充电完成 → 4 充满
+   电流单位 mA（bat_curr 已是 mA），电压 mV。 */
+static int detect_charge_stage(void) {
+    int charging = strcmp(bat_status, "Charging") == 0;
+    int full = strcmp(bat_status, "Full") == 0;
+    if (full) return 4;
+    if (!charging) return 0;
+    if (bat_capacity >= 0 && bat_capacity < 10 && bat_curr < 300) return 1;
+
+    /* CV 判据 + 迟滞（v1.5.0 修正抖动）
+       首次实测：仅比较「本轮电流 < 上轮峰值 60%」会在电流小幅波动时
+       于 CC<->CV 反复横跳（实测 39s CC / 44s CV 来回切）。
+       现在：
+         · cc_peak 记录本轮充电的电流峰值（充电开始时重置）
+         · 进入 CV 需 电流 < 峰值 60%（较严）
+         · 退出 CV 需 电流 > 峰值 75%（较松）—— 两阈值拉开形成迟滞带
+         · 且必须电压确实接近恒压点，避免低温大电流误判 */
+    int cv_mv = x_orig_cv > 0 ? x_orig_cv : 4430;
+    if (bat_curr > cc_peak) cc_peak = bat_curr;
+    if (cc_peak <= 0) cc_peak = bat_curr;
+
+    int near_cv = (bat_volt >= cv_mv - 80);
+    if (chg_stage == 3) {
+        if (bat_curr > cc_peak * 75 / 100 || !near_cv) return 2;
+        return 3;
+    }
+    if (near_cv && bat_curr > 0 && bat_curr < cc_peak * 6 / 10) return 3;
+    return 2;
+}
+
+/* ★ v1.5.0: 电池校准状态机
+   LiCo/LiPo 电量计(库仑计)长期部分充放会累积漂移，表现为"显示 80% 但实际已到 20%"
+   或"到 100% 后还能充很久"。校准 = 完整走一次 满→空→满，让 gauge 重新对齐。
+
+   流程：
+     idle ──start──> charging_full ──(到100%)──> resting ──(静置2h)──> discharging
+              ──(到10%)──> charging_up ──(充满)──> done(重置计数)
+
+   安全护栏（重要）：
+     · 放电阶段【不主动耗电】，只提示用户拔充电器自然使用 —— 主动放电对电池有损
+     · 电量 <5% 立即中止（防过放损伤）
+     · 温度 >45°C 中止（防高温充电）
+     · 全程写 calibrate.jsonl，可事后回溯 */
+static const char *cal_state_name(int st) {
+    switch (st) {
+        case 1: return "charging_full";
+        case 2: return "resting";
+        case 3: return "discharging";
+        case 4: return "charging_up";
+        case 5: return "done";
+        default: return "idle";
+    }
+}
+
+static void save_cal_state(void) {
+    FILE *f = fopen("/data/adb/battery-manager/calibrate.state", "w");
+    if (!f) return;
+    fprintf(f, "%d\n%ld\n%d\n%d\n%d\n", cal_state, (long)cal_started,
+            cal_max_cap, cal_min_cap, cal_fulfilled);
+    fclose(f);
+}
+
+static void load_cal_state(void) {
+    FILE *f = fopen("/data/adb/battery-manager/calibrate.state", "r");
+    if (!f) return;
+    long t = 0;
+    if (fscanf(f, "%d %ld %d %d %d", &cal_state, &t, &cal_max_cap, &cal_min_cap, &cal_fulfilled) >= 1)
+        cal_started = (time_t)t;
+    fclose(f);
+}
+
+static void cal_log(const char *msg) {
+    FILE *f = fopen(CALIB_FILE, "a");
+    if (!f) return;
+    fprintf(f, "{\"t\":%ld,\"s\":%d,\"stage\":\"%s\",\"c\":%d,\"msg\":\"%s\"}\n",
+            (long)time(NULL), cal_state, cal_state_name(cal_state), bat_capacity, msg);
+    fclose(f);
+}
+
+static void cal_start(void) {
+    cal_state = 1;
+    cal_started = time(NULL);
+    cal_max_cap = bat_capacity;
+    cal_min_cap = bat_capacity >= 0 ? bat_capacity : 101;
+    cal_fulfilled = 0;
+    save_cal_state();
+    cal_log("校准开始：请保持充电至 100%");
+    log_event("校准模式已启动");
+}
+
+static void cal_abort(const char *why) {
+    char m[128];
+    snprintf(m, sizeof(m), "校准中止：%s", why);
+    cal_state = 0;
+    save_cal_state();
+    cal_log(m);
+    log_event(m);
+}
+
+/* 每轮 update_battery 后调用 */
+static void cal_tick(void) {
+    if (cal_state == 0 || cal_state == 5) return;
+
+    int charging = strcmp(bat_status, "Charging") == 0;
+    int full     = strcmp(bat_status, "Full") == 0;
+
+    /* 通用护栏 */
+    if (bat_capacity >= 0 && bat_capacity < 5 && cal_state != 1) {
+        cal_abort("电量低于 5%（防过放）");
+        return;
+    }
+    if (bat_temp > 450) { cal_abort("温度超过 45°C"); return; }
+
+    if (bat_capacity > cal_max_cap) cal_max_cap = bat_capacity;
+    if (bat_capacity >= 0 && bat_capacity < cal_min_cap) cal_min_cap = bat_capacity;
+
+    switch (cal_state) {
+        case 1: /* 等充满 */
+            if (full || bat_capacity >= 100) {
+                cal_fulfilled = 1;
+                cal_state = 2;
+                cal_started = time(NULL);   /* 静置计时起点 */
+                save_cal_state();
+                cal_log("已充满，请拔掉充电器静置 2 小时");
+            }
+            break;
+
+        case 2: /* 静置：2 小时（不拔线也行，只要不充不放） */
+            if (time(NULL) - cal_started >= 2 * 3600) {
+                cal_state = 3;
+                cal_started = time(NULL);
+                save_cal_state();
+                cal_log("静置完成，请断开充电器使用设备放电至 10%");
+            }
+            break;
+
+        case 3: /* 放电：等用户用到 10% */
+            if (charging && bat_capacity <= 15) {
+                /* 用户提前插上了：直接进入回充阶段 */
+                cal_state = 4;
+                save_cal_state();
+                cal_log("检测到回充，进入满充阶段");
+            } else if (bat_capacity >= 0 && bat_capacity <= 10) {
+                cal_state = 4;
+                save_cal_state();
+                cal_log("已放到 10%，请插上充电器充满以完成校准");
+            }
+            break;
+
+        case 4: /* 回充到满，完成 */
+            if (full || bat_capacity >= 100) {
+                cal_state = 5;
+                save_cal_state();
+                cal_log("校准完成：电量计已重新对齐");
+                log_event("电池校准已完成");
+            }
+            break;
+    }
+}
+
+static char *cal_status_json(void) {
+    char *out = malloc(512);
+    if (!out) return strdup("{}");
+    long elapsed = cal_started > 0 ? (long)(time(NULL) - cal_started) : 0;
+    snprintf(out, 512,
+        "{\"state\":%d,\"state_name\":\"%s\",\"elapsed_sec\":%ld,"
+        "\"cap_now\":%d,\"cap_max\":%d,\"cap_min\":%d,\"fulfilled\":%d,"
+        "\"temp\":%d,\"charging\":%d}",
+        cal_state, cal_state_name(cal_state), elapsed,
+        bat_capacity, cal_max_cap, cal_min_cap, cal_fulfilled,
+        bat_temp, strcmp(bat_status, "Charging") == 0);
+    return out;
+}
+
 static void push_history(void) {
     { time_t tn = time(NULL); static time_t hist_last = 0; if (tn - hist_last < 60) return; hist_last = tn; }
     time_t now = time(NULL);
@@ -904,20 +1109,153 @@ static void push_history(void) {
         }
     }
     FILE *f = fopen(HISTORY, "a"); if (!f) return;
-    fprintf(f, "{\"t\":%ld,\"c\":%d,\"tmp\":%d,\"v\":%d,\"s\":\"%s\"}\n",
-            (long)now, bat_capacity, bat_temp, bat_volt, bat_status);
+    fprintf(f, "{\"t\":%ld,\"c\":%d,\"tmp\":%d,\"v\":%d,\"s\":\"%s\",\"i\":%d,\"st\":%d}\n",
+            (long)now, bat_capacity, bat_temp, bat_volt, bat_status, bat_curr, chg_stage);
     fclose(f);
     last_save = now;
     if (sess_active && now - session_30s >= 30) {
         session_30s = now;
-        FILE *sf = fopen("/data/adb/battery-manager/session.jsonl", "a");
+        /* ★ v1.5.0: 增加 电流/电压/阶段，供充电曲线图使用
+           i=电流mA  v=电压mV  st=阶段(0未充/1预充/2恒流/3恒压/4充满)
+           ★ 同时做滚动截断：session.jsonl 是纯追加文件，长期会无限增长
+             （每 30s 一条，一年 ≈ 100 万行 / 90MB）。
+             超过 512KB 时保留尾部 256KB（约 2800 条 ≈ 23 小时采样）。 */
+        FILE *sf = fopen(SESSION_FILE, "a");
         if (sf) {
-            fprintf(sf, "{\"t\":%ld,\"c\":%d,\"mah\":%d,\"tmp\":%d}\n",
-                (long)now, bat_capacity, sess_mah, bat_temp);
+            fprintf(sf, "{\"t\":%ld,\"c\":%d,\"mah\":%d,\"tmp\":%d,\"i\":%d,\"v\":%d,\"st\":%d}\n",
+                (long)now, bat_capacity, sess_mah, bat_temp,
+                bat_curr, bat_volt, chg_stage);
             fclose(sf);
+
+            struct stat sst;
+            if (stat(SESSION_FILE, &sst) == 0 && sst.st_size > 512 * 1024) {
+                FILE *rf = fopen(SESSION_FILE, "r");
+                if (rf) {
+                    fseek(rf, -256 * 1024, SEEK_END);
+                    long tail_len = sst.st_size - ftell(rf);
+                    char *tail = malloc(tail_len + 1);
+                    if (tail) {
+                        size_t rd = fread(tail, 1, tail_len, rf);
+                        tail[rd] = '\0';
+                        fclose(rf);
+                        /* 跳过残行，保证 JSONL 每行完整 */
+                        char *first_nl = strchr(tail, '\n');
+                        FILE *wf = fopen(SESSION_FILE, "w");
+                        if (wf && first_nl) {
+                            fwrite(first_nl + 1, 1, strlen(first_nl + 1), wf);
+                            fclose(wf);
+                        } else if (wf) fclose(wf);
+                        free(tail);
+                    } else fclose(rf);
+                }
+            }
         }
     }
     if (!sess_active) session_30s = 0;
+}
+
+/* ★ v1.5.0: 读 session.jsonl 尾部的最近 N 条，输出 JSON 数组
+   （供 App 画充电曲线：电量/电流/电压/温度/阶段 随时间）
+   max_lines 上限 2000，防止一次拉爆内存。 */
+static char *session_json(int max_lines) {
+    FILE *f = fopen(SESSION_FILE, "r");
+    if (!f) return strdup("[]");
+    fseek(f, 0, SEEK_END); long sz = ftell(f); rewind(f);
+    if (sz <= 0) { fclose(f); return strdup("[]"); }
+    /* 每行约 90 字节，只回读够用的尾部 */
+    long want = (long)max_lines * 100;
+    long start = (sz > want) ? sz - want : 0;
+    fseek(f, start, SEEK_SET);
+    char *buf = malloc(sz - start + 1);
+    if (!buf) { fclose(f); return strdup("[]"); }
+    size_t rd = fread(buf, 1, sz - start, f); fclose(f);
+    buf[rd] = '\0';
+    /* start 落在行中间时跳过残行 */
+    char *p0 = buf;
+    if (start > 0) {
+        char *nl = strchr(buf, '\n');
+        if (nl) p0 = nl + 1;
+    }
+    int nl_count = 0;
+    for (char *c = p0; *c; c++) if (*c == '\n') nl_count++;
+    int skip = nl_count > max_lines ? nl_count - max_lines : 0;
+    char *startp = p0; int seen = 0;
+    for (char *c = p0; *c && seen < skip; c++) if (*c == '\n') { startp = c + 1; seen++; }
+    for (char *c = startp; *c; c++) if (*c == '\n') *c = ',';
+    size_t blen = strlen(startp);
+    if (blen > 0 && startp[blen-1] == ',') startp[blen-1] = '\0', blen--;
+    char *out = malloc(blen + 3);
+    if (!out) { free(buf); return strdup("[]"); }
+    out[0] = '[';
+    memcpy(out + 1, startp, blen);
+    out[blen + 1] = ']'; out[blen + 2] = '\0';
+    free(buf);
+    return out;
+}
+
+static void handle_curve(int fd, const char *body) {
+    (void)body;
+    char *j = session_json(1440);   /* 30s 采样 → 720 条/6h；1440 上限约 12h */
+    send_resp(fd, 200, "application/json", j);
+    free(j);
+}
+
+static void handle_sessions(int fd, const char *body) {
+    (void)body;
+    /* 从 session.jsonl 里按时间间隔 >30min 切分，生成会话索引 */
+    FILE *f = fopen(SESSION_FILE, "r");
+    if (!f) { send_resp(fd, 200, "application/json", "[]"); return; }
+    char line[512];
+    long prev_t = 0, seg_start = 0;
+    int seg_cap0 = -1, seg_mah = 0, seg_n = 0, seg_capmax = -1;
+    char *out = malloc(16384);
+    if (!out) { fclose(f); send_resp(fd, 200, "application/json", "[]"); return; }
+    int off = 0;
+    off += snprintf(out + off, 16384 - off, "[");
+    int first = 1;
+    while (fgets(line, sizeof(line), f)) {
+        long t = 0; int c = -1, mah = 0;
+        char *q = strstr(line, "\"t\":");
+        if (q) t = atol(q + 4);
+        q = strstr(line, "\"c\":");
+        if (q) c = atoi(q + 4);
+        q = strstr(line, "\"mah\":");
+        if (q) mah = atoi(q + 6);
+        if (t == 0) continue;
+        if (prev_t && t - prev_t > 1800) {   /* 间隔 >30min 视为新会话 */
+            if (seg_n > 2 && off < 16000)
+                off += snprintf(out + off, 16384 - off,
+                    "%s{\"t\":%ld,\"dur\":%ld,\"cap0\":%d,\"capmax\":%d,\"mah\":%d,\"n\":%d}",
+                    first ? "" : ",", seg_start, prev_t - seg_start,
+                    seg_cap0, seg_capmax, seg_mah, seg_n);
+            first = 0;
+            seg_start = t; seg_cap0 = c; seg_capmax = c; seg_mah = mah; seg_n = 1;
+        } else {
+            if (seg_n == 0) { seg_start = t; seg_cap0 = c; }
+            if (c > seg_capmax) seg_capmax = c;
+            seg_mah = mah; seg_n++;
+        }
+        prev_t = t;
+    }
+    if (seg_n > 2 && off < 16000)
+        off += snprintf(out + off, 16384 - off,
+            "%s{\"t\":%ld,\"dur\":%ld,\"cap0\":%d,\"capmax\":%d,\"mah\":%d,\"n\":%d}",
+            first ? "" : ",", seg_start, prev_t - seg_start,
+            seg_cap0, seg_capmax, seg_mah, seg_n);
+    fclose(f);
+    snprintf(out + off, 16384 - off, "]");
+    send_resp(fd, 200, "application/json", out);
+    free(out);
+}
+
+static void handle_calibrate(int fd, const char *body, const char *method) {
+    if (!strcmp(method, "POST") && body) {
+        if (strstr(body, "start"))      cal_start();
+        else if (strstr(body, "abort")) cal_abort("用户主动中止");
+    }
+    char *j = cal_status_json();
+    send_resp(fd, 200, "application/json", j);
+    free(j);
 }
 
 static char *history_json(void) {
@@ -1425,6 +1763,10 @@ static void handle_client(int fd) {
     if (!strcmp(uri, "/api/update-check")) { handle_update_check(fd); return; }
     /* v1.3.1: /api/update-apply 已移除（改用 APatch 管理器的 updateJson 渠道）*/
     if (!strcmp(uri, "/api/history")) { char *j = history_json(); send_resp(fd, 200, "application/json", j); free(j); return; }
+    /* ★ v1.5.0 充电曲线 & 校准 */
+    if (!strcmp(uri, "/api/curve"))     { handle_curve(fd, body); return; }
+    if (!strcmp(uri, "/api/sessions"))  { handle_sessions(fd, body); return; }
+    if (!strcmp(uri, "/api/calibrate")) { handle_calibrate(fd, body, method); return; }
     if (!strcmp(method, "GET")) serve_file(fd, uri);
     else send_resp(fd, 405, "text/plain", "Method Not Allowed");
 }
@@ -1436,6 +1778,7 @@ int main(void) {
     update_battery();
     /* ★ v1.4.0: 抓住未被污染的原厂恒压点（务必在任何 apply_* 之前） */
     snapshot_orig_cv();
+    load_cal_state();   /* ★ v1.5.0: 恢复校准状态机（重启不丢） */
     /* 探测旁路支持 */
     FILE *bf = popen("ls /sys/class/power_supply/*/bypass_charger /sys/class/power_supply/*/charge_bypass /sys/class/power_supply/*/bypass /sys/class/power_supply/*/bypass_mode /sys/class/power_supply/*/bypass_charging /sys/class/power_supply/*/charging_bypass /sys/class/power_supply/*/smb_bypass /sys/class/power_supply/*/main_bypass /sys/class/power_supply/*/batt_bypass /sys/class/power_supply/*/charge_control_bypass 2>/dev/null | head -1", "r");
     if (bf) { char bb[64]; if (fgets(bb, sizeof(bb), bf)) { size_t bl = strlen(bb); while (bl > 0 && (bb[bl-1]=='\n'||bb[bl-1]==' ')) bb[--bl]='\0'; if (bl>0) { bypass_supported = 1; strncpy(bypass_node, bb, sizeof(bypass_node)-1); } } pclose(bf); }
@@ -1476,6 +1819,18 @@ int main(void) {
                导致 sess_min/sess_mah/stats_* 恒为 0 ——
                v1.3.1 引入的 charge_counter 精确统计实际从未生效。*/
             handle_charging_state();
+            /* ★ v1.5.0: 先算阶段（push_history 会带上），再跑校准状态机 */
+            {
+                int st = detect_charge_stage();
+                if (st != chg_stage) {
+                    if (st == 3) log_event("进入恒压(CV)阶段");
+                    else if (st == 2 && chg_stage != 2) log_event("进入恒流(CC)阶段");
+                    chg_stage = st;
+                }
+                cal_tick();
+                prev_curr = bat_curr;
+                prev_volt = bat_volt;
+            }
             push_history();
             apply_control(); apply_power_path(); apply_cv_and_current(); apply_native_night(); apply_night_mode(); high_temp_alert();
         }
