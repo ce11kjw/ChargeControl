@@ -2,7 +2,8 @@ name: Build Module
 
 on:
   push:
-    tags: ['v*']
+    branches: [ main ]
+    paths-ignore: ['**.md', 'LICENSE']
   workflow_dispatch:
 
 permissions:
@@ -24,43 +25,70 @@ jobs:
         run: |
           V=$(grep '^version=' module/module.prop | cut -d= -f2)
           C=$(grep '^versionCode=' module/module.prop | cut -d= -f2)
+          [ -n "$V" ] || { echo "::error::module.prop 缺 version"; exit 1; }
+          [ -n "$C" ] || { echo "::error::module.prop 缺 versionCode"; exit 1; }
           echo "version=$V" >> $GITHUB_OUTPUT
-          echo "code=$C" >> $GITHUB_OUTPUT
+          echo "code=$C"    >> $GITHUB_OUTPUT
           echo "→ $V ($C)"
 
       - name: Build battd (aarch64 static)
         run: |
-          aarch64-linux-gnu-gcc -static -O2 -s -o src/battd src/battd.c
+          aarch64-linux-gnu-gcc -static -O2 -s -Wall \
+            -o src/battd src/battd.c
           file src/battd
+          file src/battd | grep -q aarch64 || { echo "::error::不是 aarch64"; exit 1; }
 
       - name: Build module zip
         run: |
+          mkdir -p module/bin
           cp src/battd module/bin/battd
-          rm -f "ChargeControl-${{ steps.ver.outputs.version }}.zip"
-          cd module && zip -r "../ChargeControl-${{ steps.ver.outputs.version }}.zip" . \
-            -x '*.bak' -x '*.v*' -x '*.old'
-          cd ..
+          chmod 755 module/bin/battd
+          # 模块 zip 内固定命名 ChargeControl.zip，配合 update.json 的
+          # releases/latest/download/ChargeControl.zip 永久链接
+          rm -f ChargeControl.zip
+          ( cd module && zip -r ../ChargeControl.zip . \
+              -x '*.bak' -x '*.v*' -x '*.old' -x '*.o' )
+          ls -l ChargeControl.zip
 
       - name: Verify
         run: |
-          ZIP="ChargeControl-${{ steps.ver.outputs.version }}.zip"
-          unzip -l "$ZIP"
-          sha256sum "$ZIP" | tee "$ZIP.sha256"
-          file module/bin/battd | grep -q aarch64 && echo "✅ aarch64 OK"
+          echo "=== zip 内容 ==="
+          unzip -l ChargeControl.zip
+          for f in module.prop service.sh customize.sh bin/battd; do
+            unzip -l ChargeControl.zip | grep -q "$f" \
+              || { echo "::error::zip 缺少 $f"; exit 1; }
+          done
+          sha256sum ChargeControl.zip | tee ChargeControl.zip.sha256
+          echo "✅ 校验通过"
+
+      - name: Check tag vs module.prop
+        id: tagchk
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VER="${{ steps.ver.outputs.version }}"
+          if [ "$TAG" != "$VER" ]; then
+            echo "::error::tag ($TAG) 与 module.prop version ($VER) 不一致"
+            exit 1
+          fi
+          echo "✅ tag 与 version 一致: $TAG"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ChargeControl-${{ steps.ver.outputs.version }}
           path: |
-            ChargeControl-*.zip
-            ChargeControl-*.zip.sha256
+            ChargeControl.zip
+            ChargeControl.zip.sha256
 
-      - name: Create / update Release
+      - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ steps.ver.outputs.version }}
+          tag_name: ${{ steps.ver.outputs.version }}
           files: |
-            ChargeControl-*.zip
-            ChargeControl-*.zip.sha256
-          generate_release_notes: false
+            ChargeControl.zip
+            ChargeControl.zip.sha256
+          generate_release_notes: true
+          draft: false

@@ -1,3 +1,12 @@
+# 编译产物
 *.o
 src/battd
+module/bin/battd
+# 打包产物（由 CI 生成，不进仓库）
+*.zip
+*.zip.sha256
+# 备份
 *.bak
+*.bak-*
+*.old
+*.v1.*
