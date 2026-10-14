@@ -10,6 +10,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -21,6 +22,7 @@ import com.ce11kjw.chargecontrol.HapticUtils
 import com.ce11kjw.chargecontrol.ui.charge.ChargeControlViewModel
 import com.ce11kjw.chargecontrol.ui.components.charts.LineChart
 import com.ce11kjw.chargecontrol.ui.theme.*
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -39,6 +41,7 @@ fun ChargingCurveScreen(
 ) {
     val ctx = LocalContext.current
     val scroll = rememberScrollState()
+    val scope = rememberCoroutineScope()
     val curve = vm.curve
     val sessions = vm.sessions
 
@@ -117,7 +120,7 @@ fun ChargingCurveScreen(
                     Spacer(Modifier.height(10.dp))
                     TextButton(onClick = {
                         HapticUtils.lightTap(ctx)
-                        vm.refreshCurve()
+                        scope.launch { vm.refreshCurve() }
                     }) { Text("立即刷新", fontSize = 13.sp, color = NeonCyan) }
                 }
             }

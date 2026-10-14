@@ -104,7 +104,8 @@ fun DeviceInfoScreen(
             Row2("面板类型", g("dev_display_type"), "—")
             Row2("色深", g("dev_display_bit"), "—")
             Row2("色域", g("dev_display_gamut"), "—")
-            val w = gi("dev_screen_w", -1), h = gi("dev_screen_h", -1)
+            val w = gi("dev_screen_w", -1)
+            val h = gi("dev_screen_h", -1)
             Row2("分辨率", if (w > 0 && h > 0) "${w} × ${h}" else "—", "—")
             val dpi = gi("dev_screen_density", -1)
             Row2("屏幕密度", if (dpi > 0) "$dpi dpi" else "—", "—")
@@ -129,7 +130,8 @@ fun DeviceInfoScreen(
         InfoCard("存储规格") {
             Row2("闪存类型", g("dev_storage_type"), "—")
             Row2("加速特性", g("oem_storage_boost"), "—")
-            val st = gi("storage_total", -1), sf = gi("storage_free", -1)
+            val st = gi("storage_total", -1)
+            val sf = gi("storage_free", -1)
             Row2("/data", if (st > 0) "${fmtMb(st)}（可用 ${fmtMb(sf)}）" else "—", "—")
             // 分区列表
             s?.optJSONArray("parts")?.let { arr ->
