@@ -11,6 +11,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <sys/statfs.h>
 #include <sys/select.h>
 
@@ -89,6 +90,45 @@ static int safety_timer_expired = -1, calibrate = -1;
 static int constant_charge_current = -1, constant_charge_voltage = -1;
 static int capacity_error_margin = -1, time_to_empty = -1, bat_present = -1, internal_resistance = -1;
 static int mem_total = -1, mem_avail = -1, mem_free = -1;
+/* ═══ v1.6.0 为 App 提供完整系统信息（App 改为纯模块取数，不再自读 sysfs）═══ */
+#define MAX_CORES 16
+static int  cpu_freq_khz[MAX_CORES] = {0};
+static int  cpu_freq_max_khz[MAX_CORES] = {0};
+static int  cpu_freq_min_khz[MAX_CORES] = {0};
+static char cpu_arch[64] = "";
+static char cpu_abi[128] = "";
+static char cpu_cache_l1[32] = "", cpu_cache_l2[32] = "", cpu_cache_l3[32] = "";
+static int  cpu_usage_total = -1;
+static long cpu_ticks_prev_total = 0, cpu_ticks_prev_idle = 0;
+static int  cpu_deep_sleep_pct = -1;
+static int  cpu_idle_pct = -1;
+
+static int mem_buffers = -1, mem_cached = -1, mem_sreclaim = -1, mem_sunreclaim = -1;
+static int mem_shmem = -1, mem_pagetables = -1, mem_kernelstack = -1, mem_vmallocused = -1;
+static int mem_swap_total = -1, mem_swap_free = -1;
+static int mem_zram_orig = -1, mem_zram_compr = -1, mem_zram_used = -1;
+static int mem_slab = -1, mem_mapped = -1;
+
+#define MAX_PARTS 8
+static int  part_count = 0;
+static char part_mount[MAX_PARTS][48];
+static long part_total_mb[MAX_PARTS], part_free_mb[MAX_PARTS];
+
+static int  sys_sdk_level = -1;
+static char sys_android_ver[32] = "", sys_build_display[64] = "", sys_security_patch[32] = "";
+static char sys_bootloader[64] = "";
+static char sys_soc_vendor[64] = "", sys_soc_model[64] = "";
+/* ═══ v1.6.0 GPU（供 App GPU 页走模块取数）═══ */
+static char gpu_model[128] = "";
+static char gpu_vendor[64] = "";
+static int  gpu_freq_khz = -1, gpu_freq_min_khz = -1, gpu_freq_max_khz = -1;
+static char gpu_governor[64] = "", gpu_avail_gov[192] = "";
+static int  gpu_load_pct = -1;          /* GPU 负载 % ×10 */
+static char gpu_load_src[32] = "";
+static int  gpu_temp_c = -1;            /* 复用 thermal 已采集的 gpu_temp */
+static int  gpu_throttled = 0;
+
+
 static int storage_total = -1, storage_free = -1;
 static int uptime_secs = -1, cpu_cores = -1;
 static char kernel_ver[128] = "", cpu_model[128] = "", device_model[128] = "";
@@ -279,10 +319,31 @@ static void slow_update_battery(void) {
             char *sp = strstr(kernel_ver, "version "); if (sp) memmove(kernel_ver, sp+8, strlen(sp)-7);
             char *nl = strchr(kernel_ver, '\n'); if (nl) *nl = 0;
         } fclose(vf); }
+        /* CPU 型号：ARM 在 "Hardware" 行，x86 在 "model name" 行（v1.6.0 补兼容） */
         FILE *cif = fopen("/proc/cpuinfo", "r");
-        if (cif) { char cl[256]; while (fgets(cl, sizeof(cl), cif)) {
-            char *p = strstr(cl, "Hardware"); if (p) { char *c = strchr(p, ':'); if (c) { c++; while(*c==' ') c++; snprintf(cpu_model, sizeof(cpu_model), "%s", c); break; } }
-        } fclose(cif); }
+        if (cif) {
+            char cl[256];
+            while (fgets(cl, sizeof(cl), cif)) {
+                char *p = strstr(cl, "Hardware");
+                if (!p) p = strstr(cl, "model name");
+                if (p) {
+                    char *c = strchr(p, ':');
+                    if (c) {
+                        c++;
+                        while (*c == ' ') c++;
+                        char *nl = strchr(c, '\n'); if (nl) *nl = 0;
+                        snprintf(cpu_model, sizeof(cpu_model), "%s", c);
+                        break;
+                    }
+                }
+            }
+            fclose(cif);
+        }
+        /* 每核频率兜底：部分平台没有 cpufreq，读 scaling_cur_freq 失败时试 cpuinfo_cur_freq */
+        if (cpu_freq_khz[0] == 0) {
+            int v2 = read_int("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq");
+            if (v2 > 0) cpu_freq_khz[0] = v2;
+        }
         FILE *dmf = fopen("/proc/device-tree/model", "r");
         if (dmf) { if (fgets(device_model, sizeof(device_model), dmf)) {
             char *nl = strchr(device_model, '\n'); if (nl) *nl = 0;
@@ -391,6 +452,397 @@ static void update_temps(void) {
 static void handle_charging_state(void);
 static void send_resp(int fd, int code, const char *ctype, const char *body);  /* v1.5.0 前向声明 */
 static void cal_log(const char *msg);                                          /* v1.5.0 前向声明 */
+/* ═══════════════════════════════════════════════════════════
+   v1.6.0 系统信息采集（供 App 走模块取数，替代 App 自读 sysfs）
+   全部字段来自 /proc 与 /sys，root 权限下可见性优于 App。
+   ═══════════════════════════════════════════════════════════ */
+
+/* CPU 每核频率 + 架构 + 缓存（30s 节流） */
+static void update_cpu_detail(void) {
+    time_t tn = time(NULL);
+    static time_t last = 0;
+    if (tn - last < 30) return;
+    last = tn;
+
+    /* 每核频率 */
+    int found_max = 0;
+    for (int i = 0; i < MAX_CORES && i < 32; i++) {
+        char pth[160];
+        snprintf(pth, sizeof(pth), "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq", i);
+        int v = read_int(pth);
+        if (v > 0) cpu_freq_khz[i] = v;
+        snprintf(pth, sizeof(pth), "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", i);
+        if ((v = read_int(pth)) > 0) { cpu_freq_max_khz[i] = v; found_max = 1; }
+        snprintf(pth, sizeof(pth), "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_min_freq", i);
+        if ((v = read_int(pth)) > 0) cpu_freq_min_khz[i] = v;
+    }
+    (void)found_max;
+
+    /* 架构与 ABI */
+    read_str("/proc/sys/kernel/arch", cpu_arch, sizeof(cpu_arch));
+    if (cpu_arch[0] == 0) {
+        /* 退路：从 /proc/cpuinfo 的 CPU architecture 行取 */
+        FILE *f = fopen("/proc/cpuinfo", "r");
+        if (f) {
+            char l[256];
+            while (fgets(l, sizeof(l), f)) {
+                char *p = strstr(l, "CPU architecture");
+                if (p) {
+                    char *c = strchr(p, ':'); if (c) { c++; while (*c == ' ') c++;
+                        int n = 0; while (c[n] && c[n] != '\n' && n < 63) { cpu_arch[n] = c[n]; n++; }
+                        cpu_arch[n] = 0; }
+                    break;
+                }
+            }
+            fclose(f);
+        }
+    }
+
+    /* 缓存（ARM 上是 indexN/size，x86 是 cpu0/cache/indexN/size） */
+    FILE *f = fopen("/sys/devices/system/cpu/cpu0/cache/index0/size", "r");
+    if (f) { if (fgets(cpu_cache_l1, sizeof(cpu_cache_l1), f)) { char *nl = strchr(cpu_cache_l1,'\n'); if (nl) *nl = 0; } fclose(f); }
+    f = fopen("/sys/devices/system/cpu/cpu0/cache/index2/size", "r");
+    if (f) { if (fgets(cpu_cache_l2, sizeof(cpu_cache_l2), f)) { char *nl = strchr(cpu_cache_l2,'\n'); if (nl) *nl = 0; } fclose(f); }
+    f = fopen("/sys/devices/system/cpu/cpu0/cache/index3/size", "r");
+    if (f) { if (fgets(cpu_cache_l3, sizeof(cpu_cache_l3), f)) { char *nl = strchr(cpu_cache_l3,'\n'); if (nl) *nl = 0; } fclose(f); }
+}
+
+/* 整机 CPU 使用率（两次 /proc/stat 差值）+ idle 占比 */
+static void update_cpu_usage(void) {
+    FILE *f = fopen("/proc/stat", "r");
+    if (!f) return;
+    char line[256];
+    if (fgets(line, sizeof(line), f)) {
+        long u = 0, n = 0, sy = 0, idle = 0, iow = 0, irq = 0, sirq = 0, steal = 0;
+        int got = sscanf(line, "cpu  %ld %ld %ld %ld %ld %ld %ld %ld",
+                         &u, &n, &sy, &idle, &iow, &irq, &sirq, &steal);
+        if (got >= 5) {
+            long total = u + n + sy + idle + iow + irq + sirq + steal;
+            if (cpu_ticks_prev_total > 0) {
+                long dt = total - cpu_ticks_prev_total;
+                long di = idle - cpu_ticks_prev_idle;
+                if (dt > 0) {
+                    cpu_usage_total = (int)((dt - di) * 1000 / dt);   /* ×10 */
+                    cpu_idle_pct    = (int)(di * 1000 / dt);
+                    /* 深度睡眠：iowait + idle 中属于深睡的部分无法直接测，
+                       这里用 idle 与 iowait 之和近似"总空闲"，深睡单独尝试 cpuidle */
+                }
+            }
+            cpu_ticks_prev_total = total;
+            cpu_ticks_prev_idle  = idle;
+        }
+    }
+    fclose(f);
+
+    /* 深度睡眠占比：读 cpuidle 各 state 的累计时间 */
+    static long sleep_prev = 0, sleep_total_prev = 0;
+    long sleep_sum = 0;
+    for (int c = 0; c < MAX_CORES && c < 8; c++) {
+        char pth[160];
+        snprintf(pth, sizeof(pth), "/sys/devices/system/cpu/cpu%d/cpuidle", c);
+        if (access(pth, R_OK) != 0) break;
+        for (int st = 2; st < 6; st++) {   /* state0/1 是浅睡，从 2 起算深睡 */
+            char p2[192];
+            snprintf(p2, sizeof(p2), "%s/state%d/time", pth, st);
+            int v = read_int(p2);
+            if (v > 0) sleep_sum += v;
+        }
+    }
+    if (sleep_sum > 0) {
+        FILE *up = fopen("/proc/uptime", "r");
+        double up_s = 0;
+        if (up) { if (fscanf(up, "%lf", &up_s) == 1) {} fclose(up); }
+        long now_total = (long)(up_s * 1000000);   /* 微秒 */
+        if (sleep_total_prev > 0) {
+            long ds = sleep_sum - sleep_prev;
+            long dtot = now_total - sleep_total_prev;
+            if (dtot > 0) cpu_deep_sleep_pct = (int)(ds * 1000 / dtot);
+        }
+        sleep_prev = sleep_sum;
+        sleep_total_prev = now_total;
+    }
+}
+
+/* 内存细分 + swap + zram */
+static void update_mem_detail(void) {
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (f) {
+        char l[256]; int v;
+        while (fgets(l, sizeof(l), f)) {
+            if (sscanf(l, "MemTotal: %d kB", &v) == 1) mem_total = v;
+            else if (sscanf(l, "MemAvailable: %d kB", &v) == 1) mem_avail = v;
+            else if (sscanf(l, "MemFree: %d kB", &v) == 1) mem_free = v;
+            else if (sscanf(l, "Buffers: %d kB", &v) == 1) mem_buffers = v;
+            else if (sscanf(l, "Cached: %d kB", &v) == 1) mem_cached = v;
+            else if (sscanf(l, "SReclaimable: %d kB", &v) == 1) mem_sreclaim = v;
+            else if (sscanf(l, "SUnreclaim: %d kB", &v) == 1) mem_sunreclaim = v;
+            else if (sscanf(l, "Shmem: %d kB", &v) == 1) mem_shmem = v;
+            else if (sscanf(l, "PageTables: %d kB", &v) == 1) mem_pagetables = v;
+            else if (sscanf(l, "KernelStack: %d kB", &v) == 1) mem_kernelstack = v;
+            else if (sscanf(l, "VmallocUsed: %d kB", &v) == 1) mem_vmallocused = v;
+            else if (sscanf(l, "SwapTotal: %d kB", &v) == 1) mem_swap_total = v;
+            else if (sscanf(l, "SwapFree: %d kB", &v) == 1) mem_swap_free = v;
+            else if (sscanf(l, "Slab: %d kB", &v) == 1) mem_slab = v;
+            else if (sscanf(l, "Mapped: %d kB", &v) == 1) mem_mapped = v;
+        }
+        fclose(f);
+    }
+    /* zram：取第一个 zram 块设备的 mm_stat */
+    FILE *z = fopen("/sys/block/zram0/mm_stat", "r");
+    if (z) {
+        long orig = 0, compr = 0, mem_used = 0;
+        if (fscanf(z, "%ld %ld %ld", &orig, &compr, &mem_used) == 3) {
+            mem_zram_orig = (int)(orig / 1024);
+            mem_zram_compr = (int)(compr / 1024);
+            mem_zram_used = (int)(mem_used / 1024);
+        }
+        fclose(z);
+    }
+}
+
+/* 存储分区（App 的"存储"页需要） */
+static void update_partitions(void) {
+    static const char *cands[] = {"/data", "/system", "/cache", "/vendor", "/metadata", "/storage/emulated/0", NULL};
+    part_count = 0;
+    for (int i = 0; cands[i] && part_count < MAX_PARTS; i++) {
+        struct statfs sf;
+        if (statfs(cands[i], &sf) != 0) continue;
+        snprintf(part_mount[part_count], sizeof(part_mount[0]), "%s", cands[i]);
+        part_total_mb[part_count] = (long)((long long)sf.f_blocks * sf.f_bsize / (1024*1024));
+        part_free_mb[part_count]  = (long)((long long)sf.f_bfree  * sf.f_bsize / (1024*1024));
+        part_count++;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   v1.6.0 GPU 采集
+   覆盖四类平台（与 App 的 GpuDataSource 探测路径对齐）：
+     1. 高通 Adreno: /sys/class/kgsl/kgsl-3d0/
+     2. ARM Mali:    /sys/class/devfreq/ 里的 mali 项 或 /proc/mali/
+     3. 联发科:      /proc/gpufreq/ 或 /sys/kernel/ged/
+     4. 通用:        扫描 /sys/class/devfreq/ 全部条目
+   ═══════════════════════════════════════════════════════════ */
+
+/* 判断 devfreq 目录名像不像 GPU */
+static int looks_like_gpu(const char *name) {
+    if (!name) return 0;
+    return strstr(name, "mali") || strstr(name, "gpu") || strstr(name, "kgsl")
+        || strstr(name, "gpufreq") || strstr(name, "ged") || strstr(name, "adreno");
+}
+
+/* 从指定 devfreq 目录读全套参数 */
+static int gpu_from_devfreq(const char *dir) {
+    char pth[256];
+    int got = 0;
+
+    snprintf(pth, sizeof(pth), "/sys/class/devfreq/%s/cur_freq", dir);
+    int v = read_int(pth);
+    if (v > 0) { gpu_freq_khz = v / 1000; got = 1; }
+
+    snprintf(pth, sizeof(pth), "/sys/class/devfreq/%s/max_freq", dir);
+    if ((v = read_int(pth)) > 0) gpu_freq_max_khz = v / 1000;
+
+    snprintf(pth, sizeof(pth), "/sys/class/devfreq/%s/min_freq", dir);
+    if ((v = read_int(pth)) > 0) gpu_freq_min_khz = v / 1000;
+
+    snprintf(pth, sizeof(pth), "/sys/class/devfreq/%s/governor", dir);
+    if (read_str(pth, gpu_governor, sizeof(gpu_governor)) > 0) { /* ok */ }
+
+    snprintf(pth, sizeof(pth), "/sys/class/devfreq/%s/available_governors", dir);
+    if (read_str(pth, gpu_avail_gov, sizeof(gpu_avail_gov)) > 0) { /* ok */ }
+
+    /* load：不同平台格式不同，可能是 "x y"（busy/total）或百分比 */
+    snprintf(pth, sizeof(pth), "/sys/class/devfreq/%s/load", dir);
+    FILE *f = fopen(pth, "r");
+    if (f) {
+        long a = 0, b = 0;
+        if (fscanf(f, "%ld %ld", &a, &b) == 2 && b > 0) {
+            gpu_load_pct = (int)(a * 1000 / b);
+            snprintf(gpu_load_src, sizeof(gpu_load_src), "devfreq");
+        } else if (fscanf(f, "%ld", &a) == 1 && a >= 0 && a <= 100) {
+            gpu_load_pct = (int)(a * 10);
+            snprintf(gpu_load_src, sizeof(gpu_load_src), "devfreq");
+        }
+        fclose(f);
+    }
+    return got;
+}
+
+static void update_gpu(void) {
+    time_t tn = time(NULL);
+    static time_t last = 0;
+    if (tn - last < 5) return;   /* 5s 刷新（频率/负载变化快） */
+    last = tn;
+
+    /* ── 1. 高通 Adreno（kgsl）── */
+    {
+        const char *bases[] = {
+            "/sys/class/kgsl/kgsl-3d0",
+            "/sys/devices/platform/kgsl-3d0.0/kgsl/kgsl-3d0",
+            "/sys/devices/soc/1c00000.qcom,kgsl-3d0/kgsl/kgsl-3d0",
+            "/sys/devices/virtual/kgsl/kgsl-3d0",
+            NULL
+        };
+        for (int i = 0; bases[i]; i++) {
+            char pth[256];
+            snprintf(pth, sizeof(pth), "%s/gpuclk", bases[i]);
+            int v = read_int(pth);
+            if (v > 0) {
+                gpu_freq_khz = v / 1000000;   /* Hz → kHz */
+                snprintf(gpu_model, sizeof(gpu_model), "Adreno");
+                snprintf(gpu_vendor, sizeof(gpu_vendor), "Qualcomm");
+                break;
+            }
+        }
+        if (gpu_freq_khz < 0) {
+            /* devfreq 子路径 */
+            for (int i = 0; bases[i]; i++) {
+                char pth[256];
+                snprintf(pth, sizeof(pth), "%s/devfreq/cur_freq", bases[i]);
+                int v = read_int(pth);
+                if (v > 0) {
+                    gpu_freq_khz = v / 1000;
+                    snprintf(gpu_model, sizeof(gpu_model), "Adreno");
+                    snprintf(gpu_vendor, sizeof(gpu_vendor), "Qualcomm");
+                    snprintf(pth, sizeof(pth), "%s/devfreq/max_freq", bases[i]);
+                    if ((v = read_int(pth)) > 0) gpu_freq_max_khz = v / 1000;
+                    snprintf(pth, sizeof(pth), "%s/devfreq/governor", bases[i]);
+                    read_str(pth, gpu_governor, sizeof(gpu_governor));
+                    break;
+                }
+            }
+        }
+        /* 负载：kgsl 的 gpu_busy_percentage 最准 */
+        if (gpu_load_pct < 0) {
+            for (int i = 0; bases[i]; i++) {
+                char pth[256];
+                snprintf(pth, sizeof(pth), "%s/gpu_busy_percentage", bases[i]);
+                int v = read_int(pth);
+                if (v >= 0 && v <= 100) {
+                    gpu_load_pct = v * 10;
+                    snprintf(gpu_load_src, sizeof(gpu_load_src), "kgsl");
+                    break;
+                }
+                /* gpubusy: "busy total" */
+                snprintf(pth, sizeof(pth), "%s/gpubusy", bases[i]);
+                FILE *f = fopen(pth, "r");
+                if (f) {
+                    long a = 0, b = 0;
+                    if (fscanf(f, "%ld %ld", &a, &b) == 2 && b > 0) {
+                        gpu_load_pct = (int)(a * 1000 / b);
+                        snprintf(gpu_load_src, sizeof(gpu_load_src), "kgsl");
+                        fclose(f);
+                        break;
+                    }
+                    fclose(f);
+                }
+            }
+        }
+    }
+
+    /* ── 2. Mali ── */
+    if (gpu_freq_khz < 0) {
+        /* /sys/class/misc/mali0/device/gpuinfo 给型号 */
+        char buf[128];
+        if (read_str("/sys/class/misc/mali0/device/gpuinfo", buf, sizeof(buf)) > 0) {
+            snprintf(gpu_model, sizeof(gpu_model), "%s", buf);
+            snprintf(gpu_vendor, sizeof(gpu_vendor), "ARM");
+        }
+        if (gpu_model[0] == 0) {
+            if (read_str("/proc/mali/gpu_clock", buf, sizeof(buf)) > 0) {
+                snprintf(gpu_model, sizeof(gpu_model), "Mali");
+                snprintf(gpu_vendor, sizeof(gpu_vendor), "ARM");
+            }
+        }
+    }
+
+    /* ── 3. MTK ── */
+    if (gpu_freq_khz < 0) {
+        int v = read_int("/proc/gpufreq/gpufreq_var");
+        if (v > 0) { gpu_freq_khz = v / 1000; }
+        if (gpu_freq_khz < 0 && read_int("/sys/module/ged/parameters/gpu_freq") > 0) {
+            gpu_freq_khz = read_int("/sys/module/ged/parameters/gpu_freq") / 1000;
+        }
+        if (gpu_freq_khz < 0) {
+            v = read_int("/proc/gpufreq/gpufreq_opp_freq");
+            if (v > 0) gpu_freq_khz = v / 1000;
+        }
+    }
+
+    /* ── 4. 通用 devfreq 扫描（最后兜底）── */
+    if (gpu_freq_khz < 0) {
+        DIR *d = opendir("/sys/class/devfreq");
+        if (d) {
+            struct dirent *e;
+            while ((e = readdir(d))) {
+                if (e->d_name[0] == '.') continue;
+                if (!looks_like_gpu(e->d_name)) continue;
+                /* 限制目录名长度，避免 snprintf 截断告警（devfreq 名通常 < 32 字符） */
+                char dname[64];
+                snprintf(dname, sizeof(dname), "%.63s", e->d_name);
+                if (gpu_from_devfreq(dname)) {
+                    if (gpu_model[0] == 0) snprintf(gpu_model, sizeof(gpu_model), "%.127s", e->d_name);
+                    break;
+                }
+            }
+            closedir(d);
+        }
+    }
+
+    /* 型号/厂商标注（若前面没识别出）*/
+    if (gpu_model[0] == 0) {
+        char buf[128];
+        if (read_str("/sys/kernel/gpu/gpu_model", buf, sizeof(buf)) > 0)
+            snprintf(gpu_model, sizeof(gpu_model), "%s", buf);
+    }
+
+    /* 节流判定：当前频率 < 最大频率的 70% */
+    gpu_throttled = (gpu_freq_khz > 0 && gpu_freq_max_khz > 0
+                     && gpu_freq_khz < gpu_freq_max_khz * 70 / 100) ? 1 : 0;
+}
+
+/* 系统属性：SDK / Android 版本 / 补丁级别 / bootloader / SoC */
+static void update_sys_props(void) {
+    time_t tn = time(NULL);
+    static time_t last = 0;
+    if (tn - last < 300) return;   /* 静态信息，5 分钟即可 */
+    last = tn;
+
+    /* __system_property_get 需要 <sys/system_properties.h>，为免依赖，
+       直接用 /system/build.prop + /vendor/build.prop + /proc/version 兜底 */
+    const char *props[] = {
+        "/system/build.prop",
+        "/vendor/build.prop",
+        "/product/build.prop",
+        "/odm/etc/build.prop",
+        "/system/odm/etc/build.prop",
+        NULL
+    };
+    for (int i = 0; props[i]; i++) {
+        FILE *f = fopen(props[i], "r");
+        if (!f) continue;
+        char l[512];
+        while (fgets(l, sizeof(l), f)) {
+            char *nl = strchr(l, '\n'); if (nl) *nl = 0;
+            char *eq = strchr(l, '='); if (!eq) continue;
+            *eq = 0; const char *k = l, *v = eq + 1;
+            if (!strcmp(k, "ro.build.version.sdk")) sys_sdk_level = atoi(v);
+            else if (!strcmp(k, "ro.build.version.release")) { strncpy(sys_android_ver, v, sizeof(sys_android_ver)-1); }
+            else if (!strcmp(k, "ro.build.display.id")) { strncpy(sys_build_display, v, sizeof(sys_build_display)-1); }
+            else if (!strcmp(k, "ro.build.version.security_patch")) { strncpy(sys_security_patch, v, sizeof(sys_security_patch)-1); }
+            else if (!strcmp(k, "ro.bootloader")) { strncpy(sys_bootloader, v, sizeof(sys_bootloader)-1); }
+            else if (!strcmp(k, "ro.product.board") || !strcmp(k, "ro.board.platform")) {
+                if (sys_soc_model[0] == 0) strncpy(sys_soc_model, v, sizeof(sys_soc_model)-1);
+            }
+            else if (!strcmp(k, "ro.soc.model") || !strcmp(k, "ro.soc.manufacturer")) {
+                if (!strcmp(k, "ro.soc.manufacturer")) strncpy(sys_soc_vendor, v, sizeof(sys_soc_vendor)-1);
+                else strncpy(sys_soc_model, v, sizeof(sys_soc_model)-1);
+            }
+        }
+        fclose(f);
+    }
+}
+
 static void update_battery(void) {
     char path[MAX_LINE]; int v;
     snprintf(path, sizeof(path), "%s/capacity", SYSFS);
@@ -1317,6 +1769,18 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
 }
 
 static void handle_status(int fd) {
+    /* ★ v1.6.0: 分区数组预生成（主 JSON 串用 %s 拼入） */
+    char parts_json[1024];
+    {
+        int off = 0;
+        off += snprintf(parts_json + off, sizeof(parts_json) - off, "[");
+        for (int i = 0; i < part_count && off < (int)sizeof(parts_json) - 120; i++) {
+            off += snprintf(parts_json + off, sizeof(parts_json) - off,
+                "%s{\"m\":\"%s\",\"t\":%ld,\"f\":%ld}",
+                i ? "," : "", part_mount[i], part_total_mb[i], part_free_mb[i]);
+        }
+        snprintf(parts_json + off, sizeof(parts_json) - off, "]");
+    }
     char body[8192];
     char cl_buf[512] = "";
     read_charge_logger_tail(cl_buf, sizeof(cl_buf));
@@ -1425,7 +1889,21 @@ static void handle_status(int fd) {
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
-        "\"mem_total\":%d,\"mem_avail\":%d,\"mem_free\":%d,\"storage_total\":%d,\"storage_free\":%d,\"uptime_secs\":%d,\"cpu_cores\":%d,\"kernel_ver\":\"%s\",\"cpu_model\":\"%s\",\"device_model\":\"%s\",\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
+        "\"mem_total\":%d,\"mem_avail\":%d,\"mem_free\":%d,\"storage_total\":%d,\"storage_free\":%d,\"uptime_secs\":%d,\"cpu_cores\":%d,\"kernel_ver\":\"%s\",\"cpu_model\":\"%s\",\"device_model\":\"%s\","
+        /* v1.6.0 系统字段 */
+        "\"cpu_usage\":%d,\"cpu_idle\":%d,\"cpu_deep_sleep\":%d,\"cpu_arch\":\"%s\",\"cpu_abi\":\"%s\","
+        "\"cpu_cache_l1\":\"%s\",\"cpu_cache_l2\":\"%s\",\"cpu_cache_l3\":\"%s\","
+        "\"cpu_freq_khz\":%d,\"cpu_freq_max_khz\":%d,\"cpu_freq_min_khz\":%d,"
+        "\"mem_buffers\":%d,\"mem_cached\":%d,\"mem_sreclaim\":%d,\"mem_sunreclaim\":%d,\"mem_shmem\":%d,"
+        "\"mem_pagetables\":%d,\"mem_kernelstack\":%d,\"mem_vmallocused\":%d,\"mem_slab\":%d,\"mem_mapped\":%d,"
+        "\"mem_swap_total\":%d,\"mem_swap_free\":%d,\"mem_zram_orig\":%d,\"mem_zram_compr\":%d,\"mem_zram_used\":%d,"
+        "\"sys_sdk_level\":%d,\"sys_android_ver\":\"%s\",\"sys_build_display\":\"%s\",\"sys_security_patch\":\"%s\","
+        "\"sys_bootloader\":\"%s\",\"sys_soc_vendor\":\"%s\",\"sys_soc_model\":\"%s\",\"part_count\":%d,\"parts\":%s,"
+        /* v1.6.0 GPU */
+        "\"gpu_model\":\"%s\",\"gpu_vendor\":\"%s\",\"gpu_freq_khz\":%d,\"gpu_freq_max_khz\":%d,\"gpu_freq_min_khz\":%d,"
+        "\"gpu_governor\":\"%s\",\"gpu_avail_gov\":\"%s\",\"gpu_load\":%d,\"gpu_load_src\":\"%s\",\"gpu_throttled\":%d,"
+        "\"gpu_temp_c\":%d,"
+        "\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d,\"x_pp\":%d,\"x_pp_ok\":%d,\"x_cv\":%d,\"x_cv_mv\":%d,\"x_cv_ok\":%d,\"x_lc\":%d,\"x_lc_ma\":%d,\"x_nn\":%d,\"x_nn_ok\":%d,\"x_bmin\":%d,\"native_night\":%d,\"cl_tail\":\"%s\"}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
@@ -1435,7 +1913,19 @@ static void handle_status(int fd) {
         power_mw, est_full_min, est_full_txt, health_degrade,
         usb_online, proto_name, pd_type, usb_power_max,
         control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
-        mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, cpu_model, device_model, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high,
+        mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, cpu_model, device_model,
+        /* ★ v1.6.0 新增系统字段 */
+        cpu_usage_total, cpu_idle_pct, cpu_deep_sleep_pct, cpu_arch, cpu_abi,
+        cpu_cache_l1, cpu_cache_l2, cpu_cache_l3,
+        cpu_freq_khz[0], cpu_freq_max_khz[0], cpu_freq_min_khz[0],
+        mem_buffers, mem_cached, mem_sreclaim, mem_sunreclaim, mem_shmem,
+        mem_pagetables, mem_kernelstack, mem_vmallocused, mem_slab, mem_mapped,
+        mem_swap_total, mem_swap_free, mem_zram_orig, mem_zram_compr, mem_zram_used,
+        sys_sdk_level, sys_android_ver, sys_build_display, sys_security_patch,
+        sys_bootloader, sys_soc_vendor, sys_soc_model, part_count, parts_json,
+        gpu_model, gpu_vendor, gpu_freq_khz, gpu_freq_max_khz, gpu_freq_min_khz,
+        gpu_governor, gpu_avail_gov, gpu_load_pct, gpu_load_src, gpu_throttled,
+        gpu_temp_c, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high,
         pd_pdo_count, pd_pdo_max_mv, pd_pdo_max_ma, pd_svid, pd_state,
         cc_limit_supported, cc_limit_val, power_path_en, jeita_index,
         soh_native, soh_first, soh_delta_x10, design_mah, chg_temp_limit,
@@ -1831,6 +2321,14 @@ int main(void) {
                 prev_curr = bat_curr;
                 prev_volt = bat_volt;
             }
+            /* ★ v1.6.0: 系统信息采集（供 App 走模块取数） */
+            update_cpu_detail();
+            update_cpu_usage();
+            update_mem_detail();
+            update_partitions();
+            update_sys_props();
+            update_gpu();
+            gpu_temp_c = gpu_temp;   /* 复用 thermal 已采的 GPU 温度给 App */
             push_history();
             apply_control(); apply_power_path(); apply_cv_and_current(); apply_native_night(); apply_night_mode(); high_temp_alert();
         }

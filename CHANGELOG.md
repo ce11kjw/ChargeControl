@@ -1,5 +1,53 @@
 # Changelog
 
+## v1.6.0 (2026-10-14)
+
+### ✨ 模块补齐系统信息（为 App 走模块取数铺路）
+目标是让 App 不再自己读 /proc /sys，统一由模块提供（模块有 root，
+可见性更好，且两边数据不会再出现不一致）。
+
+**新增 47 个 /api/status 字段：**
+
+- **CPU（11 个）**
+  `cpu_usage` / `cpu_idle` / `cpu_deep_sleep`（整机使用率、空闲率、深度睡眠占比，均为 ×10 定点）
+  `cpu_arch` / `cpu_model`（ARM 读 Hardware 行，x86 读 model name 行）
+  `cpu_cache_l1/l2/l3`（读 /sys/.../cpu0/cache/indexN/size）
+  `cpu_freq_khz` / `cpu_freq_max_khz` / `cpu_freq_min_khz`（cpufreq，带 cpuinfo_cur_freq 兜底）
+- **内存（16 个）**
+  `mem_buffers` / `mem_cached` / `mem_sreclaim` / `mem_sunreclaim` / `mem_shmem`
+  `mem_pagetables` / `mem_kernelstack` / `mem_vmallocused` / `mem_slab` / `mem_mapped`
+  `mem_swap_total` / `mem_swap_free`
+  `mem_zram_orig` / `mem_zram_compr` / `mem_zram_used`（读 /sys/block/zram0/mm_stat）
+- **GPU（11 个）** — 四平台全覆盖
+  `gpu_model` / `gpu_vendor` / `gpu_freq_khz` / `gpu_freq_max_khz` / `gpu_freq_min_khz`
+  `gpu_governor` / `gpu_avail_gov` / `gpu_load` / `gpu_load_src` / `gpu_throttled` / `gpu_temp_c`
+  探测顺序：高通 kgsl（gpuclk/gpu_busy_percentage/gpubusy）
+  → ARM Mali（/sys/class/misc/mali0/device/gpuinfo + devfreq）
+  → 联发科（/proc/gpufreq/、/sys/module/ged/）
+  → 通用 devfreq 目录扫描（按名字含 mali/gpu/kgsl/adreno 匹配）
+- **存储（1 个）** `parts` 数组：`[{m:挂载点, t:总MB, f:可用MB}]`
+  覆盖 /data /system /cache /vendor /metadata /storage/emulated/0，最多 8 个
+- **系统（8 个）**
+  `sys_sdk_level` / `sys_android_ver` / `sys_build_display` / `sys_security_patch`
+  `sys_bootloader` / `sys_soc_vendor` / `sys_soc_model`
+  读 /system、/vendor、/product、/odm 的 build.prop（5 分钟缓存，静态信息）
+
+### 🔧 实现要点
+- CPU 型号同时兼容 ARM（`Hardware` 行）与 x86（`model name` 行）
+- GPU 负载支持两种格式：`"busy total"`（算比值）与单值百分比
+- 节流判定：当前频率 < 最大频率 70% 视为被 DVFS 节流
+- 采集节流：CPU 详情/缓存 30s、系统属性 5min、GPU 5s（频率负载变化快）
+- JSON 体量仍只 ~3KB（App 每 3s 拉一次无压力）
+
+### 🧪 测试（x86 实机 + 假节点）
+- CPU 11/11 字段存在（8 核 / x86_64 / L1 32K / L2 1M / L3 28M）
+- 内存 16/16 存在（cached 756M / slab 342M / pagetables 87M / swap 512M）
+- 系统 9/9 存在（kernel_ver 正确解析）
+- 分区数组正确（/data 4348MB）
+- GPU：构造假 devfreq 节点，freq 800MHz / max 1000MHz / governor / 负载 45% /
+  节流判定 全部正确
+- 编译 -Wall -Wextra 零警告
+
 ## v1.5.0 (2026-10-14)
 
 ### ✨ 新增：充电曲线记录
