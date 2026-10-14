@@ -10,3 +10,5 @@ module/bin/battd
 *.bak-*
 *.old
 *.v1.*
+*.v14bak
+*.v1*bak
