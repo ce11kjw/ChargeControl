@@ -35,6 +35,7 @@
     <string name="tab_network">Network</string>
     <string name="tab_gps">GPS</string>
     <string name="tab_sensors">Sensors</string>
+    <string name="tab_charge">Charge</string>
     <string name="tab_device">Details</string>
 
     <!-- ═══ Settings 设置 ═══ -->

@@ -250,6 +250,7 @@ private val topTabIcons = listOf(
     R.drawable.ic_cyber_gpu,
     R.drawable.ic_cyber_memory,
     R.drawable.ic_cyber_battery,
+    R.drawable.ic_cyber_charge,
     R.drawable.ic_cyber_network,
     R.drawable.ic_cyber_gps,
     R.drawable.ic_cyber_sensors,
@@ -265,6 +266,7 @@ private fun rememberTopTabs(): List<TopTabItem> {
         stringResource(R.string.tab_gpu),
         stringResource(R.string.tab_memory),
         stringResource(R.string.tab_battery),
+        stringResource(R.string.tab_charge),
         stringResource(R.string.tab_network),
         stringResource(R.string.tab_gps),
         stringResource(R.string.tab_sensors),
@@ -927,12 +929,13 @@ private fun MainTabs(
                 2 -> GpuScreen()
                 3 -> MemoryScreen()
                 4 -> BatteryScreen()
-                5 -> NetworkScreen()
-                6 -> GpsScreen()
-                7 -> SensorsScreen(
+                5 -> com.rb.cybermonitorpro.ui.charge.ChargeControlScreen()
+                6 -> NetworkScreen()
+                7 -> GpsScreen()
+                8 -> SensorsScreen(
                     onNavigateToSensor = onOpenSensorDetail
                 )
-                8 -> DeviceScreen(onOpenHdrLab = onOpenHdrLab)
+                9 -> DeviceScreen(onOpenHdrLab = onOpenHdrLab)
             }
             } // end StaggeredPageProvider (per-page)
         }

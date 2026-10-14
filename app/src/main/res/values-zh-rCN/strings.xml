@@ -740,6 +740,7 @@
     <string name="tab_network">网络</string>
     <string name="tab_gps">GPS</string>
     <string name="tab_sensors">传感器</string>
+    <string name="tab_charge">充电</string>
     <string name="tab_device">详情</string>
 
     <!-- Settings 设置 -->
