@@ -7,7 +7,7 @@
   翻译术语遵循硬件监控领域标准：CPU/GPU/RAM/SWAP/PCIe/ABI 等保持英文缩写
 -->
 <resources>
-    <string name="app_name">System Monitor</string>
+    <string name="app_name">ChargeControl</string>
 
     <!-- ═══ Common 通用 ═══ -->
     <string name="common_settings">Settings</string>
@@ -65,7 +65,7 @@
     <string name="settings_nightlight_bar_desc">Independent watch-lume edge flash bar; requires TurboXDR intensity to set brightness</string>
     <string name="settings_nightlight_bar_on">On</string>
     <string name="settings_nightlight_bar_off">Off</string>
-    <string name="settings_app_name">Cyber Android Monitor Pro</string>
+    <string name="settings_app_name">ChargeControl</string>
     <string name="settings_app_version">v6.0.606.0</string>
     <string name="settings_app_tech">Kotlin 2.2.10 · Compose · Bat Theme</string>
     <string name="settings_app_author">by Rickeal-Boss</string>

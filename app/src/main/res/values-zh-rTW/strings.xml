@@ -775,7 +775,7 @@
     <string name="settings_nightlight_bar_desc">獨立的全螢幕邊緣夜光條開關；亮度由 TurboXDR 強度滑桿統一控制</string>
     <string name="settings_nightlight_bar_on">已開啟</string>
     <string name="settings_nightlight_bar_off">已關閉</string>
-    <string name="settings_app_name">Cyber Android Monitor Pro</string>
+    <string name="settings_app_name">ChargeControl</string>
     <string name="settings_app_version">v6.0.606.0</string>
     <string name="settings_app_tech">Kotlin 2.2.10 · Compose · Bat Theme</string>
     <string name="settings_app_author">by Rickeal-Boss</string>
