@@ -742,11 +742,7 @@
     <string name="tab_gpu">GPU</string>
     <string name="tab_memory">記憶體</string>
     <string name="tab_battery">電池</string>
-    <string name="tab_network">網路</string>
-    <string name="tab_gps">GPS</string>
-    <string name="tab_sensors">感測器</string>
     <string name="tab_charge">充電</string>
-    <string name="tab_device">詳細資料</string>
 
     <!-- Settings 設定 -->
     <string name="settings_title">設定</string>

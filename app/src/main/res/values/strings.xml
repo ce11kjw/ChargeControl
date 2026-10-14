@@ -32,11 +32,7 @@
     <string name="tab_gpu">GPU</string>
     <string name="tab_memory">Memory</string>
     <string name="tab_battery">Battery</string>
-    <string name="tab_network">Network</string>
-    <string name="tab_gps">GPS</string>
-    <string name="tab_sensors">Sensors</string>
     <string name="tab_charge">Charge</string>
-    <string name="tab_device">Details</string>
 
     <!-- ═══ Settings 设置 ═══ -->
     <string name="settings_title">Settings</string>

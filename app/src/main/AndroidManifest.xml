@@ -7,30 +7,11 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- WiFi 扫描 (Android 13+ 附近设备权限，声明 neverForLocation 免除位置关联) -->
-    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
-        android:usesPermissionFlags="neverForLocation" />
-
-    <!-- GPS 卫星信息（本地设备） -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
     <!-- 悬浮窗（本地叠加层） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- 电话状态（SIM信息，本地读取） -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-
-    <!-- 身体活动（API 29+ 步数传感器运行时权限, 未授权时步数计数器/步测器不出现在传感器列表） -->
-    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-
-    <!-- ★ 身体传感器（心率）— 2026-09-01 审查补漏:
-         传感器详情页直读 TYPE_HEART_RATE 全链路已有(列表项/详情健康卡/5min 聚合), 但权限从未声明,
-         导致该功能在全部版本上静默失效(API 23+ 心率传感器不出现在 getSensorList 或不返回样本)。
-         - 不加 maxSdkVersion: android.permission.health.* 是 Health Connect 专用, SensorManager
-           直读心率在全部版本(含 API 34+)都需要 BODY_SENSORS, 收窄会让高版本失效
-         - 不声明 BODY_SENSORS_BACKGROUND: 仅前台详情页使用, 声明反而触发 Play 后台身体数据政策审查 -->
-    <uses-permission android:name="android.permission.BODY_SENSORS" />
 
     <!-- 蓝牙（本地设备） -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />

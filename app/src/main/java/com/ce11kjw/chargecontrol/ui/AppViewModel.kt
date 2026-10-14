@@ -39,11 +39,6 @@ class AppViewModel(
         } catch (e: Throwable) { android.util.Log.w("AppVM", "间隔调整失败", e) }
     }
 
-    // 按 Tab 智能控制 GPS — 仅在 GPS/网络页面启用，离开时关闭以省电
-    fun setGpsEnabled(enabled: Boolean) {
-        if (enabled) repo.enableGps() else repo.disableGps()
-    }
-
     override fun onCleared() {
         super.onCleared()
         // ★ 采集真值表 (2026-09-01): 悬浮窗开启时 VM 清理不停采集 —

@@ -69,15 +69,10 @@ import com.ce11kjw.chargecontrol.ui.components.NeonHeaderDecoration
 import com.ce11kjw.chargecontrol.ui.components.neonBorderGlow
 import com.ce11kjw.chargecontrol.ui.cpu.CpuScreen
 import com.ce11kjw.chargecontrol.ui.dashboard.DashboardScreen
-import com.ce11kjw.chargecontrol.ui.device.DeviceScreen
 import com.ce11kjw.chargecontrol.ui.device.HdrLabScreen
 import com.ce11kjw.chargecontrol.ui.floatwindow.FloatingWindowScreen
-import com.ce11kjw.chargecontrol.ui.gps.GpsScreen
 import com.ce11kjw.chargecontrol.ui.gpu.GpuScreen
 import com.ce11kjw.chargecontrol.ui.memory.MemoryScreen
-import com.ce11kjw.chargecontrol.ui.network.NetworkScreen
-import com.ce11kjw.chargecontrol.ui.sensors.SensorDetailContent
-import com.ce11kjw.chargecontrol.ui.sensors.SensorsScreen
 import com.ce11kjw.chargecontrol.ui.settings.SettingsScreen
 import com.ce11kjw.chargecontrol.ui.effects.GlobalLightProvider
 import com.ce11kjw.chargecontrol.ui.effects.LocalSharedTransitionScope
@@ -185,18 +180,14 @@ class MainActivity : ComponentActivity() {
  * 按 API 过滤运行时权限清单；SYSTEM_ALERT_WINDOW 不并入 RequestMultiplePermissions
  * （它必须走 ACTION_MANAGE_OVERLAY_PERMISSION，悬浮窗页已按需引导）。
  * 首启页不拦截 Back：默认系统返回可退出，不阻塞用户。
+ * 注：GPS/网络/传感器页面已移除，相关定位与身体传感器权限不再请求。
  */
 @Composable
 private fun FirstLaunchPermissionScreen(onDismiss: () -> Unit) {
     val runtimePerms = remember {
         buildList {
-            add(Manifest.permission.ACCESS_FINE_LOCATION)
-            add(Manifest.permission.ACCESS_COARSE_LOCATION)
-            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            // 已移除 GPS / 网络 / 传感器页面，对应权限(定位/WiFi扫描/身体活动/身体传感器)一并去掉
             add(Manifest.permission.READ_PHONE_STATE)
-            if (Build.VERSION.SDK_INT >= 29) add(Manifest.permission.ACTIVITY_RECOGNITION)
-            // ★ 身体传感器(API 23+ 运行时权限): TYPE_HEART_RATE 直读需要; API 21/22 由清单声明装机即授
-            if (Build.VERSION.SDK_INT >= 23) add(Manifest.permission.BODY_SENSORS)
             if (Build.VERSION.SDK_INT >= 31) add(Manifest.permission.BLUETOOTH_CONNECT)
             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
         }.toTypedArray()
@@ -251,10 +242,6 @@ private val topTabIcons = listOf(
     R.drawable.ic_cyber_memory,
     R.drawable.ic_cyber_battery,
     R.drawable.ic_cyber_charge,
-    R.drawable.ic_cyber_network,
-    R.drawable.ic_cyber_gps,
-    R.drawable.ic_cyber_sensors,
-    R.drawable.ic_cyber_device,
 )
 
 /** Tab 标题国际化 — 在 Composable 内调用 stringResource 获取当前语言标题 */
@@ -266,11 +253,7 @@ private fun rememberTopTabs(): List<TopTabItem> {
         stringResource(R.string.tab_gpu),
         stringResource(R.string.tab_memory),
         stringResource(R.string.tab_battery),
-        stringResource(R.string.tab_charge),
-        stringResource(R.string.tab_network),
-        stringResource(R.string.tab_gps),
-        stringResource(R.string.tab_sensors),
-        stringResource(R.string.tab_device)
+        stringResource(R.string.tab_charge)
     )
     return titles.mapIndexed { i, title -> TopTabItem(title, topTabIcons[i]) }
 }
@@ -332,8 +315,6 @@ fun SystemMonitorApp(appViewModel: AppViewModel? = null) {
 
     var showSettings by remember { mutableStateOf(false) }
     var showFloatConfig by remember { mutableStateOf(false) }
-    var showSensorDetail by remember { mutableStateOf<Boolean>(false) }
-    var selectedSensorForDetail by remember { mutableStateOf<com.ce11kjw.chargecontrol.data.model.SensorItemInfo?>(null) }
     // ★ 2026-08-16: HDR 实验室（详情页二层 — 局部 EDR 真机验证）
     var showHdrLab by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -343,40 +324,8 @@ fun SystemMonitorApp(appViewModel: AppViewModel? = null) {
     val pagerState = rememberPagerState(pageCount = { topTabs.size })
     val scope = rememberCoroutineScope()
 
-    // GPS 智能开关状态 — 仅在需要时请求定位权限
-    var gpsTabActive by remember { mutableStateOf(false) }
 
-    val overlayVisible = showSettings || showFloatConfig || showSensorDetail || showHdrLab
-
-    // ── F5: 传感器详情统一主时钟 — Animatable<Float>, 0f=收起 1f=展开 ──
-    //   进入: animateTo(1f, ENTRY_SPRING) / 预测返回: snapTo 跟手 /
-    //   手势取消: animateTo(1f) 回弹 / 完成或返回键: animateTo(0f) 后移出组合。
-    //   渲染条件用 sensorAlive(keepAlive 守卫)，绝不读 sensorProgress.value 组合判断 → 零重组。
-    //   scrim(sensorScrim) 现已与容器进度解耦并独立排序: 打开时容器先展开→scrim 后到位; 关闭时 scrim 先解除→容器后收起。
-    val sensorProgress = remember { Animatable(0f) }
-    // scrim 主时钟, 与容器进度解耦: 打开时容器先展开→scrim 后到位; 关闭时 scrim 先解除→容器后收起
-    val sensorScrim = remember { Animatable(0f) }
-    var sensorAlive by remember { mutableStateOf(false) }
-
-    fun openSensorDetail(sensor: com.ce11kjw.chargecontrol.data.model.SensorItemInfo) {
-        selectedSensorForDetail = sensor
-        showSensorDetail = true
-        sensorAlive = true
-        scope.launch {
-            sensorProgress.animateTo(1f, CARD_ENTRY_SPEC)   // ① 先播放容器展开动画
-            sensorScrim.animateTo(1f, CARD_ENTRY_SPEC)      // ② 然后 scrim 到位 (主界面被完全隔绝)
-        }
-    }
-
-    fun closeSensorDetail() {
-        scope.launch {
-            sensorScrim.animateTo(0f, CARD_EXIT_SPEC)       // ① 先移除隔绝
-            sensorProgress.animateTo(0f, CARD_EXIT_SPEC)    // ② 再播容器收起动画
-            showSensorDetail = false
-            selectedSensorForDetail = null
-            sensorAlive = false
-        }
-    }
+    val overlayVisible = showSettings || showFloatConfig || showHdrLab
 
     // ── F5 → CAMP 修复: HDR 实验室覆盖层 — scrim + 卡片中心缩放(可打断过渡, 主时钟 hdrProgress) ──
     //   进入: animateTo(1f, CARD_ENTRY_SPEC) 550ms 中心锚定缩放展开;
@@ -384,7 +333,7 @@ fun SystemMonitorApp(appViewModel: AppViewModel? = null) {
     //   预测返回: snapTo 跟手 / 取消回弹 1f / 完成 animateTo(0f) 后移出组合。
     //   scrim(hdrScrim) 现已与容器进度解耦并独立排序: 打开时容器先展开→scrim 后到位; 关闭时 scrim 先解除→容器后收起。
     val hdrProgress = remember { Animatable(0f) }
-    // scrim 主时钟, 与容器进度解耦 (见 sensorScrim 注释)
+    // scrim 主时钟, 与容器进度解耦
     val hdrScrim = remember { Animatable(0f) }
     var hdrAlive by remember { mutableStateOf(false) }
     var hdrSurfacesVisible by remember { mutableStateOf(false) }
@@ -413,13 +362,11 @@ fun SystemMonitorApp(appViewModel: AppViewModel? = null) {
     // ── F3: 水波纹圆形展开 — 仅【设置】【悬浮窗】2 覆盖层独立 reveal state + origin ──
     //   进入 animateTo(1f) 弹簧扩散、退出 animateTo(0f) 后 isRevealing=false 移出组合;
     //   HDR 实验室已改归 F5 可打断过渡管理（hdrProgress, 见上）;
-    //   传感器覆盖层不建自己的 reveal state，只一行挂接 F5 的 sensorProgress（唯一主时钟）。
     //   预测返回"被拽走"(scale/translate)效果已移除，统一只留压暗 alpha —— 圆形展开/收缩是唯一过渡语言。
     val settingsReveal = rememberCircularRevealState()
     val floatReveal = rememberCircularRevealState()
     var settingsOrigin by remember { mutableStateOf(Offset.Zero) }
     var floatOrigin by remember { mutableStateOf(Offset.Zero) }
-    var sensorRevealOrigin by remember { mutableStateOf(Offset.Zero) }
 
     // 兜底原点: 触发点未上报时从右上角按钮区展开（与悬浮窗/设置按钮同区, CAMP 二轮修复:
     //   原屏幕中心兜底导致冷启动首开圆形从中心展开, 与按钮位置脱节）
@@ -447,7 +394,7 @@ fun SystemMonitorApp(appViewModel: AppViewModel? = null) {
     // activity-compose 1.9.0 中 PredictiveBackHandler 已稳定（无需 @OptIn）
     // CAMP 二轮修复: 手势进度直接驱动各自覆盖层的过渡主时钟 —
     //   设置/悬浮窗 → 水波纹圆形收缩 (settingsReveal/floatReveal.progress);
-    //   传感器/HDR → 卡片缩放收缩 (sensorProgress/hdrProgress)。
+    //   HDR → 卡片缩放收缩 (hdrProgress)。
     //   放开手: 完成 → 收缩到底并关闭; 中途取消 → 回弹至 1f。
     //   不支持预测的 ROM flow 为空 → 立即完成, 等价普通 BackHandler。
     //
@@ -464,7 +411,6 @@ fun SystemMonitorApp(appViewModel: AppViewModel? = null) {
     PredictiveBackHandler(enabled = overlayVisible) { progress: Flow<BackEventCompat> ->
         val settingsStart = if (showSettings) settingsReveal.progress.value else 0f
         val floatStart = if (showFloatConfig) floatReveal.progress.value else 0f
-        val sensorStart = if (showSensorDetail) sensorProgress.value else 0f
         val hdrStart = if (showHdrLab) hdrProgress.value else 0f
         try {
             progress.collect { event ->
@@ -472,25 +418,10 @@ fun SystemMonitorApp(appViewModel: AppViewModel? = null) {
                 val t = 1f - event.progress
                 if (showSettings) settingsReveal.progress.snapTo((settingsStart * t).coerceIn(0f, 1f))
                 if (showFloatConfig) floatReveal.progress.snapTo((floatStart * t).coerceIn(0f, 1f))
-                if (showSensorDetail) {
-                    sensorProgress.snapTo((sensorStart * t).coerceIn(0f, 1f))
-                    sensorScrim.snapTo((sensorStart * t * t).coerceIn(0f, 1f))   // 关闭拖拽: scrim 先行解除隔绝
-                }
-                if (showHdrLab) {
-                    hdrProgress.snapTo((hdrStart * t).coerceIn(0f, 1f))
-                    hdrScrim.snapTo((hdrStart * t * t).coerceIn(0f, 1f))
-                }
             }
             // 手势完成 — 各覆盖层收缩到底后关闭, 重置进度
             backProgress.snapTo(0f)
             when {
-                showSensorDetail -> {
-                    sensorProgress.snapTo(0f)
-                    sensorScrim.snapTo(0f)
-                    showSensorDetail = false
-                    selectedSensorForDetail = null
-                    sensorAlive = false
-                }
                 showHdrLab -> {
                     hdrSurfacesVisible = false
                     hdrProgress.snapTo(0f)
@@ -512,20 +443,11 @@ fun SystemMonitorApp(appViewModel: AppViewModel? = null) {
             backProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
             if (showSettings) settingsReveal.progress.animateTo(1f, tween(400))
             if (showFloatConfig) floatReveal.progress.animateTo(1f, tween(400))
-            if (showSensorDetail) {
-                sensorProgress.animateTo(1f, CARD_ENTRY_SPEC)
-                sensorScrim.animateTo(1f, CARD_ENTRY_SPEC)
-            }
             if (showHdrLab) {
                 hdrProgress.animateTo(1f, CARD_ENTRY_SPEC)
                 hdrScrim.animateTo(1f, CARD_ENTRY_SPEC)
             }
         }
-    }
-
-    // GPS 开关观察 — 离开 GPS/网络 Tab 时自动关闭定位
-    LaunchedEffect(gpsTabActive) {
-        safeViewModel.setGpsEnabled(gpsTabActive)
     }
 
     Scaffold(
@@ -561,11 +483,6 @@ fun SystemMonitorApp(appViewModel: AppViewModel? = null) {
                 onOpenFloat = { origin ->
                     floatOrigin = origin
                     showFloatConfig = true
-                },
-                onGpsTabChanged = { active -> gpsTabActive = active },
-                onOpenSensorDetail = { sensor, origin ->
-                    sensorRevealOrigin = origin
-                    openSensorDetail(sensor)
                 },
                 onOpenHdrLab = { openHdrLab() }
             )
@@ -694,70 +611,6 @@ fun SystemMonitorApp(appViewModel: AppViewModel? = null) {
                 }
             }
 
-            // ── 传感器详情 (CAMP 二轮: 卡片位移缩放+内容渐变可打断, 对齐 frames 逐帧参考) ──
-            //   容器: 屏幕中心锚点 TransformOrigin(0.5f,0.5f) + scale 0.3→1.0 + 起始位移至屏幕中上部 (背景仅 p>0.6 收尾淡入)
-            //   (0.25W, 0.15H) — 与 frames"小卡片→全屏"形态一致;
-            //   容器背景(CyberCardStart ×0.92)由 sensorScrim 驱动 (s>0.6 收尾淡入), 与 sensorProgress(scale) 解耦 —
-            //   打开=容器先展开(背景透明可见主界面)→scrim 后到位(背景填充, 主界面被完全隔绝),
-            //   关闭=scrim 先解除(背景淡出)→容器后收起; 0.22 scrim 与 bg 同源 (均跟 *Scrim)
-            //   内容: alpha 渐变 (p>0.25 后) + 24dp 上移, 由卡片缩放先行、内容跟进;
-            //   渲染条件读 sensorAlive State, 绝不在组合期读 sensorProgress.value。
-            if (sensorAlive || showSensorDetail) {
-                val sensor = selectedSensorForDetail
-                if (sensor != null) {
-                    val density = LocalDensity.current
-                    // P1: 覆盖层根 Box 消费点击, 隔绝主界面触摸 (内部交互仍由子节点优先消费)
-                    Box(Modifier.fillMaxSize()
-                        .pointerInput(Unit) { detectTapGestures { } }
-                    ) {
-                        // ① scrim: 全屏压暗层 (alpha 由 sensorScrim 驱动, 二次曲线半透明; scrim 与容器 sensorProgress 解耦, 打开时容器先展开→scrim 后到位, 关闭时 scrim 先解除→容器后收起)
-                        //   pre12 修复: 同 HDR scrim, 改 drawBehind 直接以目标 alpha 画黑矩形, 根除黑闪。
-                        Box(Modifier.fillMaxSize()
-                            .drawBehind {
-                                drawRect(
-                                    color = Color.Black,
-                                    alpha = (sensorScrim.value * sensorScrim.value) * 0.22f
-                                )
-                            }
-                        )
-                        // ② 卡片容器: scale 0.3→1.0 跟 sensorProgress; 背景(CyberCardStart ×0.92) 跟 sensorScrim —
-                        //   scale 与 bg 解耦: 打开时容器先展开(背景透明可见主界面)→scrim 后到位(背景填充, 隔绝), 关闭反之
-                        val sensorP = sensorProgress.value
-                        Box(Modifier.fillMaxSize()
-                            .graphicsLayer {
-                                transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                val s = 0.3f + 0.7f * sensorP
-                                scaleX = s
-                                scaleY = s
-                            }
-                            // pre12 修复: 容器背景 alpha 移出层属性, 改 drawBehind 直接画带 alpha 的 CyberCardStart。
-                            .drawBehind {
-                                drawRect(
-                                    color = CyberCardStart,
-                                    alpha = ((sensorScrim.value - 0.6f) / 0.4f).coerceIn(0f, 1f) * 0.92f
-                                )
-                            }
-                        ) {
-                            // ③ 内容渐变 + 上移 (draw 阶段驱动, 零重组)
-                            Box(Modifier.fillMaxSize()
-                                .graphicsLayer {
-                                    val p = sensorProgress.value
-                                    val ca = ((p - 0.25f) / 0.75f).coerceIn(0f, 1f)
-                                    alpha = ca
-                                    translationY = (1f - ca) * 24.dp.toPx()
-                                }
-                            ) {
-                                SensorDetailContent(
-                                    sensor = sensor,
-                                    progress = sensorProgress,
-                                    density = density,
-                                    onBack = { closeSensorDetail() }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
             } // end GlobalLightProvider
                 } // end CompositionLocalProvider(LocalSharedTransitionScope)
             } // end SharedTransitionLayout
@@ -773,8 +626,6 @@ private fun MainTabs(
     overlayVisible: Boolean = false,
     onOpenSettings: (Offset) -> Unit,
     onOpenFloat: (Offset) -> Unit,
-    onGpsTabChanged: (Boolean) -> Unit = {},
-    onOpenSensorDetail: (com.ce11kjw.chargecontrol.data.model.SensorItemInfo, Offset) -> Unit = { _, _ -> },
     onOpenHdrLab: () -> Unit = {}
 ) {
     val topTabs = rememberTopTabs()
@@ -784,11 +635,6 @@ private fun MainTabs(
     // F3: 按钮触发点坐标 — onGloballyPositioned 上报中心(boundsInRoot; RIPPLE-04 备 positionInWindow 降级)
     var floatBtnOrigin by remember { mutableStateOf(Offset.Zero) }
     var settingsBtnOrigin by remember { mutableStateOf(Offset.Zero) }
-    LaunchedEffect(currentPage) {
-        val isGpsRelated = currentPage == 5 || currentPage == 6
-        onGpsTabChanged(isGpsRelated)
-    }
-
     // ★ 覆盖层显示时不拦截 → 由 SystemMonitorApp 的 PredictiveBackHandler 统一处理
     //   互斥逻辑: overlayVisible 时本回调 disabled (!overlayVisible=false)，
     //   PredictiveBackHandler (enabled=overlayVisible) 接管返回手势；
@@ -930,12 +776,6 @@ private fun MainTabs(
                 3 -> MemoryScreen()
                 4 -> BatteryScreen()
                 5 -> com.ce11kjw.chargecontrol.ui.charge.ChargeControlScreen()
-                6 -> NetworkScreen()
-                7 -> GpsScreen()
-                8 -> SensorsScreen(
-                    onNavigateToSensor = onOpenSensorDetail
-                )
-                9 -> DeviceScreen(onOpenHdrLab = onOpenHdrLab)
             }
             } // end StaggeredPageProvider (per-page)
         }
