@@ -151,19 +151,39 @@ static void url_decode(char *s) {
 
 static int read_int(const char *path) {
     char buf[64]; int fd = open(path, O_RDONLY);
-    if (fd < 0) return -1; int n = read(fd, buf, sizeof(buf)-1);
-    close(fd); if (n <= 0) return -1; buf[n] = '\0'; return atoi(buf);
+    if (fd < 0) return -1;
+    int n = read(fd, buf, sizeof(buf)-1);
+    close(fd);
+    if (n <= 0) return -1;
+    buf[n] = '\0';
+    return atoi(buf);
 }
 static int read_str(const char *path, char *out, int size) {
     int fd = open(path, O_RDONLY);
-    if (fd < 0) return -1; int n = read(fd, out, size-1);
-    close(fd); if (n <= 0) return -1; out[n] = '\0';
+    if (fd < 0) return -1;
+    int n = read(fd, out, size-1);
+    close(fd);
+    if (n <= 0) return -1;
+    out[n] = '\0';
     while (n > 0 && (out[n-1]=='\n'||out[n-1]=='\r')) out[--n] = '\0';
     return n;
 }
+/* ★ v1.4.0 关键修复：返回值语义。
+   原实现 return n（write 的字节数），但调用方混用两种判定：
+     5 处  if (write_str(...) == 0)   判成功
+    11 处  if (write_str(...) <  0)   判失败
+   写入成功时 n=1..8，于是「== 0」永远为假 —— 所有写入都被当成失败：
+     · apply_power_path 写完即自我放弃（x_en_power_path=0），真旁路从未生效
+     · apply_night_mode / input_suspend / 温度保护 的失败日志全是误报
+   现在统一为：成功返回 0，失败返回 -1（POSIX 惯例），两种调用点都正确。
+   另补 O_TRUNC：procfs/sysfs 不要求，但普通文件下不截断会残留旧内容。 */
 static int write_str(const char *path, const char *val) {
-    int fd = open(path, O_WRONLY); if (fd < 0) return -1;
-    int n = write(fd, val, strlen(val)); close(fd); return n;
+    int fd = open(path, O_WRONLY | O_TRUNC);
+    if (fd < 0) return -1;
+    ssize_t n = write(fd, val, strlen(val));
+    int r = (n == (ssize_t)strlen(val)) ? 0 : -1;
+    close(fd);
+    return r;
 }
 
 static void log_event(const char *msg) {
@@ -451,45 +471,105 @@ static void apply_native_night(void) {
     }
 }
 
+/* ★ v1.4.0: 恒压点/限流的"已应用"状态改为文件级持久标志。
+   原先用函数内 static，进程一重启就归 0，
+   于是「关掉恒压点」的还原分支永远进不去 —— 电池被永久锁在 4200mV。 */
+static int cv_applied = 0;
+static int cc_applied = 0;
+
+/* ★ v1.4.0: 启动时抓一次"原厂恒压点"。
+   必须在任何写入发生之前调用（main 里紧跟 update_battery），
+   否则读到的是上一次自己写进去的值，备份就废了。 */
+static void snapshot_orig_cv(void) {
+    const char *CV = "/proc/mtk_battery_cmd/set_cv";
+    if (access(CV, R_OK) != 0) return;
+    if (x_orig_cv > 0) return;              /* conf 里已有可信备份，别覆盖 */
+    int v = read_int(CV);
+    /* 合理范围才认；读失败(-1)或越界一律不写，避免存进垃圾值 */
+    if (v >= 3900 && v <= 4500) {
+        x_orig_cv = v;
+        log_event("已记录原厂恒压点");
+    }
+}
+
 static void apply_cv_and_current(void) {
     const char *CV = "/proc/mtk_battery_cmd/set_cv";
     const char *CC = "/proc/mtk_battery_cmd/current_cmd";
-    static int cv_applied = 0;
-    static int cc_applied = 0;
+    static int cc_last_ma = -1;
+
+    /* ★ v1.4.0: cv_applied/cc_applied 是内存态，重启即归 0，
+       导致"关掉恒压点"的还原分支永远进不去。
+       这里在首次进入时按 conf 的开关状态重建。 */
+    static int inited = 0;
+    if (!inited) {
+        inited = 1;
+        if (x_set_cv_en) cv_applied = 1;
+        if (x_limit_current_en) cc_applied = 1;
+    }
 
     /* ── 恒压点 ── */
     if (access(CV, W_OK) == 0) {
         if (x_set_cv_en && x_set_cv_mv >= 3900 && x_set_cv_mv <= 4500) {
-            if (x_orig_cv < 0) x_orig_cv = read_int(CV);   /* 备份原值 */
+            if (x_orig_cv < 0) snapshot_orig_cv();   /* 兜底：仍未有备份就现抓 */
             char v[16]; snprintf(v, sizeof(v), "%d", x_set_cv_mv);
             if (write_str(CV, v) == 0) cv_applied = 1;
         } else if (cv_applied && x_orig_cv > 0) {
-            /* 关闭 → 还原原值 */
             char v[16]; snprintf(v, sizeof(v), "%d", x_orig_cv);
-            write_str(CV, v);
-            cv_applied = 0;
-            log_event("恒压点已还原");
+            if (write_str(CV, v) == 0) {
+                cv_applied = 0;
+                log_event("恒压点已还原");
+            }
         }
     }
 
-    /* ── 充电电流限流 ── */
-    if (access(CC, W_OK) == 0) {
-        if (x_limit_current_en && x_limit_current_ma > 0 && x_limit_current_ma <= 6000) {
-            /* 格式: "<current_unlimited> <discharging>"，用 0 表示不限，靠改下方 max 节点 */
-            char v[32]; snprintf(v, sizeof(v), "%d %d", 0, 0);
-            write_str(CC, v);
-            cc_applied = 1;
-            /* 另配合 constant_charge_current_max（µA）限制 */
-            char path[128];
-            snprintf(path, sizeof(path), "/sys/class/power_supply/mtk-master-charger/input_current_limit");
-            char ma[16]; snprintf(ma, sizeof(ma), "%d", x_limit_current_ma * 1000);
-            write_str(path, ma);
-        } else if (cc_applied) {
-            cc_applied = 0;
-            log_event("电流限制已解除");
+    /* ── 充电电流限流 ──
+       真正的限流节点是 input_current_limit(µA)，与 current_cmd 无关。
+       ★ v1.4.0 修复三点：
+         1) 原实现把整个限流块嵌在 if (access(current_cmd, W_OK)) 里，
+            没有 current_cmd 的机型（有 input_current_limit 但无该 proc 节点）
+            会静默失效 —— 现在改为直接检查 input_current_limit 是否可写。
+         2) 原实现第一段硬编码 "0 0"，跟 x_limit_current_ma 完全无关（空转）。
+         3) 关闭时不复位，节点被永久留在限流值上。
+       current_cmd 若存在仍顺手写一次（部分 MTK 需要它解锁），但不再作为前置条件。 */
+    {
+        static const char *IL_CANDIDATES[] = {
+            "/sys/class/power_supply/mtk-master-charger/input_current_limit",
+            "/sys/class/power_supply/battery/input_current_limit",
+            "/sys/class/power_supply/usb/input_current_limit",
+            NULL
+        };
+        const char *IL = NULL;
+        for (int i = 0; IL_CANDIDATES[i]; i++) {
+            if (access(IL_CANDIDATES[i], W_OK) == 0) { IL = IL_CANDIDATES[i]; break; }
         }
-    } else {
-        x_limit_current_en = 0;
+        /* 顺带：若 current_cmd 存在，写一次解锁标志（不影响限流主逻辑） */
+        if (access(CC, W_OK) == 0)
+            write_str(CC, "0 0");
+
+        if (IL) {
+            if (x_limit_current_en && x_limit_current_ma > 0 && x_limit_current_ma <= 6000) {
+                if (cc_last_ma != x_limit_current_ma) {
+                    char ma[16]; snprintf(ma, sizeof(ma), "%d", x_limit_current_ma * 1000);
+                    if (write_str(IL, ma) == 0) {
+                        cc_last_ma = x_limit_current_ma;
+                        cc_applied = 1;
+                        log_event("充电电流已限流");
+                    }
+                }
+            } else if (cc_applied) {
+                /* 关闭：写回节点自身上限，交还内核调度 */
+                int cap = read_int(IL);
+                int restore = (cap > x_limit_current_ma * 1000) ? cap : 6000000;
+                char ma[16]; snprintf(ma, sizeof(ma), "%d", restore);
+                write_str(IL, ma);
+                cc_last_ma = -1;
+                cc_applied = 0;
+                log_event("电流限制已解除");
+            }
+        } else {
+            /* 本机无任何可写的限流节点：不清用户设置，仅不执行（与原策略一致） */
+            if (x_limit_current_en) log_event("本机无电流限流节点");
+        }
     }
 }
 
@@ -607,6 +687,17 @@ static void load_config(void) {
         else if (!strcmp(k, "interval")) { x = atoi(v); interval = (x >= 1 && x <= 60) ? x : 5; }
         else if (!strcmp(k, "enabled")) limit_enabled = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "history_enabled")) history_enabled = atoi(v) ? 1 : 0;
+        /* ★ v1.4.0: 高级控制开关纳入主配置。
+           原先只存 extras.json，一旦该文件损坏/丢失，开关会静默丢失；
+           x_orig_cv 更是只存内存 ⇒ 重启后关不掉恒压点会永久停在 4200mV。 */
+        else if (!strcmp(k, "xpp")) x_en_power_path = atoi(v) ? 1 : 0;
+        else if (!strcmp(k, "xcv")) x_set_cv_en = atoi(v) ? 1 : 0;
+        else if (!strcmp(k, "xcvmv")) { x = atoi(v); x_set_cv_mv = (x == 0 || (x >= 3900 && x <= 4500)) ? x : 0; }
+        else if (!strcmp(k, "xcc")) x_limit_current_en = atoi(v) ? 1 : 0;
+        else if (!strcmp(k, "xccma")) { x = atoi(v); x_limit_current_ma = (x >= 0 && x <= 6000) ? x : 0; }
+        else if (!strcmp(k, "xnight")) x_use_native_night = atoi(v) ? 1 : 0;
+        else if (!strcmp(k, "xminsoc")) { x = atoi(v); x_bypass_min_soc = (x >= 20 && x <= 80) ? x : 50; }
+        else if (!strcmp(k, "xorigcv")) { x = atoi(v); x_orig_cv = (x > 0) ? x : -1; }
     }
     fclose(f);
 }
@@ -619,6 +710,15 @@ static void save_config(void) {
     fprintf(f, "interval=%d\n", interval);
     fprintf(f, "enabled=%d\n", limit_enabled);
     fprintf(f, "history_enabled=%d\n", history_enabled);
+    /* ★ v1.4.0: 高级控制开关 + 恒压点原值备份（重启可还原） */
+    fprintf(f, "xpp=%d\n", x_en_power_path);
+    fprintf(f, "xcv=%d\n", x_set_cv_en);
+    fprintf(f, "xcvmv=%d\n", x_set_cv_mv);
+    fprintf(f, "xcc=%d\n", x_limit_current_en);
+    fprintf(f, "xccma=%d\n", x_limit_current_ma);
+    fprintf(f, "xnight=%d\n", x_use_native_night);
+    fprintf(f, "xminsoc=%d\n", x_bypass_min_soc);
+    fprintf(f, "xorigcv=%d\n", x_orig_cv);
     fclose(f);
 }
 
@@ -648,7 +748,12 @@ static void load_extras(void) {
     if ((q = strstr(buf, "\"lang\":"))) lang = atoi(q + 7);
     if ((q = strstr(buf, "\"theme\":"))) theme = atoi(q + 8);
     if ((q = strstr(buf, "\"bypass_soft\":"))) bypass_soft = atoi(q + 14);
-    /* ★ v1.3.1 P2 新配置（注意每个字段名的精确长度） */
+    /* ★ v1.3.1 P2 新配置（注意每个字段名的精确长度）
+       ★ v1.4.0: 改为「extras.json 优先、batt.conf 兜底」。
+       load_config() 先跑并从 batt.conf 读这些键，
+       但 extras.json 才是它们的主存处（save_extras 每次写入）。
+       这里只在 extras.json 真的存在该字段时才覆盖，
+       避免旧版本残留的不完整 extras.json 把 batt.conf 的值清成 0。 */
     if ((q = strstr(buf, "\"xpp\":"))) x_en_power_path = atoi(q + 6);
     if ((q = strstr(buf, "\"xcv\":"))) x_set_cv_en = atoi(q + 6);
     if ((q = strstr(buf, "\"xcvmv\":"))) x_set_cv_mv = atoi(q + 8);
@@ -656,15 +761,20 @@ static void load_extras(void) {
     if ((q = strstr(buf, "\"xlcma\":"))) x_limit_current_ma = atoi(q + 8);
     if ((q = strstr(buf, "\"xnn\":"))) x_use_native_night = atoi(q + 6);
     if ((q = strstr(buf, "\"xbminsoc\":"))) x_bypass_min_soc = atoi(q + 11);
+    /* ★ v1.4.0: 恒压点原值备份 —— extras.json 里没有就沿用 batt.conf 的值。
+       （x_orig_cv 只在 extras 里存过一次的话，老版本升级上来的用户能保住备份） */
+    if ((q = strstr(buf, "\"xorigcv\":"))) { int t = atoi(q + 10); if (t > 0) x_orig_cv = t; }
 }
 static void save_extras(void) {
     FILE *f = fopen("/data/adb/battery-manager/extras.json", "w");
     if (!f) return;
+    /* ★ v1.4.0: 追加 xorigcv（恒压点原值备份）。
+       不存它的话，重启后 x_orig_cv=-1，用户关掉恒压点调整会还原不回去。 */
     fprintf(f, "{\"night\":%d,\"ns\":%d,\"ne\":%d,\"scene\":%d,\"webhook\":\"%s\",\"lang\":%d,\"theme\":%d,\"bypass_soft\":%d,"
-        "\"xpp\":%d,\"xcv\":%d,\"xcvmv\":%d,\"xlc\":%d,\"xlcma\":%d,\"xnn\":%d,\"xbminsoc\":%d}",
+        "\"xpp\":%d,\"xcv\":%d,\"xcvmv\":%d,\"xlc\":%d,\"xlcma\":%d,\"xnn\":%d,\"xbminsoc\":%d,\"xorigcv\":%d}",
         night_enabled, night_start_h, night_end_h, scene, webhook_url, lang, theme, bypass_soft,
         x_en_power_path, x_set_cv_en, x_set_cv_mv, x_limit_current_en, x_limit_current_ma,
-        x_use_native_night, x_bypass_min_soc);
+        x_use_native_night, x_bypass_min_soc, x_orig_cv);
     fclose(f);
 }
 
@@ -1067,14 +1177,18 @@ static void handle_limit(int fd, const char *body) {
             }
             else if (!strcmp(key, "lang")) lang = atoi(dec);
             else if (!strcmp(key, "theme")) theme = atoi(dec);
-            /* ★ v1.3.1 P2 新功能开关 */
-            else if (!strcmp(key, "x_power_path")) x_en_power_path = atoi(dec) ? 1 : 0;
-            else if (!strcmp(key, "x_set_cv_en")) x_set_cv_en = atoi(dec) ? 1 : 0;
-            else if (!strcmp(key, "x_set_cv_mv")) { int v = atoi(dec); if (v >= 3900 && v <= 4500) x_set_cv_mv = v; }
-            else if (!strcmp(key, "x_limit_en")) x_limit_current_en = atoi(dec) ? 1 : 0;
-            else if (!strcmp(key, "x_limit_ma")) { int v = atoi(dec); if (v > 0 && v <= 6000) x_limit_current_ma = v; }
-            else if (!strcmp(key, "x_native_night")) x_use_native_night = atoi(dec) ? 1 : 0;
-            else if (!strcmp(key, "x_bypass_min_soc")) { int v = atoi(dec); if (v >= 20 && v <= 90) x_bypass_min_soc = v; }
+            /* ★ v1.3.1 P2 新功能开关
+               ★ v1.4.0: 同时接受 conf 里的短名（xpp/xcv/...）。
+               原先 API 只认长名(x_set_cv_en)，conf 却存短名(xcv)，
+               重启后 load_config 用 xcv=0 覆盖掉刚设的 x_set_cv_en=1，
+               限流/恒压点/旁路在重启后会静默失效。 */
+            else if (!strcmp(key, "x_power_path") || !strcmp(key, "xpp")) x_en_power_path = atoi(dec) ? 1 : 0;
+            else if (!strcmp(key, "x_set_cv_en") || !strcmp(key, "xcv")) x_set_cv_en = atoi(dec) ? 1 : 0;
+            else if (!strcmp(key, "x_set_cv_mv") || !strcmp(key, "xcvmv")) { int v = atoi(dec); if (v >= 3900 && v <= 4500) x_set_cv_mv = v; }
+            else if (!strcmp(key, "x_limit_en") || !strcmp(key, "xcc")) x_limit_current_en = atoi(dec) ? 1 : 0;
+            else if (!strcmp(key, "x_limit_ma") || !strcmp(key, "xccma")) { int v = atoi(dec); if (v > 0 && v <= 6000) x_limit_current_ma = v; }
+            else if (!strcmp(key, "x_native_night") || !strcmp(key, "xnight")) x_use_native_night = atoi(dec) ? 1 : 0;
+            else if (!strcmp(key, "x_bypass_min_soc") || !strcmp(key, "xminsoc")) { int v = atoi(dec); if (v >= 20 && v <= 90) x_bypass_min_soc = v; }
             else if (!strcmp(key, "webhook")) {
                 char wb[256]; strncpy(wb, dec, 255); wb[255] = '\0';
                 url_decode(wb);
@@ -1320,6 +1434,8 @@ static void on_sig(int sig) { (void)sig; running = 0; }
 int main(void) {
     load_config(); load_stats(); load_extras(); last_save = time(NULL);
     update_battery();
+    /* ★ v1.4.0: 抓住未被污染的原厂恒压点（务必在任何 apply_* 之前） */
+    snapshot_orig_cv();
     /* 探测旁路支持 */
     FILE *bf = popen("ls /sys/class/power_supply/*/bypass_charger /sys/class/power_supply/*/charge_bypass /sys/class/power_supply/*/bypass /sys/class/power_supply/*/bypass_mode /sys/class/power_supply/*/bypass_charging /sys/class/power_supply/*/charging_bypass /sys/class/power_supply/*/smb_bypass /sys/class/power_supply/*/main_bypass /sys/class/power_supply/*/batt_bypass /sys/class/power_supply/*/charge_control_bypass 2>/dev/null | head -1", "r");
     if (bf) { char bb[64]; if (fgets(bb, sizeof(bb), bf)) { size_t bl = strlen(bb); while (bl > 0 && (bb[bl-1]=='\n'||bb[bl-1]==' ')) bb[--bl]='\0'; if (bl>0) { bypass_supported = 1; strncpy(bypass_node, bb, sizeof(bypass_node)-1); } } pclose(bf); }
@@ -1355,7 +1471,12 @@ int main(void) {
         }
         now = time(NULL);
         if (now - last_poll >= (time_t)interval) {
-            last_poll = now; update_battery(); push_history();
+            last_poll = now; update_battery();
+            /* ★ v1.4.0 修复: handle_charging_state 一直没被调用，
+               导致 sess_min/sess_mah/stats_* 恒为 0 ——
+               v1.3.1 引入的 charge_counter 精确统计实际从未生效。*/
+            handle_charging_state();
+            push_history();
             apply_control(); apply_power_path(); apply_cv_and_current(); apply_native_night(); apply_night_mode(); high_temp_alert();
         }
     }
