@@ -111,9 +111,6 @@ fun SettingsScreen(viewModel: SettingsViewModel = koinViewModel()) {
         // ═══ 主题色（ChargeControl 新增）═══
         AccentThemeSettingsCard()
 
-        // ═══ 性能（ChargeControl 新增）═══
-        PerformanceSettingsCard()
-
         Text(stringResource(R.string.settings_module_refresh),
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -742,51 +739,5 @@ private fun AccentThemeSettingsCard() {
                 TextButton(onClick = { showDialog = false }) { Text("关闭") }
             }
         )
-    }
-}
-
-// ═══════ 性能设置卡片（ChargeControl 新增）═══════
-
-@Composable
-private fun PerformanceSettingsCard() {
-    val ctx = LocalContext.current
-    val settings = remember { AppSettings.getInstance(ctx) }
-    var animOn by remember { mutableStateOf(settings.pageAnimationEnabled) }
-
-    Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = NeonPurple.copy(alpha = 0.08f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text("性能", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-            Spacer(Modifier.size(4.dp))
-            Text("中端机建议保持关闭", fontSize = 11.sp, color = TextSecondary)
-            Spacer(Modifier.size(12.dp))
-
-            // 页面交错动画
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("页面切换动画", fontSize = 14.sp, color = TextPrimary)
-                    Text(
-                        if (animOn) "已开启（切 Tab 有交错效果，较吃性能）"
-                        else "已关闭（切 Tab 零延迟，推荐）",
-                        fontSize = 11.sp, color = TextSecondary
-                    )
-                }
-                CyberJoystickSwitch(
-                    checked = animOn,
-                    onCheckedChange = { v ->
-                        animOn = v
-                        settings.pageAnimationEnabled = v
-                    },
-                )
-            }
-        }
     }
 }
