@@ -119,6 +119,33 @@ static char sys_android_ver[32] = "", sys_build_display[64] = "", sys_security_p
 static char sys_bootloader[64] = "";
 static char sys_soc_vendor[64] = "", sys_soc_model[64] = "";
 /* ═══ v1.6.0 GPU（供 App GPU 页走模块取数）═══ */
+/* ═══ v1.7.0 OEM / 厂商信息（对齐 App 的 OemInfo）═══ */
+static char oem_brand[64] = "";          /* Xiaomi / OPPO / vivo / Samsung / AOSP */
+static char oem_os_name[64] = "";        /* HyperOS / ColorOS / OriginOS / One UI */
+static char oem_os_version[64] = "";
+static char oem_build_fingerprint[192] = "";
+static char oem_charging_protocol[64] = "";
+static char oem_charging_watt[32] = "";
+static char oem_battery_capacity[32] = "";
+static int  oem_dual_cell = 0;
+static char oem_display_panel[64] = "";      /* AMOLED / LCD */
+static char oem_display_vendor[64] = "";     /* Samsung / BOE / Visionox */
+static char oem_display_max_hz[16] = "";
+static char oem_display_peak_nits[16] = "";
+static char oem_cpu_governor[64] = "";
+static char oem_gpu_governor[64] = "";
+static char oem_security_chip[64] = "";
+static int  oem_secure_boot = 0;
+static char oem_verified_boot[16] = "";
+static char oem_game_mode[8] = "";
+static char oem_perf_mode[8] = "";
+static char oem_power_save[8] = "";
+static char oem_ultra_power_save[8] = "";
+static char oem_ai_engine[64] = "";
+static char oem_memory_fusion[32] = "";
+static char oem_thermal_solution[64] = "";
+static char oem_storage_boost[32] = "";
+
 static char gpu_model[128] = "";
 static char gpu_vendor[64] = "";
 static int  gpu_freq_khz = -1, gpu_freq_min_khz = -1, gpu_freq_max_khz = -1;
@@ -799,6 +826,143 @@ static void update_gpu(void) {
     /* 节流判定：当前频率 < 最大频率的 70% */
     gpu_throttled = (gpu_freq_khz > 0 && gpu_freq_max_khz > 0
                      && gpu_freq_khz < gpu_freq_max_khz * 70 / 100) ? 1 : 0;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   v1.7.0 OEM 属性采集（供 App「OEM/系统」页走模块取数）
+
+   来源优先级：
+     1. /system|vendor|product|odm/build.prop（静态）
+     2. getprop <key>（能拿 persist.* 等运行时属性）
+   模块以 root 运行，getprop 可用；相比 App 调 SystemProperties.get()，
+   走模块的好处是多设备一致 + App 不需要自己读系统属性。
+   ═══════════════════════════════════════════════════════════ */
+
+/* 用 getprop 读单个属性 */
+static int prop_get(const char *key, char *out, int outsz) {
+    const char *gp = "/system/bin/getprop";
+    if (access(gp, X_OK) != 0) {
+        gp = "/vendor/bin/getprop";
+        if (access(gp, X_OK) != 0) return -1;
+    }
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "%s '%s' 2>/dev/null", gp, key);
+    FILE *f = popen(cmd, "r");
+    if (!f) return -1;
+    out[0] = 0;
+    if (fgets(out, outsz, f)) {
+        char *nl = strchr(out, '\n'); if (nl) *nl = 0;
+    }
+    pclose(f);
+    return out[0] ? (int)strlen(out) : -1;
+}
+
+/* ═══ v1.7.0 OEM 采集（5 分钟缓存，都是静态/半静态属性）═══ */
+static void update_oem(void) {
+    time_t tn = time(NULL);
+    static time_t last = 0;
+    if (tn - last < 300) return;
+    last = tn;
+
+    char buf[256];
+    int got_any = 0;
+
+    /* ── 厂商识别 ── */
+    if (prop_get("ro.product.brand", buf, sizeof(buf)) > 0 ||
+        prop_get("ro.product.manufacturer", buf, sizeof(buf)) > 0) {
+        snprintf(oem_brand, sizeof(oem_brand), "%.*s", (int)sizeof(oem_brand)-1, buf);
+        got_any = 1;
+    }
+    /* OS 名称：各家专有属性 */
+    if (prop_get("ro.mi.os.version.name", buf, sizeof(buf)) > 0 ||
+        prop_get("ro.miui.ui.version.name", buf, sizeof(buf)) > 0) {
+        snprintf(oem_os_name, sizeof(oem_os_name), "%.*s", (int)sizeof(oem_os_name)-1, buf);
+    } else if (prop_get("ro.build.version.oplusrom", buf, sizeof(buf)) > 0) {
+        snprintf(oem_os_name, sizeof(oem_os_name), "ColorOS %.*s", (int)sizeof(oem_os_name)-9, buf);
+    } else if (prop_get("ro.vivo.os.version", buf, sizeof(buf)) > 0) {
+        snprintf(oem_os_name, sizeof(oem_os_name), "OriginOS %.*s", (int)sizeof(oem_os_name)-10, buf);
+    } else if (prop_get("ro.build.version.incremental", buf, sizeof(buf)) > 0) {
+        snprintf(oem_os_name, sizeof(oem_os_name), "%.*s", (int)sizeof(oem_os_name)-1, buf);
+    }
+    if (prop_get("ro.build.display.id", buf, sizeof(buf)) > 0)
+        snprintf(oem_os_version, sizeof(oem_os_version), "%.*s", (int)sizeof(oem_os_version)-1, buf);
+    if (prop_get("ro.build.fingerprint", buf, sizeof(buf)) > 0)
+        snprintf(oem_build_fingerprint, sizeof(oem_build_fingerprint), "%.*s", (int)sizeof(oem_build_fingerprint)-1, buf);
+
+    /* ── 充电 ── */
+    if (prop_get("ro.charger.protocol", buf, sizeof(buf)) > 0 ||
+        prop_get("persist.vendor.charger.protocol", buf, sizeof(buf)) > 0) {
+        snprintf(oem_charging_protocol, sizeof(oem_charging_protocol), "%.*s", (int)sizeof(oem_charging_protocol)-1, buf);
+    }
+    if (prop_get("ro.vendor.max.charging.power", buf, sizeof(buf)) > 0 ||
+        prop_get("persist.vendor.charging.watt", buf, sizeof(buf)) > 0) {
+        snprintf(oem_charging_watt, sizeof(oem_charging_watt), "%.*s", (int)sizeof(oem_charging_watt)-1, buf);
+    }
+    if (prop_get("ro.battery.capacity", buf, sizeof(buf)) > 0 ||
+        prop_get("ro.vendor.battery.capacity", buf, sizeof(buf)) > 0) {
+        snprintf(oem_battery_capacity, sizeof(oem_battery_capacity), "%.*s", (int)sizeof(oem_battery_capacity)-1, buf);
+    }
+    if (prop_get("persist.vendor.battery.dualcell", buf, sizeof(buf)) > 0)
+        oem_dual_cell = atoi(buf) ? 1 : 0;
+
+    /* ── 显示 ── */
+    if (prop_get("ro.vendor.display.type", buf, sizeof(buf)) > 0 ||
+        prop_get("ro.display.type", buf, sizeof(buf)) > 0) {
+        snprintf(oem_display_panel, sizeof(oem_display_panel), "%.*s", (int)sizeof(oem_display_panel)-1, buf);
+    }
+    if (prop_get("ro.vendor.display.panel", buf, sizeof(buf)) > 0)
+        snprintf(oem_display_vendor, sizeof(oem_display_vendor), "%.*s", (int)sizeof(oem_display_vendor)-1, buf);
+    if (prop_get("ro.vendor.display.max.refresh.rate", buf, sizeof(buf)) > 0)
+        snprintf(oem_display_max_hz, sizeof(oem_display_max_hz), "%.*s", (int)sizeof(oem_display_max_hz)-1, buf);
+    if (prop_get("ro.vendor.display.peak.brightness", buf, sizeof(buf)) > 0)
+        snprintf(oem_display_peak_nits, sizeof(oem_display_peak_nits), "%.*s", (int)sizeof(oem_display_peak_nits)-1, buf);
+
+    /* ── 调度器（从 sysfs 读，更可靠）── */
+    char g[64];
+    if (read_str("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", g, sizeof(g)) > 0)
+        snprintf(oem_cpu_governor, sizeof(oem_cpu_governor), "%s", g);
+    if (gpu_governor[0]) snprintf(oem_gpu_governor, sizeof(oem_gpu_governor), "%s", gpu_governor);
+
+    /* ── 安全 ── */
+    if (prop_get("ro.boot.verifiedbootstate", buf, sizeof(buf)) > 0) {
+        snprintf(oem_verified_boot, sizeof(oem_verified_boot), "%.*s", (int)sizeof(oem_verified_boot)-1, buf);
+        oem_secure_boot = (strcmp(buf, "green") == 0) ? 1 : 0;
+    }
+    if (prop_get("ro.hardware.security", buf, sizeof(buf)) > 0 ||
+        prop_get("ro.boot.hardware.security", buf, sizeof(buf)) > 0) {
+        snprintf(oem_security_chip, sizeof(oem_security_chip), "%.*s", (int)sizeof(oem_security_chip)-1, buf);
+    }
+
+    /* ── 模式开关 ── */
+    if (prop_get("persist.sys.game_mode", buf, sizeof(buf)) > 0 ||
+        prop_get("persist.sys.miui_game_mode", buf, sizeof(buf)) > 0)
+        snprintf(oem_game_mode, sizeof(oem_game_mode), "%.*s", (int)sizeof(oem_game_mode)-1, buf);
+    if (prop_get("persist.sys.performance_mode", buf, sizeof(buf)) > 0 ||
+        prop_get("persist.sys.miui_perf_mode", buf, sizeof(buf)) > 0)
+        snprintf(oem_perf_mode, sizeof(oem_perf_mode), "%.*s", (int)sizeof(oem_perf_mode)-1, buf);
+    if (prop_get("persist.sys.battery_saver", buf, sizeof(buf)) > 0 ||
+        prop_get("persist.sys.power_mode", buf, sizeof(buf)) > 0)
+        snprintf(oem_power_save, sizeof(oem_power_save), "%.*s", (int)sizeof(oem_power_save)-1, buf);
+    if (prop_get("persist.sys.ultra_battery_saver", buf, sizeof(buf)) > 0 ||
+        prop_get("persist.sys.ultra_powersave", buf, sizeof(buf)) > 0)
+        snprintf(oem_ultra_power_save, sizeof(oem_ultra_power_save), "%.*s", (int)sizeof(oem_ultra_power_save)-1, buf);
+
+    /* ── 特性 ── */
+    if (prop_get("persist.sys.hypermind.enable", buf, sizeof(buf)) > 0)
+        snprintf(oem_ai_engine, sizeof(oem_ai_engine), "HyperMind %.*s", (int)sizeof(oem_ai_engine)-11, buf);
+    if (prop_get("persist.sys.memory_extension.size", buf, sizeof(buf)) > 0)
+        snprintf(oem_memory_fusion, sizeof(oem_memory_fusion), "%.*s", (int)sizeof(oem_memory_fusion)-1, buf);
+    if (prop_get("persist.sys.ufs_turbo", buf, sizeof(buf)) > 0)
+        snprintf(oem_storage_boost, sizeof(oem_storage_boost), "%.*s", (int)sizeof(oem_storage_boost)-1, buf);
+    /* 散热方案：多家属性名不同，逐个试 */
+    const char *therm[] = {"ro.vendor.thermal.solution", "persist.sys.thermal_solution", NULL};
+    for (int i = 0; therm[i]; i++) {
+        if (prop_get(therm[i], buf, sizeof(buf)) > 0) {
+            snprintf(oem_thermal_solution, sizeof(oem_thermal_solution), "%.*s", (int)sizeof(oem_thermal_solution)-1, buf);
+            break;
+        }
+    }
+    (void)got_any;
 }
 
 /* 系统属性：SDK / Android 版本 / 补丁级别 / bootloader / SoC */
@@ -1903,6 +2067,16 @@ static void handle_status(int fd) {
         "\"gpu_model\":\"%s\",\"gpu_vendor\":\"%s\",\"gpu_freq_khz\":%d,\"gpu_freq_max_khz\":%d,\"gpu_freq_min_khz\":%d,"
         "\"gpu_governor\":\"%s\",\"gpu_avail_gov\":\"%s\",\"gpu_load\":%d,\"gpu_load_src\":\"%s\",\"gpu_throttled\":%d,"
         "\"gpu_temp_c\":%d,"
+        /* v1.7.0 OEM */
+        "\"oem_brand\":\"%s\",\"oem_os_name\":\"%s\",\"oem_os_version\":\"%s\","
+        "\"oem_fingerprint\":\"%s\",\"oem_charge_proto\":\"%s\",\"oem_charge_watt\":\"%s\","
+        "\"oem_bat_capacity\":\"%s\",\"oem_dual_cell\":%d,\"oem_display_panel\":\"%s\","
+        "\"oem_display_vendor\":\"%s\",\"oem_display_max_hz\":\"%s\",\"oem_display_nits\":\"%s\","
+        "\"oem_cpu_governor\":\"%s\",\"oem_gpu_governor\":\"%s\",\"oem_security_chip\":\"%s\","
+        "\"oem_secure_boot\":%d,\"oem_verified_boot\":\"%s\",\"oem_game_mode\":\"%s\","
+        "\"oem_perf_mode\":\"%s\",\"oem_power_save\":\"%s\",\"oem_ultra_power_save\":\"%s\","
+        "\"oem_ai_engine\":\"%s\",\"oem_memory_fusion\":\"%s\",\"oem_thermal\":\"%s\","
+        "\"oem_storage_boost\":\"%s\","
         "\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d,\"x_pp\":%d,\"x_pp_ok\":%d,\"x_cv\":%d,\"x_cv_mv\":%d,\"x_cv_ok\":%d,\"x_lc\":%d,\"x_lc_ma\":%d,\"x_nn\":%d,\"x_nn_ok\":%d,\"x_bmin\":%d,\"native_night\":%d,\"cl_tail\":\"%s\"}",
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
@@ -1925,7 +2099,16 @@ static void handle_status(int fd) {
         sys_bootloader, sys_soc_vendor, sys_soc_model, part_count, parts_json,
         gpu_model, gpu_vendor, gpu_freq_khz, gpu_freq_max_khz, gpu_freq_min_khz,
         gpu_governor, gpu_avail_gov, gpu_load_pct, gpu_load_src, gpu_throttled,
-        gpu_temp_c, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high,
+        gpu_temp_c,
+        oem_brand, oem_os_name, oem_os_version,
+        oem_build_fingerprint, oem_charging_protocol, oem_charging_watt,
+        oem_battery_capacity, oem_dual_cell, oem_display_panel,
+        oem_display_vendor, oem_display_max_hz, oem_display_peak_nits,
+        oem_cpu_governor, oem_gpu_governor, oem_security_chip,
+        oem_secure_boot, oem_verified_boot, oem_game_mode,
+        oem_perf_mode, oem_power_save, oem_ultra_power_save,
+        oem_ai_engine, oem_memory_fusion, oem_thermal_solution,
+        oem_storage_boost, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high,
         pd_pdo_count, pd_pdo_max_mv, pd_pdo_max_ma, pd_svid, pd_state,
         cc_limit_supported, cc_limit_val, power_path_en, jeita_index,
         soh_native, soh_first, soh_delta_x10, design_mah, chg_temp_limit,
@@ -2329,6 +2512,7 @@ int main(void) {
             update_sys_props();
             update_gpu();
             gpu_temp_c = gpu_temp;   /* 复用 thermal 已采的 GPU 温度给 App */
+            update_oem();
             push_history();
             apply_control(); apply_power_path(); apply_cv_and_current(); apply_native_night(); apply_night_mode(); high_temp_alert();
         }

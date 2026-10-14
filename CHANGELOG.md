@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.7.0 (2026-10-14)
+
+### ✨ 新增：OEM / 厂商信息采集（25 个字段）
+供 App「OEM / 系统」页走模块取数。数据来源：
+1. `/system|vendor|product|odm|system_ext/build.prop`（静态，直接读文件）
+2. `getprop <key>`（拿 persist.* 等运行时属性；模块是 root，命令可用）
+
+**字段**：`oem_brand` / `oem_os_name` / `oem_os_version` / `oem_fingerprint` /
+`oem_charge_proto` / `oem_charge_watt` / `oem_bat_capacity` / `oem_dual_cell` /
+`oem_display_panel` / `oem_display_vendor` / `oem_display_max_hz` / `oem_display_nits` /
+`oem_cpu_governor` / `oem_gpu_governor` / `oem_security_chip` / `oem_secure_boot` /
+`oem_verified_boot` / `oem_game_mode` / `oem_perf_mode` / `oem_power_save` /
+`oem_ultra_power_save` / `oem_ai_engine` / `oem_memory_fusion` / `oem_thermal` /
+`oem_storage_boost`
+
+**厂商识别覆盖**：小米（`ro.mi.os.version.name` / `ro.miui.ui.version.name`）、
+OPPO（`ro.build.version.oplusrom`）、vivo（`ro.vivo.os.version`）、
+其他走 `ro.build.version.incremental` 兜底。
+
+### 🔧 实现要点
+- `prop_get()` 用 `popen("getprop 'key'")` 单属性读取（比 fork 整个 getprop 列表快）
+- 找不到 `/system/bin/getprop` 时退到 `/vendor/bin/getprop`
+- 5 分钟缓存（这些都是静态/半静态属性）
+- 所有字符串写入用 `"%.*s"` + `(int)sizeof(dst)-N` 限长，消除 GCC 截断告警
+
+### 🧪 测试
+构造假 `getprop` 脚本，验证：`oem_brand=Xiaomi` / `oem_os_name=OS3.0.306.0` /
+`oem_fingerprint` 完整 / `oem_verified_boot=orange` 且 `oem_secure_boot=0`（正确判定非绿）/
+`oem_display_panel=AMOLED` / `oem_game_mode=1` / `oem_memory_fusion=4096` 全部正确。
+编译 -Wall -Wextra 零警告。
+
 ## v1.6.0 (2026-10-14)
 
 ### ✨ 模块补齐系统信息（为 App 走模块取数铺路）
