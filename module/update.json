@@ -1,6 +1,6 @@
 {
-  "version": "v1.9.0",
-  "versionCode": 77,
+  "version": "v1.10.0",
+  "versionCode": 78,
   "zipUrl": "https://github.com/ce11kjw/ChargeControl/releases/latest/download/ChargeControl.zip",
   "changelog": "https://raw.githubusercontent.com/ce11kjw/ChargeControl/main/CHANGELOG.md"
 }
