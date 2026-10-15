@@ -2162,6 +2162,20 @@ static void send_resp(int fd, int code, const char *ctype, const char *body) {
 }
 
 static void handle_status(int fd) {
+    /* ★ v1.9.0: 每核频率数组预生成（App CPU 页需要逐核数据） */
+    char cores_json[1024];
+    {
+        int off = 0;
+        off += snprintf(cores_json + off, sizeof(cores_json) - off, "[");
+        int n = cpu_cores > 0 && cpu_cores <= MAX_CORES ? cpu_cores : 1;
+        for (int i = 0; i < n && off < (int)sizeof(cores_json) - 80; i++) {
+            off += snprintf(cores_json + off, sizeof(cores_json) - off,
+                "%s{\"f\":%d,\"max\":%d,\"min\":%d}",
+                i ? "," : "", cpu_freq_khz[i], cpu_freq_max_khz[i], cpu_freq_min_khz[i]);
+        }
+        snprintf(cores_json + off, sizeof(cores_json) - off, "]");
+    }
+
     /* ★ v1.6.0: 分区数组预生成（主 JSON 串用 %s 拼入） */
     char parts_json[1024];
     {
@@ -2289,7 +2303,7 @@ static void handle_status(int fd) {
         /* v1.6.0 系统字段 */
         "\"cpu_usage\":%d,\"cpu_idle\":%d,\"cpu_deep_sleep\":%d,\"cpu_arch\":\"%s\",\"cpu_abi\":\"%s\","
         "\"cpu_cache_l1\":\"%s\",\"cpu_cache_l2\":\"%s\",\"cpu_cache_l3\":\"%s\","
-        "\"cpu_freq_khz\":%d,\"cpu_freq_max_khz\":%d,\"cpu_freq_min_khz\":%d,"
+        "\"cpu_freq_khz\":%d,\"cpu_freq_max_khz\":%d,\"cpu_freq_min_khz\":%d,\"cores\":%s,"
         "\"mem_buffers\":%d,\"mem_cached\":%d,\"mem_sreclaim\":%d,\"mem_sunreclaim\":%d,\"mem_shmem\":%d,"
         "\"mem_pagetables\":%d,\"mem_kernelstack\":%d,\"mem_vmallocused\":%d,\"mem_slab\":%d,\"mem_mapped\":%d,"
         "\"mem_swap_total\":%d,\"mem_swap_free\":%d,\"mem_zram_orig\":%d,\"mem_zram_compr\":%d,\"mem_zram_used\":%d,"
@@ -2337,7 +2351,7 @@ static void handle_status(int fd) {
         /* ★ v1.6.0 新增系统字段 */
         cpu_usage_total, cpu_idle_pct, cpu_deep_sleep_pct, cpu_arch, cpu_abi,
         cpu_cache_l1, cpu_cache_l2, cpu_cache_l3,
-        cpu_freq_khz[0], cpu_freq_max_khz[0], cpu_freq_min_khz[0],
+        cpu_freq_khz[0], cpu_freq_max_khz[0], cpu_freq_min_khz[0], cores_json,
         mem_buffers, mem_cached, mem_sreclaim, mem_sunreclaim, mem_shmem,
         mem_pagetables, mem_kernelstack, mem_vmallocused, mem_slab, mem_mapped,
         mem_swap_total, mem_swap_free, mem_zram_orig, mem_zram_compr, mem_zram_used,
