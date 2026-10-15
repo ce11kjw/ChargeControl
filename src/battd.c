@@ -121,7 +121,7 @@ static char sys_soc_vendor[64] = "", sys_soc_model[64] = "";
 /* ═══ v1.6.0 GPU（供 App GPU 页走模块取数）═══ */
 /* ═══ v1.7.0 OEM / 厂商信息（对齐 App 的 OemInfo）═══ */
 /* ═══ v1.8.0 硬件 / 设备详情（对齐 App DeviceDetailInfo 中模块可取的部分）═══ */
-static char dev_storage_type[32] = "";      /* UFS 4.0 / UFS 3.1 / eMMC 5.1 */
+static char dev_storage_type[64] = "";      /* UFS 4.0 / eMMC 5.1（含型号） */
 static char dev_memory_type[32] = "";       /* LPDDR5X / LPDDR5 / LPDDR4X */
 static int  dev_memory_speed_mhz = -1;
 static char dev_soc_chipname[64] = "";      /* SM8650 / MT6989 */
@@ -541,23 +541,36 @@ static void update_cpu_detail(void) {
     }
     (void)found_max;
 
-    /* 架构与 ABI */
+    /* 架构与 ABI
+       ★ v1.10.1 真机修复：/proc/cpuinfo 的 "CPU architecture" 给的是
+       内核内部编号（ARMv8 报 8、ARMv7 报 7），不是字符串。
+       原先直接照抄 → App 显示 "8"。现在做映射。 */
+    cpu_arch[0] = 0;
     read_str("/proc/sys/kernel/arch", cpu_arch, sizeof(cpu_arch));
-    if (cpu_arch[0] == 0) {
-        /* 退路：从 /proc/cpuinfo 的 CPU architecture 行取 */
+    if (cpu_arch[0] == 0 || (cpu_arch[0] >= '0' && cpu_arch[0] <= '9')) {
+        int arch_num = cpu_arch[0] ? atoi(cpu_arch) : 0;
         FILE *f = fopen("/proc/cpuinfo", "r");
         if (f) {
             char l[256];
             while (fgets(l, sizeof(l), f)) {
                 char *p = strstr(l, "CPU architecture");
                 if (p) {
-                    char *c = strchr(p, ':'); if (c) { c++; while (*c == ' ') c++;
-                        int n = 0; while (c[n] && c[n] != '\n' && n < 63) { cpu_arch[n] = c[n]; n++; }
-                        cpu_arch[n] = 0; }
+                    char *c = strchr(p, ':');
+                    if (c) { c++; while (*c == ' ') c++; arch_num = atoi(c); }
                     break;
                 }
             }
             fclose(f);
+        }
+        /* ARM 内核编号 → 可读名（含 64 位判断） */
+        if (arch_num >= 8) {
+            snprintf(cpu_arch, sizeof(cpu_arch), "ARMv%d-A (aarch64)", arch_num);
+        } else if (arch_num >= 7) {
+            snprintf(cpu_arch, sizeof(cpu_arch), "ARMv%d-A (armv7l)", arch_num);
+        } else if (arch_num > 0) {
+            snprintf(cpu_arch, sizeof(cpu_arch), "ARMv%d", arch_num);
+        } else {
+            snprintf(cpu_arch, sizeof(cpu_arch), "arm64");
         }
     }
 
@@ -918,6 +931,28 @@ static void update_device_detail(void) {
 
     /* ── 存储 / 内存 ── */
     TRY_PROP(dev_storage_type, "ro.boot.storage_type", "ro.vendor.storage_type", "ro.boot.hwstorage");
+    /* ★ v1.10.1 真机修复：小米等机型没有 storage_type 属性，
+       但 /sys/block 下的 device/model 有闪存型号（如 KLUFG8RHHD = 三星 UFS）。
+       按型号前缀反查。 */
+    if (dev_storage_type[0] == 0) {
+        const char *blk[] = {"/sys/block/sda/device/model", "/sys/block/mmcblk0/device/name",
+                             "/sys/block/sdb/device/model", NULL};
+        char mdl[64];
+        for (int bi = 0; blk[bi] && dev_storage_type[0] == 0; bi++) {
+            if (read_str(blk[bi], mdl, sizeof(mdl)) <= 0) continue;
+            /* KLU/KLU = Samsung UFS, KM = Samsung eMMC, H9T/H9Q = SK Hynix */
+            if (strncmp(mdl, "KLU", 3) == 0 || strncmp(mdl, "KLM", 3) == 0)
+                snprintf(dev_storage_type, sizeof(dev_storage_type), "UFS (Samsung %.20s)", mdl);
+            else if (strncmp(mdl, "KM", 2) == 0)
+                snprintf(dev_storage_type, sizeof(dev_storage_type), "eMMC (Samsung %.20s)", mdl);
+            else if (strncmp(mdl, "H9T", 3) == 0 || strncmp(mdl, "H9Q", 3) == 0)
+                snprintf(dev_storage_type, sizeof(dev_storage_type), "UFS (SK Hynix %.20s)", mdl);
+            else if (strncmp(mdl, "Y0", 2) == 0 || strncmp(mdl, "YC", 2) == 0)
+                snprintf(dev_storage_type, sizeof(dev_storage_type), "UFS (YMTC %.20s)", mdl);
+            else if (mdl[0])
+                snprintf(dev_storage_type, sizeof(dev_storage_type), "%.*s", (int)sizeof(dev_storage_type)-1, mdl);
+        }
+    }
     TRY_PROP(dev_memory_type,  "ro.boot.ddr_type", "ro.ddr_type", "ro.vendor.ddr_type");
     TRY_INT (dev_memory_speed_mhz, "ro.boot.ddr_freq");
 

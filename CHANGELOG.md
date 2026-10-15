@@ -1,5 +1,45 @@
 # Changelog
 
+## v1.10.1 (2026-10-16)
+
+### 🔴 修复：supervisor 的 PID 复用误判（真机故障）
+**现象**：手机重启后 battd 正常跑了几小时，之后进程消失且再没被拉起，
+App / Web UI 都「识别不到模块」。supervisor.log 最后一条是
+`supervisor already running`。
+
+**根因 1（主因）**：supervisor.sh 启动检查只判断 `/proc/<pid>` 目录是否存在：
+```sh
+if [ -f "$SUPF" ] && [ -d "/proc/$(cat $SUPF)" ]; then
+    log "supervisor already running"; exit 0
+fi
+```
+Android 的 PID 循环极快，旧 PID 被别的进程占用后该判断为真 →
+误认为 supervisor 还活着 → 直接 exit 0，**battd 从此无人守护**。
+⇒ 新增 `proc_is()`：必须 PID 存在 **且** cmdline 含预期关键字，
+才认定为同一进程。
+
+**根因 2**：service.sh 里 `supervisor.sh start ... &` 只是普通后台，
+boot 脚本退出后子进程可能被连带清理。
+⇒ 改 `setsid` 脱离会话；supervisor 自己写 PID 文件；
+   service.sh 增加「3 秒后检查，没起来就裸跑 battd」兜底。
+
+**附带**：service.sh 开机清理残留 PID 文件、等待 boot_completed 加 120s 超时、
+supervisor 新增 restart 子命令。
+
+### 🔴 修复：真机实测暴露的两个取值错误
+- **`cpu_arch` 显示为 "8"**：`/proc/cpuinfo` 的 `CPU architecture`
+  给的是**内核内部编号**（ARMv8 报 8），原代码直接照抄字符串。
+  现做映射：8 → `ARMv8-A (aarch64)`、7 → `ARMv7-A (armv7l)`，0 兜底 `arm64`。
+- **`dev_storage_type` 为空**：小米等机型没有 `ro.*.storage_type` 属性。
+  新增从 `/sys/block/*/device/model` 反查闪存型号：
+  KLU/KLM → 三星 UFS、KM → 三星 eMMC、H9T/H9Q → SK Hynix、Y0/YC → 长江存储。
+  实测 K60 Ultra 读到 `UFS (Samsung KLUFG8RHHD-B0G1)`。
+
+### 🧪 测试
+- cpu_arch 映射边界测试：8/7/6/0 四种输入全部正确
+- 存储型号反查：用真机型号 KLUFG8RHHD-B0G1 验证输出正确
+- 编译 -Wall -Wextra 零警告
+
 ## v1.9.0 (2026-10-15)
 
 ### 新增：每核 CPU 频率数组
