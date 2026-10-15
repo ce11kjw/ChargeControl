@@ -40,7 +40,6 @@ class DeviceRepository(context: Context) {
     private val memoryDataSource = MemoryDataSource()
     private val sensorDataSource = SensorDataSource(appContext)
     private val systemDataSource = SystemDataSource()
-    private val deviceDetailDataSource = DeviceDetailDataSource(appContext)
     private val oemDataSource = OemDataSource(appContext)
 
     // ═══════ CpuCache ═══════
@@ -99,7 +98,6 @@ class DeviceRepository(context: Context) {
     // 静态模块 LiveData
     val sensorsLiveData = MutableLiveData<List<SensorItemInfo>>()
     val systemLiveData = MutableLiveData<SystemInfo>()
-    val deviceDetailLiveData = MutableLiveData<DeviceDetailInfo>()
     val oemLiveData = MutableLiveData<OemInfo>()
 
     // 传感器
@@ -209,8 +207,6 @@ class DeviceRepository(context: Context) {
             }.onFailure { e -> Log.w(TAG, "存储信息采集失败", e) }
             runCatching { sensorsLiveData.postValue(sensorDataSource.getAllSensors()); healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "sensors") }
                 .onFailure { e -> Log.w(TAG, "传感器列表采集失败", e); healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "sensors") }
-            runCatching { deviceDetailLiveData.postValue(deviceDetailDataSource.collect()); healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "device") }
-                .onFailure { e -> Log.w(TAG, "设备详情采集失败", e); healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "device") }
             runCatching {
                 val oem = if (ms != null) {
                     com.ce11kjw.chargecontrol.data.model.OemInfo().also {
@@ -220,18 +216,6 @@ class DeviceRepository(context: Context) {
                 oemLiveData.postValue(oem)
                 healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "oem")
             }.onFailure { e -> Log.w(TAG, "OEM信息采集失败", e); healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "oem") }
-        }
-    }
-
-    /**
-     * ★ 新增 (2026-08-07): 仅重采「设备详情」一块。
-     * 用于 BLUETOOTH_CONNECT 运行时权限授予后立刻回填蓝牙名称，
-     * 避免为一个字段重跑 loadStaticData() 的全量静态采集。
-     */
-    fun refreshDeviceDetail() {
-        scope.launch(Dispatchers.IO) {
-            runCatching { deviceDetailLiveData.postValue(deviceDetailDataSource.collect()) }
-                .onFailure { e -> Log.w(TAG, "设备详情刷新失败", e) }
         }
     }
 

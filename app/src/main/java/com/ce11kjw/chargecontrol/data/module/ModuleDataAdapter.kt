@@ -54,12 +54,24 @@ object ModuleDataAdapter {
         info.cpuUsagePercent.let { /* 保留 */ }
         info.cpuidleSource = "module"
 
-        // 每核：模块只给了 cpu0 的频率（避免 16 个字段膨胀），
-        // 这里按核心数复制一份，标记为模块来源
+        // ★ v1.9.0: 模块提供 cores 数组（逐核 {f,max,min}）
         val f0 = o.optInt("cpu_freq_khz", -1)
         val fmax = o.optInt("cpu_freq_max_khz", -1)
         val fmin = o.optInt("cpu_freq_min_khz", -1)
-        if (info.coreCount > 0 && f0 > 0) {
+        val coresArr = o.optJSONArray("cores")
+        if (coresArr != null && coresArr.length() > 0) {
+            info.cores = (0 until coresArr.length()).mapNotNull { i ->
+                val c = coresArr.optJSONObject(i) ?: return@mapNotNull null
+                CpuCoreInfo(
+                    coreIndex = i,
+                    currentFreqKHz = c.optInt("f", -1).toLong(),
+                    maxFreqKHz = c.optInt("max", -1).toLong(),
+                    minFreqKHz = c.optInt("min", -1).toLong(),
+                    usagePercent = Float.NaN
+                )
+            }.toMutableList()
+        } else if (info.coreCount > 0 && f0 > 0) {
+            // 兼容旧版模块（只有 cpu0 单值）
             info.cores = (0 until info.coreCount).map { i ->
                 CpuCoreInfo(
                     coreIndex = i,
