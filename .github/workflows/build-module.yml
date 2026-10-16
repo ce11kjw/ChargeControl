@@ -16,14 +16,91 @@ on:
       - 'release.sh'
       - 'update.json'
       - '.github/workflows/build-module.yml'
+      - '.github/scripts/**'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  # ═══════════════════════════════════════════════════════════
+  # x86_64：编译 + 静态分析 + 冒烟测试
+  #
+  # aarch64 交叉编译只能验证「编得过」，无法运行。
+  # 这里编 x86_64 并在 CI 里真跑起来，用假 sysfs 做端到端测试
+  # （字段完整性 / 越界值拒绝 / 慢客户端 / 内存与 fd 稳定性）。
+  # 产物 test-bundle 可下载到任意 Linux 复现。
+  # ═══════════════════════════════════════════════════════════
+  test-x86:
+    name: x86_64 build + smoke test
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build x86_64 (native)
+        run: |
+          gcc -O2 -Wall -Wextra -Wno-unused-parameter \
+              -o battd-x86_64 src/battd.c
+          ls -l battd-x86_64
+          file battd-x86_64
+
+      - name: Static analysis (strict warnings)
+        run: |
+          echo "::group::-Wformat=2 校验 JSON 模板与 200 个参数"
+          gcc -O2 -Wall -Wextra -Wno-unused-parameter -Wformat=2 \
+              -fsyntax-only src/battd.c
+          echo "::endgroup::"
+
+          echo "::group::-Wshadow 变量遮蔽（v1.13.0 修过一处）"
+          gcc -O2 -Wall -Wextra -Wno-unused-parameter -Wshadow \
+              -fsyntax-only src/battd.c
+          echo "::endgroup::"
+
+          echo "✅ 静态分析通过"
+
+      - name: Smoke test
+        run: bash .github/scripts/smoke-test.sh
+
+      - name: Package test bundle
+        run: |
+          mkdir -p test-bundle/scripts
+          cp battd-x86_64        test-bundle/
+          cp src/battd.c         test-bundle/
+          cp .github/scripts/*   test-bundle/scripts/
+          cat > test-bundle/README.md <<'EOF'
+          # ChargeControl 测试包
+
+          在任何 Linux 上复现 CI 的冒烟测试：
+
+          ```sh
+          cd test-bundle
+          bash scripts/smoke-test.sh
+          ```
+
+          需要：gcc、python3、curl。
+
+          包含：
+          - `battd-x86_64`  —— CI 编出的 x86_64 二进制
+          - `battd.c`       —— 对应源码
+          - `scripts/`      —— 冒烟测试脚本
+          EOF
+          tar czf ChargeControl-test-bundle.tgz -C test-bundle .
+          sha256sum ChargeControl-test-bundle.tgz
+
+      - name: Upload test bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChargeControl-test-bundle
+          path: ChargeControl-test-bundle.tgz
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════
+  # aarch64：交叉编译 + 打包 + 发版
+  # ═══════════════════════════════════════════════════════════
+  build:
+    name: aarch64 build + release
+    runs-on: ubuntu-latest
+    needs: test-x86          # 冒烟测试通过才发版
     steps:
       - uses: actions/checkout@v4
 
@@ -66,7 +143,7 @@ jobs:
         run: |
           echo "=== zip 内容 ==="
           unzip -l ChargeControl.zip
-          for f in module.prop service.sh customize.sh bin/battd; do
+          for f in module.prop service.sh customize.sh bin/battd webroot/index.html; do
             unzip -l ChargeControl.zip | grep -q "$f" \
               || { echo "::error::zip 缺少 $f"; exit 1; }
           done
@@ -74,7 +151,6 @@ jobs:
           echo "✅ 校验通过"
 
       - name: Check tag vs module.prop
-        id: tagchk
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
