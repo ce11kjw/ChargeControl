@@ -125,6 +125,60 @@ class ChargeControlViewModel : ViewModel() {
     val chgTemp get() = ChargeControlApi.jint(status, "chg_temp")
     val caseTemp get() = ChargeControlApi.jint(status, "case_temp")
     // 高级
+    /* ═══ v1.12.0: 补齐此前未接的模块字段 ═══ */
+
+    // ── 电池本体 ──
+    val batManufacturer get() = ChargeControlApi.jstr(status, "bat_manufacturer")
+    val batModelName get() = ChargeControlApi.jstr(status, "bat_model_name")
+    val batPresent get() = ChargeControlApi.jbool(status, "bat_present")
+    val sohNative get() = ChargeControlApi.jint(status, "soh_native", -1)
+    val sohFirst get() = ChargeControlApi.jint(status, "soh_first", -1)
+    val sohDeltaX10 get() = ChargeControlApi.jint(status, "soh_delta_x10", 0)
+    val healthRating get() = ChargeControlApi.jstr(status, "health_rating")
+
+    // ── 充电协议 / PD ──
+    val pdType get() = ChargeControlApi.jint(status, "pd_type", -1)
+    val pdState get() = ChargeControlApi.jstr(status, "pd_state")
+    val pdSvid get() = ChargeControlApi.jstr(status, "pd_svid")
+    val pdPdoCount get() = ChargeControlApi.jint(status, "pd_pdo_count", 0)
+    val pdPdoMaxMv get() = ChargeControlApi.jint(status, "pd_pdo_max_mv", 0)
+    val pdPdoMaxMa get() = ChargeControlApi.jint(status, "pd_pdo_max_ma", 0)
+    val powerMaxMw get() = ChargeControlApi.jint(status, "power_max", 0)
+    /** PD 档位文本，如 "9V/3A" */
+    val pdTierText: String get() {
+        val mv = pdPdoMaxMv; val ma = pdPdoMaxMa
+        return if (mv > 0 && ma > 0) "%.1fV/%.1fA".format(mv / 1000.0, ma / 1000.0) else ""
+    }
+
+    // ── 高级控制的只读状态 ──
+    /** 充电 IC 节流档位（MTK charge_control_limit，非电量上限） */
+    val ccLimitVal get() = ChargeControlApi.jint(status, "cc_limit_val", -1)
+    val ccLimitSupported get() = ChargeControlApi.jbool(status, "cc_limit_supported")
+    /** 电源路径是否开启（真旁路前的状态） */
+    val powerPathEn get() = ChargeControlApi.jint(status, "power_path_en", -1)
+    val jeitaIndex get() = ChargeControlApi.jint(status, "jeita_index", -1)
+    val bypassHw get() = ChargeControlApi.jbool(status, "bypass_hw")
+    val nativeNight get() = ChargeControlApi.jint(status, "native_night", -1)
+
+    // ── 充电统计（本轮会话 + 累计）──
+    val sessActive get() = ChargeControlApi.jint(status, "sess_active", 0)
+    val sessMin get() = ChargeControlApi.jint(status, "sess_min", 0)
+    val sessMah get() = ChargeControlApi.jint(status, "sess_mah", 0)
+    val statsCount get() = ChargeControlApi.jint(status, "stats_count", 0)
+    val statsMin get() = ChargeControlApi.jint(status, "stats_min", 0)
+    val statsMah get() = ChargeControlApi.jint(status, "stats_mah", 0)
+
+    // ── 运行状态 ──
+    val alerted get() = ChargeControlApi.jint(status, "alerted", 0) == 1
+    val fullUntil get() = ChargeControlApi.jint(status, "full_until", 0)
+    /** 已触发手动充满 → 显示剩余保护时间 */
+    val fullUntilText: String get() {
+        val t = fullUntil
+        if (t <= 0) return ""
+        val left = t - (System.currentTimeMillis() / 1000).toInt()
+        return if (left > 0) "剩余保护 %d 分钟".format(left / 60) else ""
+    }
+
     val bypassOn get() = ChargeControlApi.jbool(status, "x_pp")
     val bypassOk get() = ChargeControlApi.jbool(status, "x_pp_ok")
     val bypassMin get() = ChargeControlApi.jint(status, "x_bmin", 50)

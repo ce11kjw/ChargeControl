@@ -32,6 +32,48 @@ object ChargeControlApi {
     private const val CONNECT_TIMEOUT = 2000
     private const val READ_TIMEOUT = 3000
 
+    /* ═══════════════════════════════════════════════════════════
+       v1.12.0: API 能力协商
+
+       模块与 App 独立发版，此前版本错配会"静默失败"
+       （App 发 x_pp 而模块只认 x_power_path → 开关无效但显示成功）。
+       现在模块在 /api/status 最前面返回 api_version 与 features，
+       App 据此判断功能可用性。
+       ═══════════════════════════════════════════════════════════ */
+
+    /** 本 App 期望的最低 API 版本。模块低于此值 → 提示用户升级模块。 */
+    const val MIN_API_VERSION = 1
+
+    /** 最近一次 status 解析出的能力集（由 DeviceRepository 更新） */
+    @Volatile
+    var apiVersion: Int = -1
+        private set
+
+    @Volatile
+    private var featureSet: Set<String> = emptySet()
+
+    /** 从 status JSON 更新能力信息（每次拉取 status 后调用） */
+    fun updateCapabilities(status: JSONObject?) {
+        if (status == null) return
+        apiVersion = status.optInt("api_version", -1)
+        featureSet = status.optString("features", "")
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet()
+        if (apiVersion in 1 until MIN_API_VERSION) {
+            Log.w(TAG, "模块 API 版本过旧: $apiVersion < $MIN_API_VERSION，部分功能不可用")
+        }
+    }
+
+    /** 模块是否支持某能力。模块未上报能力信息时返回 true（宽松兜底，避免误伤旧版）。 */
+    fun supports(feature: String): Boolean =
+        if (apiVersion < 0) true else feature in featureSet
+
+    /** 模块是否过旧（需要提示升级） */
+    val isModuleOutdated: Boolean
+        get() = apiVersion in 0 until MIN_API_VERSION
+
     /** 模块是否在线 */
     suspend fun isOnline(): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -53,9 +95,15 @@ object ChargeControlApi {
             if (conn.responseCode != 200) { conn.disconnect(); return@withContext null }
             val text = conn.inputStream.bufferedReader().use(BufferedReader::readText)
             conn.disconnect()
-            JSONObject(text)
+            val json = JSONObject(text)
+            /* ★ v1.12.0: 每次拉取都更新能力信息（模块可能刚升级） */
+            updateCapabilities(json)
+            json
         } catch (e: Throwable) {
             Log.w(TAG, "fetchStatus failed: ${e.message}")
+            // 拉取失败视为模块离线，清空能力（下次成功会重建）
+            apiVersion = -1
+            featureSet = emptySet()
             null
         }
     }

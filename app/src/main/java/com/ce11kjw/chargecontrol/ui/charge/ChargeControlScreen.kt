@@ -110,6 +110,88 @@ fun ChargeControlScreen(vm: ChargeControlViewModel = androidx.lifecycle.viewmode
             }
         }
 
+        // ── 充电统计（v1.12.0: sess_* / stats_*）──
+        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = NeonPurple.copy(alpha = 0.08f)),
+            elevation = CardDefaults.cardElevation(0.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("充电统计", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                    if (vm.sessActive == 1) {
+                        Text("统计中", fontSize = 11.sp, color = SuccessNeon)
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Stat("本次时长", if (vm.sessMin > 0) "${vm.sessMin}分" else "--")
+                    Stat("本次充入", if (vm.sessMah != 0) "${vm.sessMah}mAh" else "--")
+                    Stat("累计次数", if (vm.statsCount > 0) "${vm.statsCount}" else "--")
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Stat("累计时长", if (vm.statsMin > 0) "${vm.statsMin / 60}h${vm.statsMin % 60}m" else "--")
+                    Stat("累计充入", if (vm.statsMah > 0) "${vm.statsMah}mAh" else "--")
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+
+        // ── 电池健康（v1.12.0: soh_* / health_rating / 厂商型号）──
+        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = NeonPurple.copy(alpha = 0.08f)),
+            elevation = CardDefaults.cardElevation(0.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("电池健康", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Stat("健康度", if (vm.sohNative > 0) "${vm.sohNative}%" else "--")
+                    Stat("评级", vm.healthRating.ifEmpty { "--" })
+                    Stat("循环", if (vm.cycleCount >= 0) "${vm.cycleCount}" else "--")
+                }
+                if (vm.sohFirst > 0 || vm.sohDeltaX10 != 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Stat("首次记录", if (vm.sohFirst > 0) "${vm.sohFirst}%" else "--")
+                        val d = vm.sohDeltaX10 / 10.0
+                        Stat("相对变化", if (vm.sohDeltaX10 != 0) "%+.1f%%".format(d) else "0.0%")
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+                if (vm.batManufacturer.isNotEmpty() || vm.batModelName.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("${vm.batManufacturer} ${vm.batModelName}".trim(),
+                        fontSize = 11.sp, color = TextSecondary)
+                }
+            }
+        }
+
+        // ── PD 协议（v1.12.0: pd_* / power_max）──
+        if (vm.pdType >= 0 || vm.pdPdoCount > 0 || vm.powerMaxMw > 0) {
+            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = NeonPurple.copy(alpha = 0.08f)),
+                elevation = CardDefaults.cardElevation(0.dp)
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("PD 协议", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Stat("档位", vm.pdTierText.ifEmpty { "--" })
+                        Stat("档数", if (vm.pdPdoCount > 0) "${vm.pdPdoCount}" else "--")
+                        Stat("上限功率", if (vm.powerMaxMw > 0) "%.0fW".format(vm.powerMaxMw / 1000.0) else "--")
+                    }
+                    if (vm.pdState.isNotEmpty() || vm.pdSvid.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(listOf(vm.pdState, vm.pdSvid.takeIf { it.isNotEmpty() }?.let { "SVID $it" } ?: "")
+                                .filter { it.isNotEmpty() }.joinToString(" · "),
+                            fontSize = 11.sp, color = TextSecondary)
+                    }
+                }
+            }
+        }
+
         // ── 充电控制 ──
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = NeonPurple.copy(alpha = 0.08f)),

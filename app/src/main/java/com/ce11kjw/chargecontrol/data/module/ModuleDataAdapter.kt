@@ -210,6 +210,87 @@ object ModuleDataAdapter {
         info.cycleCountSource = "module"
         info.chargeFullSource = "module"
         info.currentNowSource = "module"
+
+        /* ★ v1.12.0: 补齐此前未接的字段（模块早已采集，App 白采） */
+
+        // ── 电池健康度 ──
+        val sohNative = o.optInt("soh_native", -1)
+        if (sohNative > 0) {
+            info.sohPercent = sohNative.toFloat()
+            info.healthPercent = sohNative
+            info.capacityFadePercent = 100f - sohNative
+        } else if (info.chargeFullMAh > 0 && info.capacityDesignMAh > 0) {
+            val s2 = info.chargeFullMAh.toFloat() / info.capacityDesignMAh * 100f
+            info.sohPercent = s2
+            info.healthPercent = s2.toInt()
+            info.capacityFadePercent = 100f - s2
+        }
+        info.sohFirstPercent = o.optInt("soh_first", -1)
+        info.sohDeltaX10 = o.optInt("soh_delta_x10", 0)
+
+        // ── 电池本体 ──
+        info.manufacturer = o.optString("bat_manufacturer", "")
+        info.modelName = o.optString("bat_model_name", "")
+        info.batPresent = o.optInt("bat_present", -1) == 1
+        info.dualCell = o.optInt("oem_dual_cell", 0) == 1
+
+        // ── 充电协议 / PD ──
+        info.protocolDetected = o.optString("proto_name", "")
+        info.pdType = o.optInt("pd_type", -1)
+        info.pdState = o.optString("pd_state", "")
+        info.pdSvid = o.optString("pd_svid", "")
+        info.pdPdoCount = o.optInt("pd_pdo_count", 0)
+        val pdoMv = o.optInt("pd_pdo_max_mv", 0)
+        val pdoMa = o.optInt("pd_pdo_max_ma", 0)
+        if (pdoMv > 0) info.maxChargingVoltageUV = pdoMv.toLong() * 1000
+        if (pdoMa > 0) info.maxChargingCurrentUA = pdoMa.toLong() * 1000
+        val pwrMax = o.optInt("power_max", 0)
+        if (pwrMax > 0) info.chargerMaxPowerMw = pwrMax.toLong()
+
+        // ── 插拔 / 电源来源 ──
+        info.isPlugged = o.optInt("usb_online", 0) == 1
+        info.chargerType = when (o.optInt("charge_type", -1)) {
+            1 -> "AC"; 2 -> "USB"; 4 -> "无线"; 8 -> "底座"; else -> ""
+        }
+        info.powerSourceLabel = if (info.isPlugged) "已连接电源" else "电池供电"
+
+        // ── 实时功率 ──
+        val pmw = o.optInt("power_mw", 0)
+        if (pmw != 0) info.wattageNow = kotlin.math.abs(pmw) / 1000.0
+
+        // ── 时间估算 ──
+        val ttf = o.optInt("time_to_full", -1)
+        val tte = o.optInt("time_to_empty", -1)
+        info.chargeRemainingTimeMin = if (ttf > 0) ttf else -1
+        info.dischargeRemainingTimeMin = if (tte > 0) tte else -1
+
+        // ── 绝对容量 ──
+        info.capacityNowMAh = o.optInt("capacity_disp", -1).toLong()
+        info.chargeNowUAh = o.optInt("charge_now", -1).toLong()
+        val cRem = o.optInt("charge_counter", -1).toLong()
+        if (cRem >= 0) info.capacityRemainingUAh = cRem
+
+        // ── 预估开路电压 ──
+        val ocv = o.optInt("voltage_ocv", -1)
+        if (ocv > 0) info.estimatedOcvMv = ocv
+
+        // ── 其它 ──
+        info.temperatureNormalized = o.optInt("temp_ambient", -1) > 0
+        info.isPowerSaveMode = o.optString("oem_power_save", "") == "1"
+
+        /* 当前电量对应的绝对容量：模块给百分比 + charge_counter，
+           直接换算成 mAh（比 App 自读 sysfs 更准） */
+        if (info.chargeCounterUAh > 0) {
+            info.capacityNowMAh = info.chargeCounterUAh / 1000
+        }
+
+        /* 未接的 4 个字段（模块确实不采集，留默认值）：
+           capacityMaxPct / isCapacityLocked / capacityLockLevel  ← 小米锁容，需读
+             /sys/class/power_supply/battery/capacity_max（本机不存在）
+           chargerTypeFromPlugged  ← Framework EXTRA_PLUGGED，模块在 C 层拿不到
+           currentNormalizedMa     ← BBK 私有归一化，非 BBK 机型无意义
+           powerProfileCapacityMAh ← power_profile.xml，非 sysfs */
+
         return info
     }
 
