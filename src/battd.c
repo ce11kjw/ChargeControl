@@ -964,6 +964,47 @@ static void update_device_detail(void) {
     TRY_PROP(dev_usb_version, "ro.boot.usb_speed", "ro.usb.speed", "persist.sys.usb.speed");
     TRY_INT (dev_usb_typec, "ro.hardware.usb.typec");
 
+    /* ★ v1.11.1 修复：dev_usb_host 此前声明了但从未赋值（永远是 -1）。
+       真机实测判据（K60 Ultra / 天玑 9200+）：
+         · /sys/class/typec/port0/ 存在 → Type-C
+         · 设备树 usb 节点的 dr_mode = otg → 支持 Host（OTG）
+         · 退路：ro.usb.host / ro.boot.usb.host 属性 */
+    if (dev_usb_typec < 0) {
+        if (access("/sys/class/typec/port0", F_OK) == 0) dev_usb_typec = 1;
+    }
+    {
+        int host = -1;
+        /* 设备树 dr_mode：扫 /sys/firmware/devicetree/base/soc 下的 usb 节点 */
+        DIR *d = opendir("/sys/firmware/devicetree/base/soc");
+        if (d) {
+            struct dirent *e;
+            while ((e = readdir(d))) {
+                if (strncmp(e->d_name, "usb", 3) != 0) continue;
+                char pth[256];
+                snprintf(pth, sizeof(pth), "/sys/firmware/devicetree/base/soc/%.80s/dr_mode", e->d_name);
+                char dm[32];
+                if (read_str(pth, dm, sizeof(dm)) > 0) {
+                    /* dr_mode 内容带结尾 NUL，read_str 已处理换行 */
+                    if (strstr(dm, "otg") || strstr(dm, "host")) { host = 1; break; }
+                }
+            }
+            closedir(d);
+        }
+        /* 退路：属性 */
+        if (host < 0) {
+            const char *ks[] = {"ro.usb.host", "ro.boot.usb.host", NULL};
+            for (int i = 0; ks[i]; i++) {
+                if (prop_get(ks[i], b, sizeof(b)) > 0 && b[0]) { host = atoi(b) ? 1 : 0; break; }
+            }
+        }
+        /* 再退路：有 usb_role 或 typec port 即视为支持（现代机基本都支持 OTG） */
+        if (host < 0) {
+            if (access("/sys/class/usb_role", F_OK) == 0
+                || access("/sys/class/typec/port0", F_OK) == 0) host = 1;
+        }
+        dev_usb_host = host;   /* -1 表示确实判不出来 */
+    }
+
     /* ── 蓝牙 / WiFi ── */
     TRY_PROP(dev_bluetooth_ver, "ro.vendor.bt.version", "ro.bluetooth.version", "ro.boot.bt.version", "persist.vendor.bt.version");
     TRY_INT (dev_wifi_6e, "ro.vendor.wifi.6e_support", "ro.boot.wifi.6e");

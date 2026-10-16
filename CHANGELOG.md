@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.11.1 (2026-10-16)
+
+### 修复：dev_usb_host 从未赋值
+声明了 dev_usb_host 但 update_device_detail() 里从没赋值，
+输出恒为 -1，App 的 USB Host 判断永远不准。
+
+真机实测（K60 Ultra / 天玑 9200+）确立判据：
+1. 设备树 usb 节点 dr_mode = otg/host → 支持
+2. /sys/class/typec/port0 存在 → Type-C
+3. 退路：ro.usb.host 属性、usb_role 节点存在
+
+本机实测：dev_usb_typec=1（Type-C）、dev_usb_host=1（支持 OTG）。
+
+### 代码审阅发现（未改，记录备查）
+- handle_status() 约 260 行、200 个位置参数 —— 加字段极易错位，建议拆 builder
+- history.json / session.jsonl 各自实现了尾部滚动截断，可抽公共函数
+- chg_stage 用裸 int（0-4）散落 5 处，建议改 enum
+- cpu_freq/min/max 三数组永远同行出现，建议合成 struct
+
 ## v1.11.0 (2026-10-16)
 
 ### 🎨 Web UI 配色对齐 App
