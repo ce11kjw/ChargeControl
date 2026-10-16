@@ -17,6 +17,7 @@ import com.ce11kjw.chargecontrol.data.source.*
 import com.ce11kjw.chargecontrol.data.module.ChargeControlApi
 import com.ce11kjw.chargecontrol.data.module.ModuleDataAdapter
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
 
@@ -108,8 +109,14 @@ class DeviceRepository(context: Context) {
     val historyData = MutableLiveData<Map<String, List<HistoryDataPoint>>>(emptyMap())
 
     // ═══════ 协程调度 ═══════
-    /* ★ v1.9.0 纯模块取数：模块在线时全部数据来自 /api/status */
+    /* ★ v1.9.0 纯模块取数：模块在线时全部数据来自 /api/status
+       ★ v1.11.2: 加时间戳缓存 + 互斥。
+       4 个采集 Block 是独立协程并发跑的，原先各自调 refreshModuleStatus()，
+       一个轮询周期会发 4 次 HTTP（实际只需 1 次）。
+       现在 500ms 内的并发调用共享同一次请求结果。 */
     private var moduleStatus: org.json.JSONObject? = null
+    private var moduleStatusAt = 0L
+    private val moduleFetchLock = kotlinx.coroutines.sync.Mutex()
     /** 模块最近一次拉取是否成功 —— 供 UI 显示「不可用」 */
     @Volatile var moduleOnline: Boolean = false
         private set
@@ -187,8 +194,11 @@ class DeviceRepository(context: Context) {
 
     fun loadStaticData() {
         scope.launch(Dispatchers.IO) { // ★ 修复(N3): 阻塞 I/O 跑 IO 线程池 (原 Default 占 CPU 线程)
-            /* ★ v1.9.0: 静态数据也走模块（纯模块策略） */
-            val ms = refreshModuleStatus()
+            /* ★ v1.9.0: 静态数据也走模块（纯模块策略）
+               ★ v1.11.2: force=true —— 静态数据是页面首次加载的关键路径，
+               若恰好复用采集 Block 的旧缓存（可能是模块刚启动时的空值），
+               会导致设备详情空白。强制刷新。 */
+            val ms = refreshModuleStatus(force = true)
 
             runCatching {
                 val info = if (ms != null) {
@@ -239,11 +249,30 @@ class DeviceRepository(context: Context) {
      * 所有采集 Block 都先调它 —— 一次 HTTP 拿到全部数据，
      * 避免每个 Block 各请求一遍。
      */
-    private suspend fun refreshModuleStatus(): org.json.JSONObject? {
-        val st = try { ChargeControlApi.fetchStatus() } catch (e: Throwable) { null }
-        moduleStatus = st
-        moduleOnline = ModuleDataAdapter.isUsable(st)
-        return if (moduleOnline) st else null
+    /**
+     * 拉取模块状态（带 500ms 缓存 + 互斥）。
+     *
+     * 4 个采集 Block 并发调用时，只有第一个真正发 HTTP，
+     * 其余等待并复用结果 —— 一个轮询周期最多 1 次请求。
+     *
+     * @param force true 时忽略缓存（手动刷新用）
+     */
+    private suspend fun refreshModuleStatus(force: Boolean = false): org.json.JSONObject? {
+        val now = System.currentTimeMillis()
+        if (!force && moduleStatus != null && now - moduleStatusAt < 500) {
+            return if (moduleOnline) moduleStatus else null
+        }
+        moduleFetchLock.withLock {
+            val t2 = System.currentTimeMillis()
+            if (!force && moduleStatus != null && t2 - moduleStatusAt < 500) {
+                return if (moduleOnline) moduleStatus else null
+            }
+            val st = try { ChargeControlApi.fetchStatus() } catch (e: Throwable) { null }
+            moduleStatus = st
+            moduleStatusAt = System.currentTimeMillis()
+            moduleOnline = ModuleDataAdapter.isUsable(st)
+            return if (moduleOnline) st else null
+        }
     }
 
     private suspend fun collectCpuBlock() {
@@ -272,7 +301,7 @@ class DeviceRepository(context: Context) {
 
     private suspend fun collectGpuBlock() {
         try {
-            val ms = moduleStatus ?: refreshModuleStatus()
+            val ms = refreshModuleStatus()
             val gpu = if (ms != null) ModuleDataAdapter.toGpuInfo(ms)
                       else com.ce11kjw.chargecontrol.data.model.GpuInfo()
             if (ms != null) cachedChip?.let { CpuCache.injectGpuInfo(it, gpu) }
@@ -291,7 +320,7 @@ class DeviceRepository(context: Context) {
 
     private suspend fun collectMemoryBlock() {
         try {
-            val ms = moduleStatus ?: refreshModuleStatus()
+            val ms = refreshModuleStatus()
             val mem = if (ms != null) ModuleDataAdapter.toMemoryInfo(ms)
                       else com.ce11kjw.chargecontrol.data.model.MemoryInfo()
             // 内存核心指标 (total/used/available/free/swap/zram) 始终来自 /proc/meminfo,
@@ -309,7 +338,7 @@ class DeviceRepository(context: Context) {
 
     private suspend fun collectBatteryBlock() {
         try {
-            val ms = moduleStatus ?: refreshModuleStatus()
+            val ms = refreshModuleStatus()
             val bat = if (ms != null) ModuleDataAdapter.toBatteryInfo(ms)
                       else com.ce11kjw.chargecontrol.data.model.BatteryInfo()
             _batteryFlow.emit(bat); batteryLiveData.postValue(bat)
