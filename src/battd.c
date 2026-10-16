@@ -354,6 +354,18 @@ static void log_event(const char *msg) {
 
 static time_t temps_last = 0;
 static time_t slow_bat_last = 0;
+/* ★ v1.13.0: 电池健康度评级的唯一来源。
+   此前下采样与 handle_status 各写了一套阈值（95/85/70/60 vs 90/80/70），
+   同一台机器可能显示不同评级。现在统一走这里。 */
+static const char *health_rating_of(int h) {
+    if (h <= 0)   return "未知";
+    if (h >= 90)  return "优秀";
+    if (h >= 80)  return "良好";
+    if (h >= 70)  return "一般";
+    if (h >= 60)  return "较差";
+    return "需更换";
+}
+
 static void slow_update_battery(void) {
     time_t tn = time(NULL);
     if (tn - slow_bat_last < 30) return;
@@ -1396,7 +1408,10 @@ static void update_battery(void) {
         float health_f = (float)charge_full_mah / (float)design_mah * 100.0f;
         if (health_f > 100) health_f = 100;
         if (health_f < 0) health_f = 0;
-        health = (int)(health_f * 10 + 0.5f) / 10.0f;
+        /* ★ v1.13.0: 原写法 (int)(health_f*10+0.5f)/10.0f 的本意是「四舍五入
+           到整数」（(int)(927+0.5)=927 再 /10.0f=92.7），但 health 是 int，
+           赋值时又截断回 92 —— 既绕又易误读。直接四舍五入即可。 */
+        health = (int)(health_f + 0.5f);
     }
     /* 剩余循环估算（用真实设计容量，不再硬编码） */
     if (cycle_count > 0 && charge_full_mah > 0 && design_mah > 0) {
@@ -1407,12 +1422,10 @@ static void update_battery(void) {
             est_cycles_left = est;
         }
     }
+    /* ★ v1.13.0: 评级统一由 health_rating_of() 生成，
+       消除此前「下采样一套阈值、status 另一套阈值」的不一致 */
     if (health > 0) {
-        if (health >= 95) strcpy(health_rating, "优秀");
-        else if (health >= 85) strcpy(health_rating, "良好");
-        else if (health >= 70) strcpy(health_rating, "一般");
-        else if (health >= 60) strcpy(health_rating, "较差");
-        else strcpy(health_rating, "需更换");
+        snprintf(health_rating, sizeof(health_rating), "%s", health_rating_of(health));
     }
     slow_update_battery();
 }
@@ -2404,11 +2417,10 @@ static void handle_status(int fd) {
     health_degrade = 0.0f;
     if (cycle_count > 0 && health > 0 && health < 100)
         health_degrade = (100.0f - health) / cycle_count * 1000.0f; /* 每千次循环衰减% */
-    const char *health_rating = "未知";
-    if (health >= 90) health_rating = "优秀";
-    else if (health >= 80) health_rating = "良好";
-    else if (health >= 70) health_rating = "一般";
-    else if (health >= 0) health_rating = "较差";
+    /* ★ v1.13.0: 删除此处遮蔽的局部 const char* 变量
+       （原名与全局 health_rating[16] 同名，导致 L1411 写入的全局值
+        从未被输出，status 实际用的是这里另一套阈值） */
+    const char *health_rating_out = health_rating_of(health);
     int est_cycles_left = 0;
     if (cycle_count > 0 && health > 0) {
         float loss_per_cycle = (100.0f - health) / cycle_count;
@@ -2471,7 +2483,7 @@ static void handle_status(int fd) {
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
-        cycle_count, health, health_rating,
+        cycle_count, health, health_rating_out,
         charge_full, est_cycles_left,
         power_mw, est_full_min, est_full_txt, health_degrade,
         usb_online, proto_name, pd_type, usb_power_max,
