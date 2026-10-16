@@ -140,7 +140,6 @@ class ChargeControlViewModel : ViewModel() {
     val pdType get() = ChargeControlApi.jint(status, "pd_type", -1)
     val pdState get() = ChargeControlApi.jstr(status, "pd_state")
     val pdSvid get() = ChargeControlApi.jstr(status, "pd_svid")
-    val pdPdoCount get() = ChargeControlApi.jint(status, "pd_pdo_count", 0)
     val pdPdoMaxMv get() = ChargeControlApi.jint(status, "pd_pdo_max_mv", 0)
     val pdPdoMaxMa get() = ChargeControlApi.jint(status, "pd_pdo_max_ma", 0)
     val powerMaxMw get() = ChargeControlApi.jint(status, "power_max", 0)
