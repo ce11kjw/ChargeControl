@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.12.0 (2026-10-16)
+
+### 新增：API 版本与能力协商
+模块与 App 独立发版，此前版本错配会“静默失败”（如 App 发 `x_pp`
+而模块只认 `x_power_path`，开关无效但 App 显示成功）。
+现在 `/api/status` 最前面返回两个协商字段：
+
+    {"api_version":1,"features":"curve,sessions,calibrate,cores,parts,x_control,..."}
+
+**14 个能力项**：`curve` / `sessions` / `calibrate` / `cores` / `parts` /
+`x_control` / `device_detail` / `oem` / `sys_props` / `mem_detail` /
+`gpu` / `soh` / `pd` / `session_stat`
+
+App 侧用法：`api_version < MIN` → 提示升级；`“x_control” in features` →
+判断高级控制可用性。以后加功能能优雅降级，而不是瞎猜。
+
+### 新增：docs/API.md（410 行接口文档）
+把 233 个字段 + 10 个端点 + 能力清单 + 数据文件说明全部文档化。
+此前契约只存在于对话里 —— 这次就是为了防止再出“键名不匹配”那类问题。
+
+含：端点总览 / 能力协商说明（App 必读）/ 233 字段按前缀分组（附当前值）/
+`POST /api/limit` 的长短名对照表 + 范围 / 行为约定（越界值静默忽略 →
+App 必须回读验证）
+
 ## v1.11.2 (2026-10-16)
 
 ### 🔴 修复：慢客户端会拖死主循环（代码审阅发现）
