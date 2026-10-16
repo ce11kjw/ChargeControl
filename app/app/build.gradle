@@ -1,0 +1,152 @@
+plugins {
+    id 'com.android.application' version '9.0.1'
+    // AGP 9.0 内置 Kotlin (2.2.10)，无需 kotlin-android 插件；compose 编译器随内置 Kotlin 版本
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.2.10'
+}
+
+android {
+    namespace 'com.ce11kjw.chargecontrol'
+    compileSdk 36   // AGP9 上限 36.1；BOM 2025.06.00 + 内置 Kotlin 2.2.10 要求 compileSdk ≥ 36；targetSdk 同步 36（Android 16，满足 2026-08-31 Play 目标 API 截止）
+
+    // ★ 新增 (2026-08-07): NDK — Vulkan 真实扩展枚举探针 libcybervulkan.so
+    //   显式 pin 版本，避免 CI 与本地 NDK 漂移导致的不可复现构建。
+    //   r29 = Latest Stable (developer.android.com/ndk/downloads，核验 2026-08-07)。
+    //   选 r29 而非 LTS r27d 的理由: NDK r28+ 默认 16 KB page 对齐，
+    //   而 targetSdk 36 (≥35) 且含 native 代码的应用自 2025-11-01 起被 Play 强制要求 16 KB 兼容。
+    ndkVersion "29.0.14206865"
+
+    externalNativeBuild {
+        cmake {
+            path file("src/main/cpp/CMakeLists.txt")
+            // "+" 后缀 = 最低版本语义 (对齐 cmake_minimum_required 行为，官方 DSL 支持)。
+            // CI 显式安装 cmake;3.22.1；若 runner 预装了更高版本亦可直接满足，
+            // 避免硬钉版本在 SDK 仓库变动时把构建打挂。
+            version "3.22.1+"
+        }
+    }
+    def ksBase64  = System.getenv("KEYSTORE_BASE64")
+    def ksPassword = System.getenv("KEYSTORE_PASSWORD")
+    def ksAlias   = System.getenv("KEY_ALIAS")
+    def ksKeyPassword = System.getenv("KEY_PASSWORD")
+
+    def doSign = ksBase64 != null && !ksBase64.isBlank() &&
+                 ksPassword != null && !ksPassword.isBlank() &&
+                 ksAlias != null && !ksAlias.isBlank() &&
+                 ksKeyPassword != null && !ksKeyPassword.isBlank()
+
+    if (doSign) {
+        def ksFile = new File(System.getProperty("java.io.tmpdir"), "device-info-viewer-release.keystore")
+        ksFile.bytes = ksBase64.decodeBase64()
+        signingConfigs {
+            ciRelease {
+                storeFile ksFile
+                storePassword ksPassword
+                keyAlias ksAlias
+                keyPassword ksKeyPassword
+                v1SigningEnabled true
+                v2SigningEnabled true
+            }
+        }
+    }
+
+defaultConfig {
+    applicationId "com.ce11kjw.chargecontrol"
+    minSdk 21
+    targetSdk 36   // Android 16 (API 36)；2026-08-31 Play 目标 API 截止。健康权限: 传感器详情页直读 TYPE_HEART_RATE 需 BODY_SENSORS(全版本有效, Play 上架需填"身体传感器"用途声明); 未使用 Health Connect / android.permission.health.*, 无需健康权限迁移; 仅前台使用, 不声明 BODY_SENSORS_BACKGROUND。
+    versionCode 1
+    versionName "1.0.0"
+
+    // ★ 新增 (2026-08-07): 仅为 arm64-v8a 打包 native 探针。
+    //   理由: 32 位设备已无新机，多打三份 ABI 会让 APK 无谓膨胀。
+    //   其它 ABI 上 System.loadLibrary 抛 UnsatisfiedLinkError，
+    //   VulkanProbe 捕获后静默降级到原有 OEM 提示判据链，功能不缺失。
+    ndk {
+        abiFilters "arm64-v8a"
+    }
+
+    buildConfigField "long", "BUILD_TIMESTAMP", "${System.currentTimeMillis()}L"
+    def buildDate = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(new java.util.Date())
+    buildConfigField "String", "BUILD_TIME_UTC", "\"${buildDate} UTC\""
+}
+
+    buildTypes {
+        release {
+            // ★ 性能优化 (2026-06-19): 启用 R8 代码缩减 + 资源缩减
+            //   - minifyEnabled: 移除未使用代码（第三方库死代码），减小 dex 体积，加快类加载
+            //   - shrinkResources: 移除未引用资源，减小 APK 体积
+            //   - proguard-rules.pro 保留 -dontobfuscate（不混淆），保护大量反射调用
+            //     (SystemProperties/BatteryManager hidden field/GnssStatus/VMRuntime 等)
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (doSign) {
+                signingConfig signingConfigs.ciRelease
+            }
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests {
+            // F-13 后 StepCounterStore 等引入 Log.*；纯 JVM 单测默认对未 mock 的 android.*
+            // 抛 "not mocked" RuntimeException。此开关让单测中 android.util.Log 返回默认值，
+            // 不炸纯逻辑单测（Android 官方推荐配置）。
+            // Groovy DSL 遵循 JavaBeans: boolean getter isReturnDefaultValues() → 属性名 returnDefaultValues
+            // (写 isReturnDefaultValues= 会找 setIsReturnDefaultValues(), AGP 未定义 → 配置期 MissingPropertyException)
+            returnDefaultValues = true
+        }
+    }
+
+    buildFeatures {
+        compose true
+        buildConfig true    // ← 新增：启用 BuildConfig 字段生成
+    }
+
+    // ★ 启动性能优化 (2026-06-19): R8 dex startup optimization
+    //   android.experimental.r8.dex-startup-optimization 在 AGP 8.x 已废弃 (README 说明)，
+    //   故 gradle.properties 未启用该开关；R8 仍会通过 minifyEnabled + shrinkResources 缩减代码与资源。
+    //   完整 Baseline Profile 需 macrobenchmark 模块自动生成，
+    //   src/main/baseline-prof.txt 为手写参考，需未来集成 macrobenchmark 插件生效
+
+}
+
+dependencies {
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.2.10'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.4'
+    implementation 'androidx.lifecycle:lifecycle-livedata-ktx:2.8.4'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.4'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.4'
+    implementation 'androidx.activity:activity-compose:1.9.0'
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'io.insert-koin:koin-android:3.5.6'
+    implementation 'io.insert-koin:koin-androidx-compose:3.5.6'
+    implementation platform('androidx.compose:compose-bom:2025.06.00')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-graphics'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation('androidx.compose.material3:material3') {
+        // ★ 裁剪 material-icons-core: 全仓 22 处通用图标已由 CyberIcons 自绘替代，
+        //   强制排除 material3 传递引入的 material-icons-core，进一步缩小 APK / dex。
+        //   注意: 若未来 M3 组件内部硬编码引用 Icons.*，此处 exclude 会导致运行时崩溃，
+        //   故替换后须全页面冒烟测试。
+        exclude group: 'androidx.compose.material', module: 'material-icons-core'
+    }
+    // ★ 裁剪 material-icons-extended: 全仓仅 6 图标依赖 (Window/Language/DragHandle/Sensors/Schedule/BatteryFull),
+    //   已由 ui/components/CyberIcons.kt 自绘替代 (描边风格与 ic_cyber_* 一致)。
+    //   收益: release APK -2~4MB, dex 少 2000+ 类, 构建变快。
+    implementation 'sh.calvin.reorderable:reorderable:3.1.0'
+    implementation 'androidx.compose.runtime:runtime-livedata'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
+    // DataStore (P2原): SysFsCapabilityProbe 持久化后端, 跨冷启动/跨进程存活
+    implementation 'androidx.datastore:datastore-preferences:1.1.1'
+    // 单元测试 (P2#13: 此前 BatteryDataSourceCurrentUnitTest 为孤儿测试, 无 junit 依赖无法运行)
+    testImplementation 'junit:junit:4.13.2'
+}
