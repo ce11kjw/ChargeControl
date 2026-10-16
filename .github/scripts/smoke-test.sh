@@ -19,13 +19,21 @@ echo 26      > "$FS"/sys/class/power_supply/battery/cycle_count
 echo 5413000 > "$FS"/sys/class/power_supply/battery/charge_full
 echo 5380000 > "$FS"/sys/class/power_supply/battery/charge_full_design
 
+# 源码位置：仓库里是 src/battd.c，test-bundle 里是平铺的 battd.c
+SRC=""
+for c in src/battd.c battd.c ./battd.c; do
+  [ -f "$c" ] && { SRC="$c"; break; }
+done
+[ -n "$SRC" ] || { echo "::error::找不到 battd.c"; exit 1; }
+echo "  源码: $SRC"
+
 echo "── 编译测试版（路径改到假 sysfs）──"
 sed -e "s|#define SYSFS       \"/sys/class/power_supply/battery\"|#define SYSFS       \"$FS/sys/class/power_supply/battery\"|" \
     -e "s|#define SYSFS_USB   \"/sys/class/power_supply/usb\"|#define SYSFS_USB   \"$FS/sys/class/power_supply/usb\"|" \
     -e "s|/data/adb/battery-manager|$FS/data/adb/battery-manager|g" \
     -e "s|/sys/class/power_supply/mtk-master-charger|$FS/sys/class/power_supply/mtk-master-charger|g" \
     -e "s|/proc/mtk_battery_cmd|$FS/proc/mtk_battery_cmd|g" \
-    src/battd.c > /tmp/battd-test.c
+    "$SRC" > /tmp/battd-test.c
 gcc -O2 -o /tmp/battd-test /tmp/battd-test.c
 
 setsid /tmp/battd-test > /tmp/battd.out 2>&1 < /dev/null &
@@ -37,7 +45,7 @@ echo "  battd-test 已启动 pid=$PID"
 curl -sS -m 5 http://127.0.0.1:8800/api/status -o /tmp/status.json
 
 echo "── 字段完整性 ──"
-python3 .github/scripts/verify_status.py
+python3 "$(dirname "$0")/verify_status.py"
 
 echo "── 写配置 + 越界值拒绝 ──"
 curl -sS -m 5 -X POST http://127.0.0.1:8800/api/limit --data 'charge_limit=65' -o /dev/null
