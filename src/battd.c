@@ -1881,20 +1881,43 @@ static const char *cal_state_name(int st) {
 }
 
 static void save_cal_state(void) {
-    FILE *f = fopen("/data/adb/battery-manager/calibrate.state", "w");
+    /* ★ v1.11.2: 原子写 —— 先写 .tmp 再 rename。
+       校准状态关系到"用户走到哪一步"，若写到一半掉电，
+       文件残缺会让 fscanf 失败 → 整个校准进度丢失。
+       rename(2) 在同一文件系统内是原子的，不会出现半成品。 */
+    const char *tmp = "/data/adb/battery-manager/calibrate.state.tmp";
+    const char *dst = "/data/adb/battery-manager/calibrate.state";
+    FILE *f = fopen(tmp, "w");
     if (!f) return;
     fprintf(f, "%d\n%ld\n%d\n%d\n%d\n", cal_state, (long)cal_started,
             cal_max_cap, cal_min_cap, cal_fulfilled);
+    if (fflush(f) != 0) { fclose(f); unlink(tmp); return; }
+    fsync(fileno(f));          /* 确保落盘再 rename */
     fclose(f);
+    if (rename(tmp, dst) != 0) unlink(tmp);
 }
 
 static void load_cal_state(void) {
     FILE *f = fopen("/data/adb/battery-manager/calibrate.state", "r");
     if (!f) return;
     long t = 0;
+    int loaded_state = 0;
     if (fscanf(f, "%d %ld %d %d %d", &cal_state, &t, &cal_max_cap, &cal_min_cap, &cal_fulfilled) >= 1)
         cal_started = (time_t)t;
+    loaded_state = cal_state;
     fclose(f);
+
+    /* ★ v1.11.2: 重启后的计时修正。
+       校准的「静置 2 小时」（state 2）是唯一依赖墙钟时长的阶段。
+       原实现直接把上次的 cal_started 恢复 —— 若关机 1.9 小时后开机，
+       会瞬间判定"静置完成"直接跳到放电阶段，用户实际没静置。
+       （对静置而言，设备关机本身就是中断，应重新计时。）
+       状态 3（放电）/4（回充）靠电量判定，不依赖时长，无需修正。 */
+    if (loaded_state == 2) {
+        cal_started = time(NULL);
+        save_cal_state();
+        cal_log("设备重启，静置计时重新开始");
+    }
 }
 
 static void cal_log(const char *msg) {
@@ -2520,17 +2543,17 @@ static void handle_limit(int fd, const char *body) {
             else if (!strcmp(key, "chg_temp_limit")) { int x = atoi(dec); if (x >= 40 && x <= 90) chg_temp_limit = x; }
             else if (!strcmp(key, "resume_delta")) { int x = atoi(dec); if (x >= 1 && x <= 20) resume_delta = x; }
             else if (!strcmp(key, "interval")) { int x = atoi(dec); if (x >= 1 && x <= 60) interval = x; }
-            else if (!strcmp(key, "enabled")) limit_enabled = atoi(dec);
-            else if (!strcmp(key, "history_enabled")) history_enabled = atoi(dec);
+            else if (!strcmp(key, "enabled")) limit_enabled = atoi(dec) ? 1 : 0;
+            else if (!strcmp(key, "history_enabled")) history_enabled = atoi(dec) ? 1 : 0;
             else if (!strcmp(key, "bypass")) {
                 if (bypass_supported) write_str(bypass_node, atoi(dec) ? "1" : "0");
                 else { bypass_soft = atoi(dec) ? 1 : 0; if (bypass_soft) last_suspend_val = -1; }
             }
-            else if (!strcmp(key, "night")) night_enabled = atoi(dec);
+            else if (!strcmp(key, "night")) night_enabled = atoi(dec) ? 1 : 0;
             else if (!strcmp(key, "ns")) { int x = atoi(dec); if (x >= 0 && x <= 23) night_start_h = x; }
             else if (!strcmp(key, "ne")) { int x = atoi(dec); if (x >= 0 && x <= 23) night_end_h = x; }
             else if (!strcmp(key, "scene")) {
-                scene = atoi(dec);
+                scene = atoi(dec); if (scene < 0 || scene > 3) scene = 0;   /* v1.11.2: 范围校验 */
                 if (scene == 1) { charge_limit = 70; temp_limit = 40; log_event("scene: gaming"); }
                 else if (scene == 2) { night_enabled = 1; log_event("scene: sleep"); }
                 else if (scene == 3) { paused = 1; log_event("scene: trip pause"); }
@@ -2749,9 +2772,13 @@ static void handle_client(int fd) {
     char buf[MAX_LINE]; int n = 0;
     /* ★ v1.3.1: 循环读，直到收到完整请求头（\r\n\r\n）或读满 */
     while (n < (int)sizeof(buf) - 1) {
-        int r = read(fd, buf + n, sizeof(buf) - 1 - n);
-        if (r <= 0) break;
-        n += r;
+        ssize_t r = read(fd, buf + n, sizeof(buf) - 1 - n);
+        if (r <= 0) {
+            /* ★ v1.11.2: 区分超时与真错误 —— 超时（EAGAIN/EWOULDBLOCK）
+               说明客户端连上不发数据，直接放弃本次请求，不阻塞主循环。 */
+            break;
+        }
+        n += (int)r;
         buf[n] = '\0';
         if (strstr(buf, "\r\n\r\n")) break;   /* 头部完整（body 跟随其后） */
     }
@@ -2833,7 +2860,21 @@ int main(void) {
         if (s > 0 && FD_ISSET(srv, &rfds)) {
             struct sockaddr_in cli; socklen_t cli_len = sizeof(cli);
             int cfd = accept(srv, (struct sockaddr*)&cli, &cli_len);
-            if (cfd >= 0) { handle_client(cfd); close(cfd); }
+            if (cfd >= 0) {
+                /* ★ v1.11.2: 给客户端连接设收发超时。
+                   此前 read() 是阻塞的 —— 客户端连上不发数据会让
+                   整个主循环卡死（电池采集/充电控制全部停摆）。
+                   虽然只绑回环，但本机 root 应用误连也会触发。
+                   读超时 3s（正常请求 <1ms）、写超时 3s。 */
+                /* 超时取值：HTTP 请求头正常 <1ms 到达（回环），
+                   300ms 对正常请求绰绰有余，慢客户端最多也只拖 300ms。
+                   （初版设 3s，实测慢连接会把正常请求拖到 1s。） */
+                struct timeval rcvto = { 0, 300 * 1000 };
+                setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &rcvto, sizeof(rcvto));
+                setsockopt(cfd, SOL_SOCKET, SO_SNDTIMEO, &rcvto, sizeof(rcvto));
+                handle_client(cfd);
+                close(cfd);
+            }
         }
         now = time(NULL);
         if (now - last_poll >= (time_t)interval) {
