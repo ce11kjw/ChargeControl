@@ -136,7 +136,19 @@ class ChargeControlViewModel : ViewModel() {
     val nightOn get() = ChargeControlApi.jbool(status, "x_nn")
     val nightOk get() = ChargeControlApi.jbool(status, "x_nn_ok")
 
-    // ═══ 写入操作 ═══
+    /* ★ v1.10.2 修复：高级控制键名此前与模块不匹配 ——
+       App 发 x_pp / x_cv / x_lc / x_nn 等短名，
+       模块 handle_limit 只认 x_power_path / x_set_cv_en / x_limit_en /
+       x_native_night 等长名（或 xpp / xcv / xcc / xnight 这套 conf 别名），
+       结果开关"发送成功"但被模块静默忽略 ⇒ 高级控制整块空转。
+       现在统一用模块的长名（语义最清晰，且模块从 v1.4.0 起兼容长短名）。 */
+    fun setBypass(v: Boolean) = write("x_power_path" to if (v) 1 else 0, msg = "真旁路")
+    fun setBypassMin(v: Int) = write("x_bypass_min_soc" to v, msg = "旁路最低电量 ${v}%")
+    fun setCv(v: Boolean) = write("x_set_cv_en" to if (v) 1 else 0, msg = "恒压点")
+    fun setCvMv(v: Int) = write("x_set_cv_mv" to v, msg = "恒压点 ${v}mV")
+    fun setLc(v: Boolean) = write("x_limit_en" to if (v) 1 else 0, msg = "电流限流")
+    fun setLcMa(v: Int) = write("x_limit_ma" to v, msg = "限流 ${v}mA")
+    fun setNight(v: Boolean) = write("x_native_night" to if (v) 1 else 0, msg = "原生夜间充电")
     private fun write(vararg pairs: Pair<String, Any>, msg: String) {
         busy = true
         viewModelScope.launch {
@@ -152,13 +164,7 @@ class ChargeControlViewModel : ViewModel() {
     fun setChargeLimit(v: Int) = write("charge_limit" to v, msg = "充电上限 ${v}%")
     fun setTempLimit(v: Int) = write("temp_limit" to v, msg = "温度上限 ${v}°C")
     fun setChgTempLimit(v: Int) = write("chg_temp_limit" to v, msg = "充电IC上限 ${v}°C")
-    fun setBypass(v: Boolean) = write("x_pp" to if (v) 1 else 0, msg = "真旁路")
-    fun setBypassMin(v: Int) = write("x_bmin" to v, msg = "旁路最低电量 ${v}%")
-    fun setCv(v: Boolean) = write("x_cv" to if (v) 1 else 0, msg = "恒压点")
-    fun setCvMv(v: Int) = write("x_cv_mv" to v, msg = "恒压点 ${v}mV")
-    fun setLc(v: Boolean) = write("x_lc" to if (v) 1 else 0, msg = "电流限流")
-    fun setLcMa(v: Int) = write("x_lc_ma" to v, msg = "限流 ${v}mA")
-    fun setNight(v: Boolean) = write("x_nn" to if (v) 1 else 0, msg = "原生夜间充电")
+
 
     fun togglePause() {
         busy = true
