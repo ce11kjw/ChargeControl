@@ -131,15 +131,15 @@ class AppSettings private constructor(context: Context) {
 
     // ── 概览页卡片排序 (逗号分隔的卡片 ID) ──
     // 指标卡: cpu_temp, mem_usage, battery_level, gpu_load
-    // 快速访问: cpu, gpu, mem, net, gps, device, battery, sensor
+    // 快速访问: cpu, gpu, mem, battery, charge, curve, device（对齐当前 8 Tab）
     var metricCardOrder: String
         get() = prefs.getString("metric_card_order", "cpu_temp,mem_usage,battery_level,gpu_load")
             ?: "cpu_temp,mem_usage,battery_level,gpu_load"
         set(value) = prefs.edit { putString("metric_card_order", value) }
 
     var quickCardOrder: String
-        get() = prefs.getString("quick_card_order", "cpu,gpu,mem,net,gps,device,battery,sensor")
-            ?: "cpu,gpu,mem,net,gps,device,battery,sensor"
+        get() = prefs.getString("quick_card_order", "cpu,gpu,mem,battery,charge,curve,device")
+            ?: "cpu,gpu,mem,battery,charge,curve,device"
         set(value) = prefs.edit { putString("quick_card_order", value) }
 
     // 概览页卡片拖拽重排总开关 (默认开启；关闭则回落静态网格，零代码回退)

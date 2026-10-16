@@ -1043,6 +1043,10 @@
     <string name="dashboard_metric_cpu_temp">CPU 溫度</string>
     <string name="dashboard_metric_gpu_load">GPU 負載</string>
     <string name="dashboard_metric_mem_usage">記憶體用量</string>
+    <string name="dashboard_quick_charge_title">充電控制</string>
+    <string name="dashboard_quick_charge_desc">限制 · 溫度 · 進階</string>
+    <string name="dashboard_quick_curve_title">充電曲線</string>
+    <string name="dashboard_quick_curve_desc">電流 · 溫度 · 階段</string>
     <string name="dashboard_quick_battery_desc">電壓 · 溫度 · 健康</string>
     <string name="dashboard_quick_battery_title">電池</string>
     <string name="dashboard_quick_cpu_desc">頻率 · 核心 · 溫度</string>

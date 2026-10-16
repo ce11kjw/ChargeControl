@@ -253,10 +253,13 @@ private fun QuickLinkCard(
 
 // ── 概览页卡片可拖拽重排：常量与解析 ──
 private val METRIC_CARD_IDS = listOf("cpu_temp", "mem_usage", "battery_level", "gpu_load")
-private val QUICK_CARD_IDS = listOf("cpu", "gpu", "mem", "net", "gps", "device", "battery", "sensor")
+/* ★ v1.11.0: 移除已删页面的卡片（net/gps/sensor），
+   加入新增的「充电」「充电曲线」。索引对齐当前 8 个 Tab：
+     0=概览 1=CPU 2=GPU 3=内存 4=电池 5=充电 6=曲线 7=设备详情 */
+private val QUICK_CARD_IDS = listOf("cpu", "gpu", "mem", "battery", "charge", "curve", "device")
 private val QUICK_NAV = mapOf(
-    "cpu" to 1, "gpu" to 2, "mem" to 3, "net" to 5,
-    "gps" to 6, "device" to 8, "battery" to 4, "sensor" to 7
+    "cpu" to 1, "gpu" to 2, "mem" to 3, "battery" to 4,
+    "charge" to 5, "curve" to 6, "device" to 7
 )
 
 /**
@@ -464,11 +467,10 @@ private fun QuickLinkByType(
         "cpu" -> QuickMeta(stringResource(R.string.dashboard_quick_cpu_title), stringResource(R.string.dashboard_quick_cpu_desc), CyberIcons.PlayArrow, NeonPurple, 1)
         "gpu" -> QuickMeta(stringResource(R.string.dashboard_quick_gpu_title), stringResource(R.string.dashboard_quick_gpu_desc), CyberIcons.Info, NeonPurpleBright, 2)
         "mem" -> QuickMeta(stringResource(R.string.dashboard_quick_mem_title), "$memUsed / $memTotal", CyberIcons.Star, NeonPurple, 3)
-        "net" -> QuickMeta(stringResource(R.string.dashboard_quick_net_title), stringResource(R.string.dashboard_quick_net_desc), CyberIcons.Share, NeonPurpleBright, 5)
-        "gps" -> QuickMeta(stringResource(R.string.dashboard_quick_gps_title), stringResource(R.string.dashboard_quick_gps_desc), CyberIcons.PlayArrow, NeonMagenta, 6)
-        "device" -> QuickMeta(stringResource(R.string.dashboard_quick_device_title), stringResource(R.string.dashboard_quick_device_desc), CyberIcons.Search, SuccessNeon, 8)
         "battery" -> QuickMeta(stringResource(R.string.dashboard_quick_battery_title), stringResource(R.string.dashboard_quick_battery_desc), CyberIcons.BatteryFull, NeonPurple, 4)
-        "sensor" -> QuickMeta(stringResource(R.string.dashboard_quick_sensor_title), stringResource(R.string.dashboard_quick_sensor_desc), CyberIcons.Sensors, NeonPurpleBright, 7)
+        "charge" -> QuickMeta(stringResource(R.string.dashboard_quick_charge_title), stringResource(R.string.dashboard_quick_charge_desc), CyberIcons.BatteryFull, SuccessNeon, 5)
+        "curve" -> QuickMeta(stringResource(R.string.dashboard_quick_curve_title), stringResource(R.string.dashboard_quick_curve_desc), CyberIcons.Share, NeonPurpleBright, 6)
+        "device" -> QuickMeta(stringResource(R.string.dashboard_quick_device_title), stringResource(R.string.dashboard_quick_device_desc), CyberIcons.Search, SuccessNeon, 7)
         else -> QuickMeta(id, "", CyberIcons.Info, NeonPurple, 0)
     }
     QuickLinkCard(
@@ -501,11 +503,11 @@ private fun DataSourceHealthBar(health: SourceHealth, modifier: Modifier = Modif
         "RAM" to (health.memory to 3),
         "IO" to (health.storage to null),
         "WiFi" to (health.wifi to null),
-        "4G" to (health.mobileNetwork to 5),
-        "IF" to (health.networkInterface to 5),
+        "4G" to (health.mobileNetwork to null),
+        "IF" to (health.networkInterface to null),
         "SYS" to (health.system to null),
-        "SNS" to (health.sensors to 7),
-        "DEV" to (health.deviceDetail to 8),
+        "SNS" to (health.sensors to null),
+        "DEV" to (health.deviceDetail to 7),
         "OEM" to (health.oem to null)
     )
     // 导航优先级: 先找首个 ERROR 源（可跳转），否则首个 WARN 源（可跳转）

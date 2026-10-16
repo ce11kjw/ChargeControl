@@ -149,15 +149,64 @@ class ChargeControlViewModel : ViewModel() {
     fun setLc(v: Boolean) = write("x_limit_en" to if (v) 1 else 0, msg = "电流限流")
     fun setLcMa(v: Int) = write("x_limit_ma" to v, msg = "限流 ${v}mA")
     fun setNight(v: Boolean) = write("x_native_night" to if (v) 1 else 0, msg = "原生夜间充电")
+    /**
+     * 写入配置 + **回读验证**。
+     *
+     * ★ v1.11.1 修复：原先只看 postLimit 的返回（HTTP 200），
+     * 但模块对非法值（如 charge_limit=5 超出 20-100 范围）也是回 200 +
+     * 内部静默忽略 —— 于是 App 会显示「✓ 成功」而实际没生效。
+     * 现在：写完 → 重新拉 status → 比对目标字段是否真的变了。
+     */
     private fun write(vararg pairs: Pair<String, Any>, msg: String) {
         busy = true
         viewModelScope.launch {
-            val ok = ChargeControlApi.postLimit(*pairs)
-            lastMsg = if (ok) "$msg ✓" else "$msg ✗ 失败"
+            val posted = ChargeControlApi.postLimit(*pairs)
+            val fresh = ChargeControlApi.fetchStatus()
+            if (fresh != null) status = fresh
+
+            val ok = if (!posted) {
+                false
+            } else if (fresh == null) {
+                // 配置已发出，但回读失败（模块刚重启等）—— 不算失败，提示不确定
+                lastMsg = "$msg… 已发送（未能确认）"
+                busy = false
+                return@launch
+            } else {
+                verifyApplied(fresh, pairs)
+            }
+            lastMsg = if (ok) "$msg ✓" else "$msg ✗ 未生效（模块可能拒绝该值）"
             busy = false
-            // 立即刷新一次
-            ChargeControlApi.fetchStatus()?.let { status = it }
         }
+    }
+
+    /** 逐项核对目标值与模块返回是否一致 */
+    private fun verifyApplied(fresh: JSONObject, pairs: Array<out Pair<String, Any>>): Boolean {
+        for ((k, v) in pairs) {
+            // 只校验数值型（字符串等无法可靠比对）
+            val expect: Int = if (v is Boolean) {
+                if (v) 1 else 0
+            } else if (v is Int) {
+                v
+            } else {
+                continue        // 非数值型跳过（continue 在 if 分支里合法）
+            }
+            // 模块对同一开关可能以长名或短名回传（v1.4.0 起两者都输出），两个都试
+            val aliases: List<String> = when (k) {
+                "x_power_path"     -> listOf("x_pp")
+                "x_set_cv_en"      -> listOf("x_cv")
+                "x_set_cv_mv"      -> listOf("x_cv_mv")
+                "x_limit_en"       -> listOf("x_lc")
+                "x_limit_ma"       -> listOf("x_lc_ma")
+                "x_native_night"   -> listOf("x_nn")
+                "x_bypass_min_soc" -> listOf("x_bmin")
+                else               -> emptyList()
+            }
+            val matched = (listOf(k) + aliases).any { key ->
+                fresh.has(key) && fresh.optInt(key, Int.MIN_VALUE) == expect
+            }
+            if (!matched) return false
+        }
+        return true
     }
 
     fun setLimitEnabled(v: Boolean) = write("limit_enabled" to if (v) 1 else 0, msg = "充电限制")
@@ -167,22 +216,39 @@ class ChargeControlViewModel : ViewModel() {
 
 
     fun togglePause() {
+        val target = !paused
         busy = true
         viewModelScope.launch {
-            val ok = ChargeControlApi.postPause(!paused)
-            lastMsg = if (ok) (if (!paused) "已暂停充电 ✓" else "已恢复充电 ✓") else "操作失败 ✗"
+            val posted = ChargeControlApi.postPause(target)
+            val fresh = ChargeControlApi.fetchStatus()
+            if (fresh != null) status = fresh
+            // ★ v1.11.1: 回读校验（原只看 HTTP 200）
+            val applied = fresh != null && fresh.optInt("paused", -1) == (if (target) 1 else 0)
+            lastMsg = when {
+                !posted -> "操作失败 ✗"
+                fresh == null -> (if (target) "已暂停充电… 已发送（未能确认）" else "已恢复充电… 已发送（未能确认）")
+                applied -> (if (target) "已暂停充电 ✓" else "已恢复充电 ✓")
+                else -> "操作 ✗ 未生效"
+            }
             busy = false
-            ChargeControlApi.fetchStatus()?.let { status = it }
         }
     }
 
     fun fullOnce() {
         busy = true
         viewModelScope.launch {
-            val ok = ChargeControlApi.postFull(false)
-            lastMsg = if (ok) "已触发充满 ✓" else "操作失败 ✗"
+            val posted = ChargeControlApi.postFull(false)
+            val fresh = ChargeControlApi.fetchStatus()
+            if (fresh != null) status = fresh
+            // ★ v1.11.1: 回读校验 —— full_once 是模块侧的运行时状态标记
+            val applied = fresh != null && fresh.optInt("full_once", 0) == 1
+            lastMsg = when {
+                !posted -> "操作失败 ✗"
+                fresh == null -> "已触发充满… 已发送（未能确认）"
+                applied -> "已触发充满 ✓"
+                else -> "已触发充满 ✗ 未生效（可能已达 100%）"
+            }
             busy = false
-            ChargeControlApi.fetchStatus()?.let { status = it }
         }
     }
 
