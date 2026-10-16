@@ -121,6 +121,34 @@ static char sys_soc_vendor[64] = "", sys_soc_model[64] = "";
 /* ═══ v1.6.0 GPU（供 App GPU 页走模块取数）═══ */
 /* ═══ v1.7.0 OEM / 厂商信息（对齐 App 的 OemInfo）═══ */
 /* ═══ v1.8.0 硬件 / 设备详情（对齐 App DeviceDetailInfo 中模块可取的部分）═══ */
+/* ═══════════════════════════════════════════════════════════
+   v1.12.0 API 版本与能力协商
+
+   模块与 App 独立发版，版本错配时原先会"静默失败"
+   （如 App 发 x_pp 而模块只认 x_power_path，App 显示成功实际没生效）。
+   现在 /api/status 返回 api_version 与 features 数组，
+   App 启动时据此判断"该功能是否可用"，而不是瞎猜。
+   ═══════════════════════════════════════════════════════════ */
+#define CC_API_VERSION  1
+
+/* 能力清单：新增功能时往这里加一项，App 用 features 判断可用性。
+   命名约定：名词或名词_动词，全小写，避免歧义。 */
+static const char *CC_FEATURES =
+    "curve,"          /* /api/curve 充电曲线 */
+    "sessions,"       /* /api/sessions 历史会话 */
+    "calibrate,"      /* /api/calibrate 电池校准 */
+    "cores,"          /* status.cores 每核频率数组 */
+    "parts,"          /* status.parts 分区数组 */
+    "x_control,"      /* 高级控制（真旁路/恒压点/限流/原生夜间） */
+    "device_detail,"  /* dev_* 硬件详情字段 */
+    "oem,"            /* oem_* 厂商字段 */
+    "sys_props,"      /* sys_* 系统属性 */
+    "mem_detail,"     /* mem_* 内存细分类 */
+    "gpu,"            /* gpu_* 四平台探测 */
+    "soh,"            /* 电池健康度/循环 */
+    "pd,"             /* PD 协议真值 */
+    "session_stat";   /* sess 与 stats 开头的充电统计字段 */
+
 static char dev_storage_type[64] = "";      /* UFS 4.0 / eMMC 5.1（含型号） */
 static char dev_memory_type[32] = "";       /* LPDDR5X / LPDDR5 / LPDDR4X */
 static int  dev_memory_speed_mhz = -1;
@@ -2388,7 +2416,8 @@ static void handle_status(int fd) {
             est_cycles_left = (int)((health - 60.0f) / loss_per_cycle);
     }
     snprintf(body, 32768,
-        "{\"capacity\":%d,\"capacity_disp\":%d,\"temp\":%d,\"voltage\":%d,\"current\":%d,"
+        "{\"api_version\":%d,\"features\":\"%s\","
+        "\"capacity\":%d,\"capacity_disp\":%d,\"temp\":%d,\"voltage\":%d,\"current\":%d,"
         "\"status\":\"%s\",\"limit_enabled\":%d,\"charge_limit\":%d,"
         "\"temp_limit\":%d,\"resume_delta\":%d,\"interval\":%d,"
         "\"soc_temp\":%d,\"gpu_temp\":%d,\"chg_temp\":%d,\"case_temp\":%d,"
@@ -2438,6 +2467,7 @@ static void handle_status(int fd) {
         "\"dev_thermal_zones\":%d,\"dev_thermal_types\":\"%s\","
         "\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d,\"x_pp\":%d,\"x_pp_ok\":%d,\"x_cv\":%d,\"x_cv_mv\":%d,\"x_cv_ok\":%d,\"x_lc\":%d,\"x_lc_ma\":%d,\"x_nn\":%d,\"x_nn_ok\":%d,\"x_bmin\":%d,\"native_night\":%d,\"cl_tail\":\"%s\"}",
+        CC_API_VERSION, CC_FEATURES,
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
         soc_temp, gpu_temp, chg_temp, case_temp,
