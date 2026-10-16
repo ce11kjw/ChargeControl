@@ -6,10 +6,16 @@ on:
     # （只写 branches 时 tag push 不匹配任何条件，v1.4.0 就因此漏发）
     branches: [ main ]
     tags: [ 'v*' ]
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
+    # ★ monorepo：只关心模块相关路径
+    #   （tag push 不受 paths 限制，保证发版一定能触发）
+    paths:
+      - 'src/**'
+      - 'module/**'
+      - 'docs/**'
+      - 'Makefile'
+      - 'release.sh'
+      - 'update.json'
+      - '.github/workflows/build-module.yml'
   workflow_dispatch:
 
 permissions:

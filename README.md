@@ -1,154 +1,99 @@
-# ChargeControl 电池管家
+# ChargeControl
 
-充电限制 · 温度保护 · 硬件监控 · 电池健康 —— KernelSU / APatch / Magisk 通用模块
+小米 K60 Ultra（corot / 天玑 9200+）电池充电控制 —— **Magisk 模块 + Android App**。
 
-## 功能特性
+> 一个 monorepo，两个产物：**root 模块**（模块侧控制 + WebUI）和 **配套 App**（图表与监控）。
 
-| 类别 | 功能 |
-|------|------|
-| 🔋 充电控制 | 充电上限（滞回区防抖）、温度保护（超限停充自动恢复）、手动充满一次（可取消）、手动暂停/恢复 |
-| 🔥 硬件监控 | 电量 / 温度 / 电压 / 电流 / 实时功率（双向充放） / 充电协议 / SoC / GPU / 充电IC / 机身温度 |
-| 📊 电池健康 | SOH 健康度、满充容量、设计容量、循环次数、剩余循环寿命估算（至60%）、低健康度换电池提醒 |
-| 📜 日志系统 | 事件日志（256KB 循环）、历史趋势（60s 记录、512KB 截断）、一键导出、历史记录开关 |
-| ⚡ 充电协议 | 自动识别 USB-PD / QC / DCP 及功率（联发科/高通通用），2×2 卡片布局 |
-| 🎨 WebUI | 四页 Tab（仪表盘/设置/统计/日志），Alpine.js + Chart.js 3s 实时刷新，Miuix 风格，底部导航，深/浅主题，渐变趋势图，骨架加载，OTA 远程更新 |
-| 🛡️ 旁路充电 | 自适应探测（支持设备显示开关，不支持显示"不支持"） |
-| 🧩 多设备适配 | thermal 传感器多品牌匹配（soc_max/tsens/cpu-therm、gpu1/gpu-therm、charger/bq/smb、X7/skin/case） |
-| 📱 守护进程 | 安装时全节点检测，WebUI 显示进程名+PID+CPU占用率 |
+---
 
-## 安装
-
-1. 从 [Releases](https://github.com/ce11kjw/ChargeControl/releases) 下载 `ChargeControl.zip`
-2. KernelSU / APatch / Magisk Manager → 模块 → 安装
-3. 重启
-4. 进入模块 → WebUI 打开控制面板
-
-## WebUI
-
-### 仪表盘
-- **状态横幅**：充电中/已达上限/温度保护/手动充满/已暂停/限制关闭
-- **电量大数字**：带 1 位小数（如 77.1%），进度条同步
-- **4 卡片**：电池温度、实时功率（充放颜色）、守护进程（PID+CPU%）、循环次数
-- **健康度大模块**：健康%/评级/满充容量/设计容量/剩余循环/换电池提醒
-- **温度 2×2**：SoC / GPU / 充电IC / 机身，带颜色圆点
-- **协议 2×2**：充电协议/协商功率/PD版本/连接状态
-- **电压/电流/电量/旁路 2×2**：电压(3位小数)/电流/小数电量/旁路状态
-- **趋势图**：双轴渐变填充，电量+温度，hover tooltip
-
-### 设置
-- 充电限制开关
-- 4 个滑块（充电上限/温度上限/恢复差值/轮询间隔），带二次确认
-- 手动充满（30分钟超时可取消）
-- 手动暂停/恢复（温度保护时自动禁用）
-- 历史记录开关
-- 旁路充电按钮（自适应，不支持时按钮禁用显示"不支持"）
-
-### 日志
-- 运行日志查看（10s 自动刷新）
-- 全量导出（配置+日志+历史）
-
-## 节点检测（安装时）
-
-安装时自动扫描并输出所有关键节点状态：
+## 仓库结构
 
 ```
-- KernelSU 环境
-- 电池控制节点
-  [Y] input_suspend = 1 (可控制充电)
-  [Y] charge_control_limit = 5 (备选节点)
-- 电池监控节点
-  [Y] capacity = 83
-  [Y] temp = 315
-  ...
-- 安装完成，请重启
+ChargeControl/
+├── src/battd.c           模块核心（C，单文件，约 2950 行）
+├── module/               模块打包内容（Magisk/KSU/APatch 通用）
+│   ├── module.prop       模块元信息（version / versionCode / updateJson）
+│   ├── customize.sh      安装脚本
+│   ├── service.sh        开机启动
+│   ├── supervisor.sh     守护进程（15s 巡检，崩溃自动拉起）
+│   ├── action.sh         模块管理器按钮
+│   ├── webroot/          WebUI（浏览器可访问）
+│   └── bin/battd         编译产物（CI 生成）
+├── app/                  Android App（Kotlin + Compose）
+│   ├── app/src/main/java/com/ce11kjw/chargecontrol/
+│   └── ...
+├── docs/API.md           模块 HTTP API 文档（233 字段 + 10 端点）
+├── Makefile              本地交叉编译（仅开发用）
+├── release.sh            发版脚本（版本自增 + tag + push）
+└── .github/workflows/
+    ├── build-module.yml  模块 CI（aarch64 交叉编译 → Release）
+    └── build-app.yml     App CI（Gradle → APK artifact）
 ```
 
-## 数据路径
+---
 
-| 文件 | 说明 |
-|------|------|
-| `/data/adb/battery-manager/batt.conf` | 配置（上限/温度/恢复/间隔/开关/历史开关） |
-| `/data/adb/battery-manager/history.json` | 历史记录（60s 一次，512KB 截断） |
-| `/data/adb/battery-manager/battd.log` | 事件日志（256KB 循环）+ `.old` 轮转 |
-| `/data/adb/battery-manager/webroot/` | WebUI 静态文件 |
+## 模块接 App 的方式
 
-## API
+**本地 HTTP + JSON**（KernelSU/APatch 生态的事实标准）：
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/status` | GET | 全部状态（36 字段：电池/温度/健康/协议/控制/进程/旁路） |
-| `/api/limit` | POST | 配置修改（`charge_limit/temp_limit/resume_delta/interval/enabled/history_enabled/bypass`） |
-| `/api/full` | POST | 手动充满（body `cancel=1` 取消） |
-| `/api/pause` | POST | 手动暂停/恢复（`pause=1` 暂停，`pause=0` 恢复） |
-| `/api/history` | GET | 历史 JSON 数组（尾 500 条） |
-| `/api/log` | GET | 纯日志文本 |
-| `/api/export` | GET | 配置+日志+历史合并导出 |
+```
+battd :8800  ← WebUI（模块管理器内置的 WebView）
+             ← App（ChargeControl-App）
+             ← 浏览器（curl 调试）
+```
 
-守护进程监听 `127.0.0.1:8800`（仅本机回环）。
+一个服务同时喂三个客户端。协议详见 [`docs/API.md`](docs/API.md)。
 
-## 硬件兼容
+**能力协商**：`/api/status` 首部返回 `api_version` 与 `features`，
+App 据此判断功能可用性，避免版本错配静默失败。
 
-- **控制节点**：`/sys/class/power_supply/battery/input_suspend` 或 `usb/input_suspend`（MTK/高通多数设备支持）
-- **协议识别**：`usb/real_type` + `power_max` + `pd_type`
-- **硬件温度**：`thermal_zone*/type` + `temp`（多品牌自动匹配）
-- **电池健康**：`charge_full` / `charge_full_design` / `cycle_count`
-- **高精度电量**：`bms/capacity_raw`（x100 精度，如 7714=77.14%）
-- **旁路充电**：自动探测 `/sys/class/power_supply/*/bypass_charger` 或 `charge_bypass`
+---
 
 ## 编译
 
-```bash
-# 交叉编译 ARM64 静态二进制
-aarch64-linux-gnu-gcc -static -O2 -s -o battd src/battd.c
+**全部在 GitHub Actions 完成**（本地只跑测试）：
 
-# 或使用 Makefile（推荐）
-make          # 编译
-make package  # 编译 + 打包为 ChargeControl.zip
+| 产物 | 触发条件 | 工作流 |
+|---|---|---|
+| 模块 zip | 改 `src/**` `module/**` 等 / 打 `v*` tag | `build-module.yml` |
+| App APK | 改 `app/**` | `build-app.yml` |
+
+**发版**：
+```bash
+./release.sh "本次更新说明"
+# → 版本自增 → 同步 update.json/CHANGELOG → commit → tag → push
+# → CI 编译 → 自动创建 Release
 ```
 
-## 版本历史
+---
 
-| 版本 | 内容 |
-|------|------|
-| v1.0.0 | 基础：充电限制 / 温度保护 / 监控 / WebUI |
-| v1.1.0 | 硬件温度 / 协议识别 / 日志 / 手动充满 / Tab 导航 |
-| v1.2.0 | 健康度 / 循环估算 / 功率 / 倒计时 / 色条 / 2×2 |
-| v1.2.1 | 字段落地 / fullOnce 取消 / 安全加固 |
-| v1.2.2 | 温度保护优先级 / 功率单位修正 / 扫描鲁棒性 / 实时功率双向 / 小数电量 / 手动暂停标志 / 历史开关 / 图表渐变 / 守护进程卡片 / 多设备 thermal 适配 / 旁路探测 / 高级设置滑块+二次确认 / paused 温度保护区分 / write_str 失败日志 / 旁路读路径统一 |
-| v1.2.3 | 版本号统一 / README 同步 |
-| v1.2.4 | 功率单位修正 / 温度实时 / GPU 多匹配 / CPU 0.0% / 去二次确认 / 远程更新检查 / 健康度增强 |
-| v1.2.5 | 充电统计（本次会话+累计历史，持久化 stats.json）|
-| v1.2.6 | 功率/电流实时读取+符号(+充电/-放电) / 统计独立Tab / 健康度优化 |
-| v1.2.7 | est_full_min 实时电压 / sess_mah 会话保护 / 温度扫描去重 |
-| v1.2.8 | USB 缓存 / 字段合并 / 暂停恢复 / TopUID 耗电排行 |
-| v1.2.22 | 功率识别慢修复 / 健康度字段合并 / 循环衰减合并 |
-| v1.2.23 | TAB 图标去重 / 电量大卡增强（充电条纹/暂停标记） |
-| v1.2.24 | 设置页面板重排（夜间移入设置） / 版本同步 |
-| v1.2.25 | 健康面板包裹 / 缩进统一 |
-| v1.2.26 | 夜间面板去重（修复 v1.2.24 回归） |
-| v1.2.27 | lang/theme 归位设置页 / TopUID 恢复 / h2 括号修复 |
-| v1.2.28 | ver_cmp 三段比较 / 版本三处统一 |
-| v1.2.29 | 温度节流 5s / HTTP 文案 / 暂停/充满立即生效 |
-| v1.2.30 | 暂停恢复中间地带卡死修复 |
-| v1.2.31 | WebHook 保存链路（url_decode + 键解析） |
-| v1.2.32 | WebHook 引号加固 / 回显防覆盖 |
-| v1.2.33 | 日志尾部 64KB / 图表浅色主题 |
-| v1.2.34 | load_extras 逐字段解析（lang/theme 之前永久丢失） |
-| v1.2.35 | val 缓冲 512 / API 值域校验 |
-| v1.2.36 | Miuix 风格（底部导航 / 18px 圆角 / 骨架态 / 分组标题）|
-| v1.2.37 | Miuix 配色 / 毛玻璃底栏 / inset 分隔线 / 控件重绘 |
-| v1.2.38 | 主题切换 chart.update 原地换色（无闪白） |
-| v1.2.39 | Tab 淡入 / shimmer 加载 / banner 最小高度 |
-| v1.2.40 | 全动画统一丝滑曲线 cubic-bezier(.4,0,.2,1) |
-| v1.2.41 | 导出日志尾部 4KB / strdup 判 NULL |
-| v1.2.42 | OTA 远程更新（/api/update-apply 下载+解压+重启） |
-| v1.2.43 | 编译格式警告修复 |
-| v1.2.44 | WEBROOT 宏传参零警告 |
-| v1.2.45 | update.json KSU 远程更新 / 打包带版本号 / README 同步 |
-| v1.2.46 | KSU update.json 同步 / 编译零警告 |
-| v1.2.47 | 去框中框（iOS 列表行 / border-bottom 分隔） |
-| v1.2.48 | 新增 9 个 sysfs 字段（technology / capacity_level / health / charge_type / time_to_full / charge_counter / input_current_limit / manufacturer / model_name） |
+## 主要功能
 
-## License
+### 电池控制
+- 充电上限（20-100%）、温度上限（电池 / 充电 IC 双阈值）
+- 停止后回充的滞后量（防反复启停）
+- 夜间模式、快捷场景、高温 WebHook 告警
 
-GPL-3.0
+### 高级控制（直接操作 MTK 内核节点，默认全关）
+真旁路（电源直供）/ 恒压点调整 / 充电电流限流 / 系统原生夜间充电
+
+### 监控与统计
+充电曲线（CC/CV 阶段识别）、电池校准、健康度追踪（SoH / 循环 / 内阻）、
+CPU 逐核频率、GPU 四平台探测、内存细分、设备详情 60 字段
+
+---
+
+## 兼容性
+
+| 项 | 要求 |
+|---|---|
+| 设备 | 小米 K60 Ultra（corot），其他 MTK 机型部分可用 |
+| Root | Magisk / KernelSU / APatch |
+| Android | 16（实测），理论 10+ |
+| 架构 | aarch64 |
+
+---
+
+## 许可
+
+见 [LICENSE](LICENSE)。

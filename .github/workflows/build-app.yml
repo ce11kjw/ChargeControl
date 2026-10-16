@@ -1,9 +1,20 @@
-name: Build APK
+name: Build App
 
 on:
   push:
     branches: [ main ]
+    # ★ monorepo：只在 app/ 有改动时触发
+    paths:
+      - 'app/**'
+      - '.github/workflows/build-app.yml'
+  pull_request:
+    paths:
+      - 'app/**'
   workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: app
 
 jobs:
   build:
@@ -11,8 +22,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -36,7 +46,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('app/**/*.gradle*', 'app/**/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
       - name: Grant execute permission
@@ -54,5 +64,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ChargeControl-App-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/app/build/outputs/apk/debug/*.apk
           retention-days: 30

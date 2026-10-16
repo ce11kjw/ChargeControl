@@ -12,3 +12,16 @@ module/bin/battd
 *.v1.*
 *.v14bak
 *.v1*bak
+
+# ── monorepo: App 产物 ──
+app/.gradle/
+app/build/
+app/app/build/
+app/local.properties
+app/.idea/
+*.apk
+*.aab
+
+# ── 模块产物 ──
+ChargeControl.zip
+ChargeControl.zip.sha256
