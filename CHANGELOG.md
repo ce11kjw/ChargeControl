@@ -1,5 +1,48 @@
 # Changelog
 
+## v1.11.0 (2026-10-16)
+
+### 🎨 Web UI 配色对齐 App
+原先 Web UI 用 iOS 风格（#0d0d0f 背景 / #0a84ff 蓝），
+与 App 的赛博深蓝主题（#080B14 / 青紫渐变）完全是两套视觉。
+
+现在统一：
+| 项 | 原（iOS 风） | 现（与 App 一致） |
+|---|---|---|
+| 背景 | `#0d0d0f` | `#080B14` |
+| 卡片 | `#1c1c1e` | `#101624` 渐变 |
+| 主色 | `#0a84ff` 蓝 | `#8B5CF6` 紫 + `#22D3EE` 青 |
+| 成功/警告/危险 | iOS 系统色 | `#10D9A0` / `#FBBF24` / `#F87171` |
+| 圆角 | 18px | 20px（与 App 的 RoundedCornerShape(20.dp) 一致） |
+
+另加：卡片渐变态、霓虹描边 + 紫色辉光、大数字青紫渐变文字、
+底部导航选中项紫色发光（对齐 App 的 TabRow 高亮）。
+浅色主题同步调整为紫色系。
+
+### 🌐 全部标题中文化
+**App 侧**（这是重点，之前中文包里有大量英文）：
+- `values-zh-rCN` / `values-zh-rTW` / `values` 三份合计替换 **1400+ 条**
+- 典型：`CPU temperature` → `CPU 温度`、`Battery health` → `电池健康度`、
+  `Memory used` → `已用内存`、`Top processes` → `占用最高的进程`
+- 单位符号中文化：`%d MHz` → `兆赫兹`、`%d cycles` → `次循环`、
+  `%.2f hPa` → `百帕`、`%d kcal` → `千卡`
+- **默认包 `values/` 也改成中文**（原先是英文，系统语言为英文时会显示英文）
+- 保留技术缩写：CPU / GPU / USB / WiFi / Vulkan / HDR / TEE / BSSID / L1 / L3 等
+
+**Web UI**：本身已有中英双语 i18n，默认走中文，无需改动
+
+### 🔴 修复：App 高级控制键名不匹配（功能空转）
+App 发的键名模块**全都不认**：
+| App 原发 | 模块接受 | 结果 |
+|---|---|---|
+| `x_pp` | `x_power_path` | 真旁路开关无效 |
+| `x_bmin` | `x_bypass_min_soc` | 护栏设置无效 |
+| `x_cv` / `x_cv_mv` | `x_set_cv_en` / `x_set_cv_mv` | 恒压点无效 |
+| `x_lc` / `x_lc_ma` | `x_limit_en` / `x_limit_ma` | 限流无效 |
+| `x_nn` | `x_native_night` | 夜间充电无效 |
+⇒ 改为模块的长名。真机验证：本机 `x_pp_ok/x_cv_ok/x_nn_ok` 全为 1（硬件都支持），
+所以这个 bug 影响是实打实的。
+
 ## v1.10.1 (2026-10-16)
 
 ### 🔴 修复：supervisor 的 PID 复用误判（真机故障）

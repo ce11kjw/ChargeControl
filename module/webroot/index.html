@@ -9,8 +9,11 @@
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; font-family:system-ui,-apple-system,sans-serif; }
-:root { --bg:#0d0d0f; --card:#1c1c1e; --card2:#2c2c2e; --navbg:rgba(28,28,30,.86); --line:rgba(255,255,255,.09); --txt:#f2f2f7; --txt2:#8e8e93; --accent:#0a84ff; --green:#32d74b; --red:#ff453a; --orange:#ff9f0a; --amber:#ffd60a; --blue:#0a84ff; --gray:#5a5a5e; --r:18px; }
-:root[data-theme="1"] { --bg:#f2f2f7; --card:#ffffff; --card2:#f2f2f7; --navbg:rgba(255,255,255,.86); --line:rgba(0,0,0,.08); --txt:#1c1c1e; --txt2:#8e8e93; --accent:#007aff; --green:#34c759; --red:#ff3b30; --orange:#ff9500; --amber:#ffcc00; --blue:#007aff; --gray:#c7c7cc; }
+/* ★ v1.11.0 配色对齐 App（ce11kjw/ChargeControl-App 的 Cyber 主题）
+   背景 #080B14 / 卡片 #101624 / 主色青紫 #8B5CF6·#22D3EE
+   与 App 的 Color.kt 保持同一套色值 */
+:root { --bg:#080B14; --card:#101624; --card2:#141D2E; --navbg:rgba(16,22,36,.88); --line:rgba(139,92,246,.18); --txt:#E8EDF5; --txt2:#8B98B0; --accent:#8B5CF6; --accent2:#22D3EE; --green:#10D9A0; --red:#F87171; --orange:#FBBF24; --amber:#FBBF24; --blue:#38BDF8; --gray:#3D4A5C; --purple:#8B5CF6; --purple-bright:#A78BFA; --purple-deep:#0E7490; --steel:#3D70B8; --r:20px; --glow:0 0 20px rgba(139,92,246,.25); }
+:root[data-theme="1"] { --bg:#F5F7FB; --card:#FFFFFF; --card2:#EDF1F8; --navbg:rgba(255,255,255,.9); --line:rgba(139,92,246,.15); --txt:#1A2233; --txt2:#6B7A94; --accent:#7C3AED; --accent2:#0891B2; --green:#0EA47A; --red:#DC2626; --orange:#D97706; --amber:#D97706; --blue:#0891B2; --gray:#C7CFDD; --purple:#7C3AED; --purple-bright:#8B5CF6; --purple-deep:#0E7490; --steel:#3D70B8; --glow:0 2px 12px rgba(124,58,237,.12); }
 body { background:var(--bg); color:var(--txt); min-height:100vh; padding-bottom:100px; -webkit-font-smoothing:antialiased; transition:background .35s, color .35s; }
 .container { max-width:560px; margin:0 auto; padding:14px 16px; }
 h1 { font-size:28px; font-weight:700; letter-spacing:-.6px; margin:6px 0 18px; display:flex; align-items:center; gap:10px; }
@@ -18,7 +21,8 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 .tabs { position:fixed; bottom:0; left:0; right:0; z-index:50; display:flex; background:var(--navbg); backdrop-filter:saturate(180%) blur(20px); -webkit-backdrop-filter:saturate(180%) blur(20px); border-top:1px solid var(--line); padding:7px 4px calc(7px + env(safe-area-inset-bottom)); }
 .tab { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; padding:4px 2px; font-size:10px; font-weight:500; line-height:1.2; cursor:pointer; color:var(--txt2); transition:color .2s; }
 .tab .ti { font-size:21px; line-height:1; }
-.tab.active { background:none; color:var(--accent); font-weight:600; }
+.tab.active { background:none; color:var(--purple-bright); font-weight:600; text-shadow:0 0 12px rgba(167,139,250,.5); }
+.tab.active .ti { filter:drop-shadow(0 0 6px rgba(167,139,250,.6)); }
 .banner { min-height:22px; border-radius:14px; padding:13px 16px; margin-bottom:14px; font-size:14px; display:flex; align-items:center; gap:10px; justify-content:space-between; }
 .banner.charging { background:rgba(74,222,128,.12); border:1px solid rgba(74,222,128,.3); }
 .banner.suspended { background:rgba(251,191,36,.12); border:1px solid rgba(251,191,36,.3); }
@@ -27,7 +31,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 .banner.disabled { background:rgba(100,116,139,.12); border:1px solid rgba(100,116,139,.3); }
 .banner.idle { background:rgba(100,116,139,.08); border:1px solid #334155; }
 .big-cap { background:var(--card); border-radius:var(--r); padding:22px; margin-bottom:14px; }
-.big-cap .val { font-size:46px; font-weight:700; letter-spacing:-1.6px; transition:color .35s cubic-bezier(.4,0,.2,1); }
+.big-cap .val { font-size:46px; font-weight:700; letter-spacing:-1.6px; transition:color .35s cubic-bezier(.4,0,.2,1); background:linear-gradient(120deg, var(--purple-bright), var(--accent2)); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
 @keyframes shimmer { 0%{opacity:.3} 50%{opacity:1} 100%{opacity:.3} }
 .big-cap .bar { height:8px; background:var(--card2); border-radius:99px; margin-top:14px; overflow:hidden; }
 .big-cap.loading .val { animation:shimmer 2s ease-in-out infinite; }
@@ -35,9 +39,13 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 .big-cap .fill { height:100%; border-radius:99px; transition:width .8s cubic-bezier(.4,0,.2,1); }
 .big-cap .info { display:flex; justify-content:space-between; margin-top:10px; font-size:12px; color:var(--txt2); }
 .temp-item { min-height:44px; }
-.panel h2 { font-size:13px; color:var(--txt2); font-weight:600; letter-spacing:.2px; margin:14px 0 8px; }
+/* 卡片渐变（对齐 App 的 CardGradient: CyberCardStart → CyberCardEnd）*/
+.panel, .big-cap { background:linear-gradient(160deg, var(--card) 0%, color-mix(in srgb, var(--purple) 8%, var(--card)) 100%); border:1px solid var(--line); box-shadow:var(--glow); }
+.panel h2 { font-size:13px; color:var(--txt); font-weight:600; letter-spacing:.2px; margin:14px 0 8px; display:flex; align-items:center; }
+.panel h2::before { content:''; width:3px; height:14px; border-radius:2px; background:var(--accent); margin-right:8px; display:inline-block; }
 .cards { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:16px; }
-.card { background:var(--card); border-radius:var(--r); padding:16px; transition:transform .25s cubic-bezier(.4,0,.2,1); }
+.card { background:linear-gradient(160deg, var(--card) 0%, color-mix(in srgb, var(--purple) 8%, var(--card)) 100%); border:1px solid var(--line); border-radius:var(--r); padding:16px; transition:transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s; }
+.card:active { transform:scale(.97); box-shadow:var(--glow); }
 .card .lbl { font-size:11px; color:var(--txt2); margin-bottom:4px; }
 .card .val { font-size:23px; font-weight:650; letter-spacing:-.4px; }
 .card .sub { font-size:11px; color:var(--gray); margin-top:3px; }
