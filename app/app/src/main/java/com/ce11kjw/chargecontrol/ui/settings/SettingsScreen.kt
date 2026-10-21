@@ -1,5 +1,10 @@
 package com.ce11kjw.chargecontrol.ui.settings
 
+import androidx.compose.foundation.layout.width
+import com.ce11kjw.chargecontrol.ui.theme.SuccessNeon
+import com.ce11kjw.chargecontrol.ui.theme.ErrorNeon
+import com.ce11kjw.chargecontrol.ui.theme.WarningNeon
+import com.ce11kjw.chargecontrol.ui.theme.NeonPurpleDeep
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.DisposableEffect
