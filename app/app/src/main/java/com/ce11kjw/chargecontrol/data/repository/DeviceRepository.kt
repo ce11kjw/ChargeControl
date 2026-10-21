@@ -127,12 +127,7 @@ class DeviceRepository(context: Context) {
     @Volatile private var intervalMs: Long = RefreshPolicy.Tier.NORMAL.defaultMs
     /** ★ 悬浮窗提频窗 — >0 时 policy 推流对每模块 min(eff, override) 只提速; 详见 setPaceOverride */
     @Volatile private var paceOverrideMs = 0L
-
-    private var cpuJob: Job? = null
-    private var gpuJob: Job? = null
-    private var memoryJob: Job? = null
     private var batteryJob: Job? = null
-    private var auxJob: Job? = null
     private var policyObserverJob: Job? = null
 
     private val cpuIntervalFlow = MutableStateFlow(RefreshPolicy.Tier.NORMAL.defaultMs)
@@ -148,21 +143,15 @@ class DeviceRepository(context: Context) {
         this.intervalMs = intervalMs
         pushAllIntervalFlows(intervalMs)
 
-        cpuJob = PollingFlow.launchModulePolling("CPU", cpuIntervalFlow, scope) { collectCpuBlock() }
-        gpuJob = PollingFlow.launchModulePolling("GPU", gpuIntervalFlow, scope) { collectGpuBlock() }
-        memoryJob = PollingFlow.launchModulePolling("Memory", memIntervalFlow, scope) { collectMemoryBlock() }
+        /* ★ v1.14.0: 只保留电池采集
+           CPU / GPU / 内存页面已移除，其轮询是纯浪费（每 3-5 秒一次 HTTP）。
+           collectCpuBlock/collectGpuBlock/collectMemoryBlock 函数保留，
+           若将来恢复页面可直接接回。 */
         batteryJob = PollingFlow.launchModulePolling("Battery", batIntervalFlow, scope) { collectBatteryBlock() }
 
-        // 辅助模块 + 历史数据推送 — 共享全局间隔
-        auxJob = PollingFlow.launchModulePolling("Aux", cpuIntervalFlow, scope, immediate = false) {
-            // ★ #2: 观察者守卫 — 无活跃观察者时跳过 15 组历史快照构建 + postValue
-            //   (每 tick ≈1200 个对象拷贝)。HistoryCache.addPoint 照常运行, 缓存持续记录,
-            //   切回图表页激活观察者后 ≤1 个 tick 即重建曲线。
-            val snapshotActive = historyData.hasActiveObservers()
-            val historyMap = auxCollector.collectAndPushHistory(
-                healthTracker, historyCache, buildSnapshot = snapshotActive)
-            if (snapshotActive) historyData.postValue(historyMap)
-        }
+        /* ★ v1.14.0: Aux 通道已移除。
+           它原本为 CPU/GPU/内存页构建 15 组历史快照（每 tick ≈1200 个对象拷贝），
+           这些页面已删除 → 纯浪费。电池的历史由 collectBatteryBlock 自己写入 historyCache。 */
 
         // 观察刷新策略 (省电模式降频，前后台不降频 — 仅动画暂停)
         policyObserverJob = scope.launch {
@@ -180,7 +169,7 @@ class DeviceRepository(context: Context) {
 
     fun stopMonitoring() {
         monitoring = false
-        cpuJob?.cancel(); gpuJob?.cancel(); memoryJob?.cancel(); batteryJob?.cancel(); auxJob?.cancel()
+        batteryJob?.cancel()   /* v1.14.0: 只保留电池 */
         policyObserverJob?.cancel()
         auxCollector.disableGps()
         disableSensor()

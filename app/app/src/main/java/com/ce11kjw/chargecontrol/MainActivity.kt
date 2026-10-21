@@ -67,12 +67,8 @@ import com.ce11kjw.chargecontrol.ui.components.GlassCircleButton
 import com.ce11kjw.chargecontrol.ui.components.NeonDivider
 import com.ce11kjw.chargecontrol.ui.components.NeonHeaderDecoration
 import com.ce11kjw.chargecontrol.ui.components.neonBorderGlow
-import com.ce11kjw.chargecontrol.ui.cpu.CpuScreen
-import com.ce11kjw.chargecontrol.ui.dashboard.DashboardScreen
 import com.ce11kjw.chargecontrol.ui.device.HdrLabScreen
 import com.ce11kjw.chargecontrol.ui.floatwindow.FloatingWindowScreen
-import com.ce11kjw.chargecontrol.ui.gpu.GpuScreen
-import com.ce11kjw.chargecontrol.ui.memory.MemoryScreen
 import com.ce11kjw.chargecontrol.ui.settings.SettingsScreen
 import com.ce11kjw.chargecontrol.ui.effects.GlobalLightProvider
 import com.ce11kjw.chargecontrol.ui.effects.LocalSharedTransitionScope
@@ -236,28 +232,20 @@ private val CARD_EXIT_SPEC  = tween<Float>(durationMillis = 450, easing = FastOu
 
 /** 赛博风格线条矢量图标 — 与 Tab 含义一一对应 */
 private val topTabIcons = listOf(
-    R.drawable.ic_cyber_dashboard,
-    R.drawable.ic_cyber_cpu,
-    R.drawable.ic_cyber_gpu,
-    R.drawable.ic_cyber_memory,
     R.drawable.ic_cyber_battery,
     R.drawable.ic_cyber_charge,
     R.drawable.ic_cyber_curve,
-    R.drawable.ic_cyber_device,
 )
 
 /** Tab 标题国际化 — 在 Composable 内调用 stringResource 获取当前语言标题 */
 @Composable
 private fun rememberTopTabs(): List<TopTabItem> {
+    /* ★ v1.14.0: 只保留电池相关页面
+       —— CPU / GPU / 内存 / 概览 / 设备详情已移除 */
     val titles = listOf(
-        stringResource(R.string.tab_dashboard),
-        stringResource(R.string.tab_cpu),
-        stringResource(R.string.tab_gpu),
-        stringResource(R.string.tab_memory),
         stringResource(R.string.tab_battery),
         stringResource(R.string.tab_charge),
-        stringResource(R.string.tab_curve),
-        stringResource(R.string.tab_device)
+        stringResource(R.string.tab_curve)
     )
     return titles.mapIndexed { i, title -> TopTabItem(title, topTabIcons[i]) }
 }
@@ -774,14 +762,9 @@ private fun MainTabs(
                 { target: Int -> scope.launch { pagerState.animateScrollToPage(target) }; Unit }
             }
             when (page) {
-                0 -> DashboardScreen(onNavigate = navigate)
-                1 -> CpuScreen()
-                2 -> GpuScreen()
-                3 -> MemoryScreen()
-                4 -> BatteryScreen()
-                5 -> com.ce11kjw.chargecontrol.ui.charge.ChargeControlScreen()
-                6 -> com.ce11kjw.chargecontrol.ui.curve.ChargingCurveScreen()
-                7 -> com.ce11kjw.chargecontrol.ui.device.DeviceInfoScreen()
+                0 -> BatteryScreen()
+                1 -> com.ce11kjw.chargecontrol.ui.charge.ChargeControlScreen()
+                2 -> com.ce11kjw.chargecontrol.ui.curve.ChargingCurveScreen()
             }
             } // end StaggeredPageProvider (per-page)
         }

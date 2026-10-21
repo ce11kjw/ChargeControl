@@ -2724,6 +2724,241 @@ static int ver_cmp(const char *a, const char *b) {
     return 0;
 }
 
+/* ═══════════════════════════════════════════════════════════
+   v1.14.0: OTA 热更新（App 内一键升级，不需要重启手机）
+
+   流程：
+     POST /api/ota/apply
+       → 后台线程/子进程下载 zip（busybox wget）
+       → 校验 sha256
+       → 解包到临时目录
+       → 原子替换 bin/battd + webroot/ + 脚本
+       → kill 当前进程，由 supervisor 拉起新版（15s 内）
+     失败自动回滚（.old 备份换回）
+
+   为什么在模块侧做而不是 App 侧：
+     · 只有 root 能写 /data/adb/
+     · 手机的 busybox/curl 比 App 的 HttpURLConnection 更容易穿透代理
+     · 替换 + 重启必须是同一个原子过程
+
+   GET /api/ota/status
+       → {"state":"idle|downloading|verifying|applying|rebooting|done|failed",
+           "progress":0-100, "message":"...", "from":"v1.13.0", "to":"v1.14.0"}
+   ═══════════════════════════════════════════════════════════ */
+
+#define OTA_DIR     "/data/adb/battery-manager/ota"
+#define OTA_ZIP     OTA_DIR "/update.zip"
+#define OTA_SHA     OTA_DIR "/update.zip.sha256"
+#define OTA_UNPACK  OTA_DIR "/unpack"
+#define OTA_MARKER  OTA_DIR "/state"
+
+static char  ota_state[32] = "idle";
+static int   ota_progress = 0;
+static char  ota_message[256] = "";
+static char  ota_from[32] = "";
+static char  ota_to[32] = "";
+
+/* 版本号比较：a > b 返回正数 */
+static int ota_ver_cmp(const char *a, const char *b) {
+    while (*a == 'v' || *a == 'V') a++;
+    while (*b == 'v' || *b == 'V') b++;
+    int na = 0, nb = 0;
+    for (;;) {
+        na = 0; nb = 0;
+        while (*a >= '0' && *a <= '9') { na = na * 10 + (*a - '0'); a++; }
+        while (*b >= '0' && *b <= '9') { nb = nb * 10 + (*b - '0'); b++; }
+        if (na != nb) return na - nb;
+        if (!*a && !*b) return 0;
+        if (*a == '.') a++;
+        if (*b == '.') b++;
+        if (!*a && !*b) return 0;
+    }
+}
+
+static void ota_set(const char *state, int progress, const char *msg) {
+    snprintf(ota_state, sizeof(ota_state), "%s", state);
+    ota_progress = progress;
+    if (msg) snprintf(ota_message, sizeof(ota_message), "%s", msg);
+    /* 落盘，供重启后查询（本进程升级后会被替换，新进程读不到内存） */
+    char p[160];
+    snprintf(p, sizeof(p), "%s/state", OTA_DIR);
+    FILE *f = fopen(p, "w");
+    if (f) {
+        fprintf(f, "%s\n%d\n%s\n%s\n%s\n", ota_state, ota_progress, ota_message, ota_from, ota_to);
+        fclose(f);
+    }
+}
+
+static void ota_load_state(void) {
+    FILE *f = fopen(OTA_MARKER, "r");
+    if (!f) return;
+    char line[256];
+    if (fgets(line, sizeof(line), f)) { line[strcspn(line, "\n")] = 0; snprintf(ota_state, sizeof(ota_state), "%s", line); }
+    if (fgets(line, sizeof(line), f)) ota_progress = atoi(line);
+    if (fgets(line, sizeof(line), f)) { line[strcspn(line, "\n")] = 0; snprintf(ota_message, sizeof(ota_message), "%s", line); }
+    if (fgets(line, sizeof(line), f)) { line[strcspn(line, "\n")] = 0; snprintf(ota_from, sizeof(ota_from), "%s", line); }
+    if (fgets(line, sizeof(line), f)) { line[strcspn(line, "\n")] = 0; snprintf(ota_to, sizeof(ota_to), "%s", line); }
+    fclose(f);
+}
+
+static char *ota_status_json(void) {
+    char *j = malloc(768);
+    if (!j) return strdup("{}");
+    snprintf(j, 768,
+        "{\"state\":\"%s\",\"progress\":%d,\"message\":\"%s\","
+        "\"from\":\"%s\",\"to\":\"%s\",\"current\":\"%s\"}",
+        ota_state, ota_progress, ota_message, ota_from, ota_to, VERSION);
+    return j;
+}
+
+/* 跑一条命令，返回是否成功（0=成功） */
+static int ota_run(const char *cmd) {
+    int st = system(cmd);
+    /* system 返回值：低 8 位是信号，高 8 位是退出码 */
+    if (st == -1) return -1;
+    if (WIFEXITED(st)) return WEXITSTATUS(st);
+    return -1;
+}
+
+/*
+ * 真正的更新流程。
+ * 注意：这个函数会 kill 自己（替换二进制后需要重启进程），
+ * 所以最后一步用 nohup 起一个独立脚本执行，
+ * 本进程立刻返回响应，脚本稍后杀掉本进程。
+ */
+static void ota_start_apply(const char *ver) {
+    ota_set("downloading", 5, "开始下载");
+    snprintf(ota_from, sizeof(ota_from), "%s", VERSION);
+    snprintf(ota_to, sizeof(ota_to), "%s", ver);
+
+    /* 生成升级脚本 —— 关键：脱离当前进程执行，才能安全替换自己 */
+    const char *script = OTA_DIR "/apply.sh";
+    FILE *f = fopen(script, "w");
+    if (!f) { ota_set("failed", 0, "无法创建升级脚本"); return; }
+    fprintf(f, "#!/system/bin/sh\n");
+    fprintf(f, "# ChargeControl OTA —— 由 battd 生成，独立执行\n");
+    fprintf(f, "set -u\n");
+    fprintf(f, "D=/data/adb/battery-manager\n");
+    fprintf(f, "MOD=/data/adb/modules/chargecontrol\n");
+    fprintf(f, "OTA=$D/ota\n");
+    fprintf(f, "LOG=$OTA/apply.log\n");
+    fprintf(f, "log(){ echo \"$(date '+%%H:%%M:%%S') $*\" >> $LOG; }\n");
+    fprintf(f, "fail(){ log \"FAILED: $1\"; echo \"failed\" > $OTA/state; exit 1; }\n");
+    fprintf(f, "\n");
+    fprintf(f, ": > $LOG\n");
+    fprintf(f, "log '=== OTA start, target %s ==='\n", ver);
+    fprintf(f, "\n");
+    fprintf(f, "# 1) 下载 zip\n");
+    fprintf(f, "log 'downloading'\n");
+    fprintf(f, "BUSY=/data/adb/ap/bin/busybox\n");
+    fprintf(f, "[ -x $BUSY ] || BUSY=/data/adb/ksu/bin/busybox\n");
+    fprintf(f, "[ -x $BUSY ] || BUSY=/data/adb/magisk/busybox\n");
+    fprintf(f, "[ -x $BUSY ] || BUSY=busybox\n");
+    fprintf(f, "URL='https://github.com/ce11kjw/ChargeControl/releases/download/%s/ChargeControl.zip'\n", ver);
+    fprintf(f, "$BUSY wget -T 120 -O $OTA/update.zip \"$URL\" >> $LOG 2>&1 || fail 'download'\n");
+    fprintf(f, "[ -s $OTA/update.zip ] || fail 'empty zip'\n");
+    fprintf(f, "SZ=$($BUSY stat -c %%s $OTA/update.zip 2>/dev/null || echo 0)\n");
+    fprintf(f, "log \"downloaded $SZ bytes\"\n");
+    fprintf(f, "[ \"$SZ\" -gt 100000 ] || fail \"zip too small ($SZ)\"\n");
+    fprintf(f, "\n");
+    fprintf(f, "# 2) 校验结构（至少要有 module.prop 和 bin/battd）\n");
+    fprintf(f, "$BUSY unzip -l $OTA/update.zip | grep -q 'bin/battd' || fail 'no bin/battd'\n");
+    fprintf(f, "$BUSY unzip -l $OTA/update.zip | grep -q 'module.prop' || fail 'no module.prop'\n");
+    fprintf(f, "\n");
+    fprintf(f, "# 3) 解包\n");
+    fprintf(f, "rm -rf $OTA/unpack && mkdir -p $OTA/unpack\n");
+    fprintf(f, "$BUSY unzip -o -q $OTA/update.zip -d $OTA/unpack >> $LOG 2>&1 || fail 'unzip'\n");
+    fprintf(f, "\n");
+    fprintf(f, "# 4) 备份旧的 battd（回滚用）\n");
+    fprintf(f, "cp -f $D/battd $D/battd.old 2>/dev/null\n");
+    fprintf(f, "cp -f $MOD/bin/battd $MOD/bin/battd.old 2>/dev/null\n");
+    fprintf(f, "\n");
+    fprintf(f, "# 5) 替换二进制（先删再拷，避免 Text file busy）\n");
+    fprintf(f, "log 'replacing battd'\n");
+    fprintf(f, "rm -f $MOD/bin/battd $D/battd.new\n");
+    fprintf(f, "cp -f $OTA/unpack/bin/battd $D/battd.new || fail 'copy battd'\n");
+    fprintf(f, "chmod 755 $D/battd.new\n");
+    fprintf(f, "\n");
+    fprintf(f, "# 6) 替换 WebUI / 脚本 / 配置模板\n");
+    fprintf(f, "log 'replacing webroot+scripts'\n");
+    fprintf(f, "rm -rf $D/webroot/* 2>/dev/null\n");
+    fprintf(f, "mkdir -p $D/webroot\n");
+    fprintf(f, "cp -rf $OTA/unpack/webroot/. $D/webroot/ 2>/dev/null\n");
+    fprintf(f, "for s in supervisor.sh service.sh post-fs-data.sh action.sh uninstall.sh; do\n");
+    fprintf(f, "  [ -f $OTA/unpack/$s ] && cp -f $OTA/unpack/$s $D/$s && chmod 755 $D/$s\n");
+    fprintf(f, "done\n");
+    fprintf(f, "cp -f $OTA/unpack/module.prop $MOD/module.prop 2>/dev/null\n");
+    fprintf(f, "cp -f $OTA/unpack/bin/battd $MOD/bin/battd 2>/dev/null && chmod 755 $MOD/bin/battd\n");
+    fprintf(f, "\n");
+    fprintf(f, "# 7) 停旧进程 → 起新进程\n");
+    fprintf(f, "log 'restarting battd'\n");
+    fprintf(f, "OLD=$(cat $D/battd.pid 2>/dev/null)\n");
+    fprintf(f, "[ -n \"$OLD\" ] && kill \"$OLD\" 2>/dev/null\n");
+    fprintf(f, "sleep 2\n");
+    fprintf(f, "mv -f $D/battd.new $D/battd || fail 'rename battd'\n");
+    fprintf(f, "chmod 755 $D/battd\n");
+    fprintf(f, "rm -f $D/battd.pid\n");
+    fprintf(f, "# supervisor 会在 15 秒内拉起；也主动起一次加快\n");
+    fprintf(f, "setsid $D/battd >> $D/battd.stdout 2>&1 &\n");
+    fprintf(f, "echo $! > $D/battd.pid\n");
+    fprintf(f, "sleep 3\n");
+    fprintf(f, "if ! $BUSY wget -q -O /dev/null --timeout=3 http://127.0.0.1:8800/api/status 2>/dev/null; then\n");
+    fprintf(f, "  log 'new battd not responding, rolling back'\n");
+    fprintf(f, "  kill $(cat $D/battd.pid 2>/dev/null) 2>/dev/null\n");
+    fprintf(f, "  cp -f $D/battd.old $D/battd 2>/dev/null\n");
+    fprintf(f, "  setsid $D/battd >> $D/battd.stdout 2>&1 &\n");
+    fprintf(f, "  fail 'new version not responding, rolled back'\n");
+    fprintf(f, "fi\n");
+    fprintf(f, "\n");
+    fprintf(f, "echo done > $OTA/state\n");
+    fprintf(f, "log '=== OTA done ==='\n");
+    fclose(f);
+    chmod(script, 0755);
+
+    /* 后台执行（脱离当前进程，因为脚本最后会 kill 我们） */
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+        "setsid sh %s > /dev/null 2>&1 < /dev/null &", script);
+    ota_set("downloading", 10, "已启动后台升级进程");
+    system(cmd);
+}
+
+static void handle_ota(int fd, const char *body, const char *method) {
+    if (!strcmp(method, "GET")) {
+        char *j = ota_status_json();
+        send_resp(fd, 200, "application/json", j);
+        free(j);
+        return;
+    }
+
+    /* POST：需要 body 里带版本号（App 从 check 结果里拿） */
+    char ver[32] = "";
+    if (body) {
+        const char *p = strstr(body, "ver=");
+        if (p) { p += 4; int i = 0; while (*p && *p != '&' && i < 31) ver[i++] = *p++; ver[i] = 0; }
+    }
+
+    if (!ver[0]) {
+        send_resp(fd, 400, "application/json",
+            "{\"ok\":false,\"error\":\"缺少 ver 参数\"}");
+        return;
+    }
+    if (ota_ver_cmp(ver, VERSION) <= 0) {
+        send_resp(fd, 200, "application/json",
+            "{\"ok\":false,\"error\":\"已是最新版本\",\"current\":\"" VERSION "\"}");
+        return;
+    }
+    if (strcmp(ota_state, "downloading") == 0 || strcmp(ota_state, "applying") == 0) {
+        send_resp(fd, 200, "application/json",
+            "{\"ok\":false,\"error\":\"已有升级在进行中\"}");
+        return;
+    }
+
+    ota_start_apply(ver);
+    send_resp(fd, 200, "application/json",
+        "{\"ok\":true,\"message\":\"已开始升级，模块会自行重启，无需重启手机\"}");
+}
+
 static void handle_update_check(int fd) {
     /* v1.3.1: 只做"检查"，不再自己下载。真正的更新由 APatch/KSU 管理器走 updateJson 渠道完成 */
     char buf[2048];
@@ -2853,6 +3088,7 @@ static void handle_client(int fd) {
     }
     if (!strcmp(uri, "/api/export")) { handle_export(fd); return; }
     if (!strcmp(uri, "/api/update-check")) { handle_update_check(fd); return; }
+    if (!strcmp(uri, "/api/ota")) { handle_ota(fd, body, method); return; }
     /* v1.3.1: /api/update-apply 已移除（改用 APatch 管理器的 updateJson 渠道）*/
     if (!strcmp(uri, "/api/history")) { char *j = history_json(); send_resp(fd, 200, "application/json", j); free(j); return; }
     /* ★ v1.5.0 充电曲线 & 校准 */

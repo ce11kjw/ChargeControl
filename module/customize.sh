@@ -92,4 +92,42 @@ if [ -e /sys/class/power_supply/bms/soh ]; then
   ui_print "  [Y] bms/soh = $(R /sys/class/power_supply/bms/soh) (原生健康度)"
 fi
 
-ui_print "- 安装完成，请重启"
+# ═══ 安装伴随的 App（模块 zip 里带了 APK）═══
+ui_print "- 安装 App"
+APK=""
+for cand in "$MODPATH/ChargeControl.apk" "$MODPATH/app/ChargeControl.apk"; do
+  [ -f "$cand" ] && { APK="$cand"; break; }
+done
+
+if [ -n "$APK" ]; then
+  VER=$(su -c "dumpsys package com.ce11kjw.chargecontrol 2>/dev/null | grep -m1 versionName" 2>/dev/null | tr -d ' ')
+  if [ -n "$VER" ]; then
+    ui_print "  已安装: $VER，尝试覆盖升级"
+  fi
+  # 优先 pm install（无需用户操作）
+  OUT=$(su -c "pm install -r -d '$APK'" 2>&1)
+  case "$OUT" in
+    *Success*)
+      ui_print "  [Y] App 安装成功"
+      ;;
+    *INSTALL_FAILED_UPDATE_INCOMPATIBLE*)
+      ui_print "  [!] 签名不匹配（旧版签名不同），需手动卸载旧 App"
+      ui_print "      已复制到 /sdcard/下载/ChargeControl.apk"
+      cp -f "$APK" /sdcard/下载/ChargeControl.apk 2>/dev/null
+      ;;
+    *INSTALL_FAILED_VERSION_DOWNGRADE*)
+      ui_print "  [!] 已装版本更新，跳过"
+      ;;
+    *)
+      ui_print "  [!] 自动安装失败，已复制到 /sdcard/下载/ChargeControl.apk"
+      ui_print "      $OUT"
+      cp -f "$APK" /sdcard/下载/ChargeControl.apk 2>/dev/null
+      ;;
+  esac
+else
+  ui_print "  [-] zip 内未找到 APK"
+fi
+
+ui_print "- 安装完成"
+ui_print "  模块已就绪，无需重启（battd 会自动启动）"
+ui_print "  App 图标: ChargeControl"

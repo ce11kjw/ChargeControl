@@ -127,11 +127,55 @@ jobs:
           file src/battd
           file src/battd | grep -q aarch64 || { echo "::error::不是 aarch64"; exit 1; }
 
+      - name: Set up JDK 17 (for bundled App)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0 platform-tools ndk;29.0.14206865 cmake;3.22.1'
+
+      - name: Accept Android licenses
+        run: |
+          SDKMANAGER=$(find "${ANDROID_SDK_ROOT}/cmdline-tools" -name sdkmanager -type f 2>/dev/null | xargs -r ls -t 2>/dev/null | head -1)
+          yes | "${SDKMANAGER}" --sdk_root="${ANDROID_SDK_ROOT}" --licenses || true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('app/**/*.gradle*', 'app/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Build App APK (bundled into module)
+        working-directory: app
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
       - name: Build module zip
         run: |
           mkdir -p module/bin
           cp src/battd module/bin/battd
           chmod 755 module/bin/battd
+
+          # ★ 把 App 一起打进模块 zip（装模块时顺带装 App）
+          APK=$(find app/app/build/outputs/apk -name "*.apk" -type f | head -1)
+          if [ -z "$APK" ]; then
+            echo "::error::未找到 App APK"
+            find app/app/build/outputs -type f 2>/dev/null | head -20
+            exit 1
+          fi
+          echo "打包 APK: $APK ($(stat -c%s "$APK") 字节)"
+          cp "$APK" module/ChargeControl.apk
+          ls -l module/ChargeControl.apk
           # 模块 zip 内固定命名 ChargeControl.zip，配合 update.json 的
           # releases/latest/download/ChargeControl.zip 永久链接
           rm -f ChargeControl.zip
@@ -143,10 +187,14 @@ jobs:
         run: |
           echo "=== zip 内容 ==="
           unzip -l ChargeControl.zip
-          for f in module.prop service.sh customize.sh bin/battd webroot/index.html; do
+          for f in module.prop service.sh customize.sh bin/battd webroot/index.html ChargeControl.apk; do
             unzip -l ChargeControl.zip | grep -q "$f" \
               || { echo "::error::zip 缺少 $f"; exit 1; }
           done
+          # 确认 APK 是合法 zip（确认没被压坏）
+          unzip -p ChargeControl.zip ChargeControl.apk > /tmp/verify.apk
+          unzip -l /tmp/verify.apk > /dev/null || { echo "::error::APK 损坏"; exit 1; }
+          echo "  APK 大小: $(stat -c%s /tmp/verify.apk) 字节"
           sha256sum ChargeControl.zip | tee ChargeControl.zip.sha256
           echo "✅ 校验通过"
 
@@ -178,5 +226,6 @@ jobs:
           files: |
             ChargeControl.zip
             ChargeControl.zip.sha256
+            module/ChargeControl.apk
           generate_release_notes: true
           draft: false
