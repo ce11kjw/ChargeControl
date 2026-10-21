@@ -157,6 +157,89 @@ object ChargeControlApi {
     }
 
     // ═══ 便捷读取（带默认值）═══
+    /* ═══════════════════════════════════════════════════════════
+       v1.14.0: OTA 热更新
+
+       ⚠️ 注意：升级过程会重启 battd 进程，本 App 的 HTTP 连接会断。
+       所以「触发升级」之后不能期待立刻拿到完整进度，
+       需要 App 侧轮询 /api/ota 直到状态变成 done 或 failed
+       （新进程会把状态从 OTA 目录的 state 文件读回来）。
+       ═══════════════════════════════════════════════════════════ */
+
+    /** OTA 状态 */
+    data class OtaState(
+        val state: String = "idle",      // idle/downloading/applying/done/failed
+        val progress: Int = 0,
+        val message: String = "",
+        val from: String = "",
+        val to: String = "",
+        val current: String = "",
+    ) {
+        val isBusy get() = state == "downloading" || state == "applying"
+        val isDone get() = state == "done"
+        val isFailed get() = state == "failed"
+        val hasUpdate get() = to.isNotEmpty() && from.isNotEmpty() && to != from
+    }
+
+    /** 检查更新（模块去 GitHub 查 latest release） */
+    suspend fun checkUpdate(): JSONObject? = withContext(Dispatchers.IO) {
+        try {
+            val text = getText("/api/update-check", 12000) ?: return@withContext null
+            JSONObject(text)
+        } catch (e: Throwable) {
+            Log.w(TAG, "checkUpdate failed: ${e.message}")
+            null
+        }
+    }
+
+    /** 查询 OTA 进度 */
+    suspend fun fetchOtaState(): OtaState? = withContext(Dispatchers.IO) {
+        try {
+            val text = getText("/api/ota", 5000) ?: return@withContext null
+            val o = JSONObject(text)
+            OtaState(
+                state = o.optString("state", "idle"),
+                progress = o.optInt("progress", 0),
+                message = o.optString("message", ""),
+                from = o.optString("from", ""),
+                to = o.optString("to", ""),
+                current = o.optString("current", ""),
+            )
+        } catch (e: Throwable) {
+            Log.w(TAG, "fetchOtaState failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 触发升级。
+     * @param ver 目标版本（如 "v1.15.0"），来自 checkUpdate 的 latest 字段
+     * @return Pair(是否成功, 提示消息)
+     */
+    suspend fun startOta(ver: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        try {
+            val body = "ver=" + URLEncoder.encode(ver, "UTF-8")
+            val conn = (URL("$BASE/api/ota").openConnection() as HttpURLConnection).apply {
+                connectTimeout = CONNECT_TIMEOUT
+                readTimeout = 10000
+                requestMethod = "POST"
+                doOutput = true
+                setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            }
+            conn.outputStream.use { it.write(body.toByteArray()) }
+            val ok = conn.responseCode == 200
+            val resp = conn.inputStream.bufferedReader().use(BufferedReader::readText)
+            conn.disconnect()
+            val o = JSONObject(resp)
+            val success = o.optBoolean("ok", false)
+            val msg = o.optString("message", o.optString("error", ""))
+            Pair(success, msg)
+        } catch (e: Throwable) {
+            Log.w(TAG, "startOta failed: ${e.message}")
+            Pair(false, "无法连接模块: ${e.message}")
+        }
+    }
+
     fun jint(o: JSONObject?, key: String, def: Int = -1): Int =
         o?.optInt(key, def) ?: def
     fun jbool(o: JSONObject?, key: String, def: Boolean = false): Boolean =

@@ -1,5 +1,13 @@
 package com.ce11kjw.chargecontrol.ui.settings
 
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import com.ce11kjw.chargecontrol.data.module.ChargeControlApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
@@ -130,6 +138,9 @@ fun SettingsScreen(viewModel: SettingsViewModel = koinViewModel()) {
 
         // ═══ 顶部夜光条（独立开关，与 TurboXDR 解耦）═══
         CyberNightlightBarSettingsCard()
+
+        // ═══ 模块更新（OTA 热更新，不重启手机）═══
+        ModuleUpdateCard()
 
         // ═══ App 信息 ═══
         Card(
@@ -743,3 +754,190 @@ private fun AccentThemeSettingsCard() {
         )
     }
 }
+
+// ═══════ 模块更新卡片（OTA 热更新）═══════
+
+/**
+ * 模块远程更新 —— 用户在 App 里点一下就能升级，**不需要重启手机**。
+ *
+ * 流程：
+ *   1. checkUpdate() → 模块去 GitHub 查 latest release
+ *   2. startOta(ver) → 模块后台下载+替换+重启自己
+ *   3. 轮询 fetchOtaState() → 显示进度
+ *
+ * 注意：升级过程中 battd 会被 kill 再拉起，期间 HTTP 会断几秒，
+ * 所以轮询要容忍失败（继续重试，不要当错误处理）。
+ */
+@Composable
+private fun ModuleUpdateCard() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var checking by remember { mutableStateOf(false) }
+    var latest by remember { mutableStateOf("") }
+    var current by remember { mutableStateOf("") }
+    var otaState by remember { mutableStateOf(ChargeControlApi.OtaState()) }
+    var errMsg by remember { mutableStateOf("") }
+    var pollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    // 进页面先拉一次状态（可能上次升级已完成）
+    LaunchedEffect(Unit) {
+        otaState = ChargeControlApi.fetchOtaState() ?: ChargeControlApi.OtaState()
+        if (otaState.current.isNotEmpty()) current = otaState.current
+    }
+
+    // 升级中自动轮询
+    LaunchedEffect(otaState.isBusy) {
+        if (otaState.isBusy) {
+            pollJob = scope.launch {
+                repeat(120) {                       // 最多 10 分钟
+                    delay(2000)
+                    val st = ChargeControlApi.fetchOtaState() ?: return@launch  // 断连时忽略
+                    otaState = st
+                    if (!st.isBusy) return@launch
+                }
+            }
+        }
+    }
+    DisposableEffect(Unit) { onDispose { pollJob?.cancel() } }
+
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("模块更新", fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.width(8.dp))
+                if (otaState.isBusy) {
+                    CircularProgressIndicator(
+                        Modifier.size(14.dp), strokeWidth = 2.dp,
+                        color = NeonPurpleBright
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            // ── 当前版本 ──
+            Text(
+                "当前版本：${if (current.isNotEmpty()) current else "读取中…"}",
+                fontSize = 12.sp, color = TextSecondary
+            )
+
+            // ── 状态区 ──
+            when {
+                otaState.isBusy -> {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        otaState.message.ifEmpty { "正在升级…" },
+                        fontSize = 12.sp, color = NeonPurpleBright
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { otaState.progress / 100f },
+                        modifier = Modifier.fillMaxWidth().height(4.dp),
+                        color = NeonPurpleBright,
+                        trackColor = NeonPurpleDeep.copy(alpha = 0.25f)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "升级中请勿操作，模块会自动重启（不用重启手机）",
+                        fontSize = 11.sp, color = TextSecondary
+                    )
+                }
+                otaState.isDone -> {
+                    Spacer(Modifier.height(10.dp))
+                    Text("✅ 已升级到 ${otaState.to}", fontSize = 12.sp, color = SuccessNeon)
+                    Text("请重新打开 App 以加载新版界面", fontSize = 11.sp, color = TextSecondary)
+                }
+                otaState.isFailed -> {
+                    Spacer(Modifier.height(10.dp))
+                    Text("❌ 升级失败：${otaState.message}", fontSize = 12.sp, color = ErrorNeon)
+                    Text("已自动回滚到原版本，可重试", fontSize = 11.sp, color = TextSecondary)
+                }
+                latest.isNotEmpty() && latest != current -> {
+                    Spacer(Modifier.height(10.dp))
+                    Text("发现新版本 $latest", fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold, color = WarningNeon)
+                }
+                latest.isNotEmpty() -> {
+                    Spacer(Modifier.height(10.dp))
+                    Text("已是最新版本", fontSize = 12.sp, color = SuccessNeon)
+                }
+                errMsg.isNotEmpty() -> {
+                    Spacer(Modifier.height(10.dp))
+                    Text(errMsg, fontSize = 11.sp, color = ErrorNeon)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ── 按钮 ──
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!otaState.isBusy) {
+                    TextButton(
+                        enabled = !checking,
+                        onClick = {
+                            HapticUtils.lightTap(ctx)
+                            checking = true; errMsg = ""; latest = ""
+                            scope.launch {
+                                val r = ChargeControlApi.checkUpdate()
+                                checking = false
+                                if (r == null) {
+                                    errMsg = "无法连接模块（模块未运行或网络不通）"
+                                    return@launch
+                                }
+                                if (r.optString("error") == "network") {
+                                    errMsg = "模块无法访问 GitHub（可在模块管理器里手动更新）"
+                                    current = r.optString("current", current)
+                                    return@launch
+                                }
+                                current = r.optString("current", current)
+                                latest = r.optString("latest", "")
+                            }
+                        }
+                    ) {
+                        Text(if (checking) "检查中…" else "检查更新",
+                            fontSize = 13.sp, color = NeonPurpleBright)
+                    }
+
+                    if (latest.isNotEmpty() && latest != current) {
+                        TextButton(onClick = {
+                            HapticUtils.standardTap(ctx)
+                            otaState = ChargeControlApi.OtaState(
+                                state = "downloading", progress = 2,
+                                from = current, to = latest,
+                                message = "正在启动升级…"
+                            )
+                            scope.launch {
+                                val (ok, msg) = ChargeControlApi.startOta(latest)
+                                if (!ok) {
+                                    otaState = ChargeControlApi.OtaState(
+                                        state = "failed", message = msg,
+                                        from = current, to = latest
+                                    )
+                                }
+                            }
+                        }) {
+                            Text("立即升级到 $latest", fontSize = 13.sp, color = SuccessNeon)
+                        }
+                    }
+                }
+
+                if (otaState.isDone || otaState.isFailed) {
+                    TextButton(onClick = {
+                        otaState = ChargeControlApi.OtaState()
+                        latest = ""
+                    }) {
+                        Text("知道了", fontSize = 13.sp, color = TextSecondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
