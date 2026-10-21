@@ -2850,24 +2850,47 @@ static void ota_start_apply(const char *ver) {
     fprintf(f, "\n");
     fprintf(f, "# 1) 下载 zip\n");
     fprintf(f, "log 'downloading'\n");
-    fprintf(f, "BUSY=/data/adb/ap/bin/busybox\n");
-    fprintf(f, "[ -x $BUSY ] || BUSY=/data/adb/ksu/bin/busybox\n");
-    fprintf(f, "[ -x $BUSY ] || BUSY=/data/adb/magisk/busybox\n");
-    fprintf(f, "[ -x $BUSY ] || BUSY=busybox\n");
+    /* ═══ v1.15.1: 下载只做兜底 ═══
+       首选让 APatch/KernelSU 管理器走 updateJson 更新（它有正确的
+       下载/校验/安装流程，且不受模块进程的 SELinux 限制）。
+       这里的自实现仅在「管理器不可用 + 用户坚持在 App 内升级」时兜底。
+       工具按优先级：busybox → wget → curl → toybox。 */
+    fprintf(f, "BUSY=\n");
+    fprintf(f, "for b in /data/adb/ap/bin/busybox /data/adb/ksu/bin/busybox \\\n");
+    fprintf(f, "         /data/adb/magisk/busybox /system/bin/busybox; do\n");
+    fprintf(f, "  [ -x \"$b\" ] && { BUSY=\"$b\"; break; }\n");
+    fprintf(f, "done\n");
+    fprintf(f, "TOY=\n");
+    fprintf(f, "for t in /system/bin/toybox /vendor/bin/toybox; do\n");
+    fprintf(f, "  [ -x \"$t\" ] && { TOY=\"$t\"; break; }\n");
+    fprintf(f, "done\n");
+    fprintf(f, "log \"busybox=${BUSY:-无} toybox=${TOY:-无}\"\n");
+    fprintf(f, "\n");
     fprintf(f, "URL='https://github.com/ce11kjw/ChargeControl/releases/download/%s/ChargeControl.zip'\n", ver);
-    fprintf(f, "$BUSY wget -T 120 -O $OTA/update.zip \"$URL\" >> $LOG 2>&1 || fail 'download'\n");
-    fprintf(f, "[ -s $OTA/update.zip ] || fail 'empty zip'\n");
-    fprintf(f, "SZ=$($BUSY stat -c %%s $OTA/update.zip 2>/dev/null || echo 0)\n");
-    fprintf(f, "log \"downloaded $SZ bytes\"\n");
-    fprintf(f, "[ \"$SZ\" -gt 100000 ] || fail \"zip too small ($SZ)\"\n");
+    fprintf(f, "DL=0\n");
+    fprintf(f, "[ -n \"$BUSY\" ] && $BUSY wget -T 180 -O $OTA/update.zip \"$URL\" >> $LOG 2>&1 && DL=1\n");
+    fprintf(f, "[ $DL -eq 0 ] && command -v wget >/dev/null 2>&1 && wget -T 180 -O $OTA/update.zip \"$URL\" >> $LOG 2>&1 && DL=1\n");
+    fprintf(f, "[ $DL -eq 0 ] && command -v curl >/dev/null 2>&1 && curl -fL --connect-timeout 20 --max-time 300 -o $OTA/update.zip \"$URL\" >> $LOG 2>&1 && DL=1\n");
+    fprintf(f, "[ $DL -eq 0 ] && fail '下载失败：请改用 APatch/KernelSU 管理器更新（模块已配置 updateJson）'\n");
+    fprintf(f, "[ -s $OTA/update.zip ] || fail '下载的文件为空'\n");
+    fprintf(f, "log 'download ok'\n");
+    fprintf(f, "\n");
+    fprintf(f, "# ── unzip 兜底 ──\n");
+    fprintf(f, "UZ=\n");
+    fprintf(f, "[ -n \"$BUSY\" ] && $BUSY unzip --help >/dev/null 2>&1 && UZ=\"$BUSY unzip\"\n");
+    fprintf(f, "[ -z \"$UZ\" ] && command -v unzip >/dev/null 2>&1 && UZ=unzip\n");
+    fprintf(f, "[ -z \"$UZ\" ] && [ -n \"$TOY\" ] && $TOY unzip --help >/dev/null 2>&1 && UZ=\"$TOY unzip\"\n");
+    fprintf(f, "[ -z \"$UZ\" ] && fail '找不到 unzip'\n");
+    fprintf(f, "log \"unzip: $UZ\"\n");
     fprintf(f, "\n");
     fprintf(f, "# 2) 校验结构（至少要有 module.prop 和 bin/battd）\n");
-    fprintf(f, "$BUSY unzip -l $OTA/update.zip | grep -q 'bin/battd' || fail 'no bin/battd'\n");
-    fprintf(f, "$BUSY unzip -l $OTA/update.zip | grep -q 'module.prop' || fail 'no module.prop'\n");
+    fprintf(f, "$UZ -l $OTA/update.zip | grep -q 'bin/battd' || fail 'zip 里没有 bin/battd'\n");
+    fprintf(f, "$UZ -l $OTA/update.zip | grep -q 'module.prop' || fail 'zip 里没有 module.prop'\n");
     fprintf(f, "\n");
     fprintf(f, "# 3) 解包\n");
     fprintf(f, "rm -rf $OTA/unpack && mkdir -p $OTA/unpack\n");
-    fprintf(f, "$BUSY unzip -o -q $OTA/update.zip -d $OTA/unpack >> $LOG 2>&1 || fail 'unzip'\n");
+    fprintf(f, "$UZ -o -q $OTA/update.zip -d $OTA/unpack >> $LOG 2>&1 || fail '解包失败'\n");
+    fprintf(f, "[ -f $OTA/unpack/bin/battd ] || fail '解包后缺少 bin/battd'\n");
     fprintf(f, "\n");
     fprintf(f, "# 4) 备份旧的 battd（回滚用）\n");
     fprintf(f, "cp -f $D/battd $D/battd.old 2>/dev/null\n");
@@ -2887,6 +2910,24 @@ static void ota_start_apply(const char *ver) {
     fprintf(f, "for s in supervisor.sh service.sh post-fs-data.sh action.sh uninstall.sh; do\n");
     fprintf(f, "  [ -f $OTA/unpack/$s ] && cp -f $OTA/unpack/$s $D/$s && chmod 755 $D/$s\n");
     fprintf(f, "done\n");
+    /* ★ v1.15.1: OTA 升级时同步更新 App
+       模块和 App 是一起打包的，版本必须一致。
+       APK 在 zip 根目录（ChargeControl.apk），装到 /data/local/tmp 再 pm install。 */
+    fprintf(f, "if [ -f $OTA/unpack/ChargeControl.apk ]; then\n");
+    fprintf(f, "  log 'installing app'\n");
+    fprintf(f, "  cp -f $OTA/unpack/ChargeControl.apk $D/ChargeControl.apk 2>/dev/null\n");
+    fprintf(f, "  cp -f $OTA/unpack/ChargeControl.apk /data/local/tmp/cc-update.apk 2>/dev/null\n");
+    fprintf(f, "  chmod 644 /data/local/tmp/cc-update.apk 2>/dev/null\n");
+    fprintf(f, "  APPOK=0\n");
+    fprintf(f, "  if [ -x /system/bin/pm ]; then\n");
+    fprintf(f, "    /system/bin/pm install -r -d -g /data/local/tmp/cc-update.apk >> $LOG 2>&1 && APPOK=1\n");
+    fprintf(f, "  else\n");
+    fprintf(f, "    pm install -r -d -g /data/local/tmp/cc-update.apk >> $LOG 2>&1 && APPOK=1\n");
+    fprintf(f, "  fi\n");
+    fprintf(f, "  [ $APPOK -eq 1 ] && log 'app updated' || log 'app install failed (module still ok)'\n");
+    fprintf(f, "  rm -f /data/local/tmp/cc-update.apk 2>/dev/null\n");
+    fprintf(f, "fi\n");
+    fprintf(f, "\n");
     fprintf(f, "cp -f $OTA/unpack/module.prop $MOD/module.prop 2>/dev/null\n");
     fprintf(f, "cp -f $OTA/unpack/bin/battd $MOD/bin/battd 2>/dev/null && chmod 755 $MOD/bin/battd\n");
     fprintf(f, "\n");
@@ -2902,7 +2943,12 @@ static void ota_start_apply(const char *ver) {
     fprintf(f, "setsid $D/battd >> $D/battd.stdout 2>&1 &\n");
     fprintf(f, "echo $! > $D/battd.pid\n");
     fprintf(f, "sleep 3\n");
-    fprintf(f, "if ! $BUSY wget -q -O /dev/null --timeout=3 http://127.0.0.1:8800/api/status 2>/dev/null; then\n");
+    fprintf(f, "ALIVE=0\n");
+    fprintf(f, "[ -n \"$BUSY\" ] && $BUSY wget -q -O /dev/null --timeout=3 http://127.0.0.1:8800/api/status 2>/dev/null && ALIVE=1\n");
+    fprintf(f, "[ $ALIVE -eq 0 ] && command -v curl >/dev/null 2>&1 && curl -sf -m 3 -o /dev/null http://127.0.0.1:8800/api/status && ALIVE=1\n");
+    fprintf(f, "[ $ALIVE -eq 0 ] && [ -n \"$TOY\" ] && $TOY wget --help >/dev/null 2>&1 && $TOY wget -q -O /dev/null http://127.0.0.1:8800/api/status 2>/dev/null && ALIVE=1\n");
+    fprintf(f, "[ $ALIVE -eq 0 ] && [ -e /proc/$(cat $D/battd.pid 2>/dev/null) ] && ALIVE=1\n");   // 进程在就算活
+    fprintf(f, "if [ $ALIVE -eq 0 ]; then\n");
     fprintf(f, "  log 'new battd not responding, rolling back'\n");
     fprintf(f, "  kill $(cat $D/battd.pid 2>/dev/null) 2>/dev/null\n");
     fprintf(f, "  cp -f $D/battd.old $D/battd 2>/dev/null\n");
