@@ -2752,6 +2752,8 @@ static int ver_cmp(const char *a, const char *b) {
 #define OTA_UNPACK  OTA_DIR "/unpack"
 #define OTA_MARKER  OTA_DIR "/state"
 
+static int ota_ver_valid(const char *v);   /* 前向声明：ota_start_apply 先用到 */
+
 static char  ota_state[32] = "idle";
 static int   ota_progress = 0;
 static char  ota_message[256] = "";
@@ -2775,11 +2777,18 @@ static int ota_ver_cmp(const char *a, const char *b) {
     }
 }
 
+static void ota_ensure_dir(void) {
+    /* ★ v1.15.2: OTA 目录此前从未被创建 —— 所有状态写入/下载/解包全失败。
+       这里每次进入 OTA 流程前保证存在（mkdir 对已存在目录无害）。 */
+    mkdir(OTA_DIR, 0755);
+}
+
 static void ota_set(const char *state, int progress, const char *msg) {
     snprintf(ota_state, sizeof(ota_state), "%s", state);
     ota_progress = progress;
     if (msg) snprintf(ota_message, sizeof(ota_message), "%s", msg);
     /* 落盘，供重启后查询（本进程升级后会被替换，新进程读不到内存） */
+    ota_ensure_dir();
     char p[160];
     snprintf(p, sizeof(p), "%s/state", OTA_DIR);
     FILE *f = fopen(p, "w");
@@ -2793,21 +2802,58 @@ static void ota_load_state(void) {
     FILE *f = fopen(OTA_MARKER, "r");
     if (!f) return;
     char line[256];
-    if (fgets(line, sizeof(line), f)) { line[strcspn(line, "\n")] = 0; snprintf(ota_state, sizeof(ota_state), "%s", line); }
+    /* ★ v1.15.2: 用 "%.*s" 显式限长，避免 GCC 截断警告
+       （from/to 只有 32 字节，而文件行最长 255）。 */
+    if (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\n")] = 0;
+        snprintf(ota_state, sizeof(ota_state), "%.*s", (int)sizeof(ota_state)-1, line);
+    }
     if (fgets(line, sizeof(line), f)) ota_progress = atoi(line);
-    if (fgets(line, sizeof(line), f)) { line[strcspn(line, "\n")] = 0; snprintf(ota_message, sizeof(ota_message), "%s", line); }
-    if (fgets(line, sizeof(line), f)) { line[strcspn(line, "\n")] = 0; snprintf(ota_from, sizeof(ota_from), "%s", line); }
-    if (fgets(line, sizeof(line), f)) { line[strcspn(line, "\n")] = 0; snprintf(ota_to, sizeof(ota_to), "%s", line); }
+    if (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\n")] = 0;
+        snprintf(ota_message, sizeof(ota_message), "%.*s", (int)sizeof(ota_message)-1, line);
+    }
+    if (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\n")] = 0;
+        snprintf(ota_from, sizeof(ota_from), "%.*s", (int)sizeof(ota_from)-1, line);
+    }
+    if (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\n")] = 0;
+        snprintf(ota_to, sizeof(ota_to), "%.*s", (int)sizeof(ota_to)-1, line);
+    }
     fclose(f);
 }
 
+/* ★ v1.15.2: ota_message 来自 apply.sh 的错误文本，可能含 " 或 \ 或换行，
+   直接塞进 JSON 会破坏格式（App 侧 JSONObject 解析抛异常）。
+   这里做最小转义。 */
+static void ota_json_escape(char *dst, size_t dstsz, const char *src) {
+    size_t w = 0;
+    for (const char *p = src; *p && w + 7 < dstsz; p++) {
+        unsigned char c = (unsigned char)*p;
+        switch (c) {
+            case '"':  dst[w++] = '\\'; dst[w++] = '"';  break;
+            case '\\': dst[w++] = '\\'; dst[w++] = '\\'; break;
+            case '\n': dst[w++] = '\\'; dst[w++] = 'n';  break;
+            case '\r': dst[w++] = '\\'; dst[w++] = 'r';  break;
+            case '\t': dst[w++] = '\\'; dst[w++] = 't';  break;
+            default:
+                if (c < 0x20) { w += (size_t)snprintf(dst + w, dstsz - w, "\\u%04x", c); }
+                else dst[w++] = (char)c;
+        }
+    }
+    dst[w] = 0;
+}
+
 static char *ota_status_json(void) {
-    char *j = malloc(768);
+    char *j = malloc(1024);
     if (!j) return strdup("{}");
-    snprintf(j, 768,
+    char msg[512];
+    ota_json_escape(msg, sizeof(msg), ota_message);
+    snprintf(j, 1024,
         "{\"state\":\"%s\",\"progress\":%d,\"message\":\"%s\","
         "\"from\":\"%s\",\"to\":\"%s\",\"current\":\"%s\"}",
-        ota_state, ota_progress, ota_message, ota_from, ota_to, VERSION);
+        ota_state, ota_progress, msg, ota_from, ota_to, VERSION);
     return j;
 }
 
@@ -2827,6 +2873,9 @@ static int ota_run(const char *cmd) {
  * 本进程立刻返回响应，脚本稍后杀掉本进程。
  */
 static void ota_start_apply(const char *ver) {
+    /* 纵深防御：即使调用方漏了校验，这里也拦住 */
+    if (!ota_ver_valid(ver)) { ota_set("failed", 0, "版本号非法，已拒绝"); return; }
+    ota_ensure_dir();          /* ★ 先建目录，否则后面全失败 */
     ota_set("downloading", 5, "开始下载");
     snprintf(ota_from, sizeof(ota_from), "%s", VERSION);
     snprintf(ota_to, sizeof(ota_to), "%s", ver);
@@ -2841,9 +2890,14 @@ static void ota_start_apply(const char *ver) {
     fprintf(f, "D=/data/adb/battery-manager\n");
     fprintf(f, "MOD=/data/adb/modules/chargecontrol\n");
     fprintf(f, "OTA=$D/ota\n");
+    fprintf(f, "mkdir -p $OTA || { echo 'failed' > $OTA/state 2>/dev/null; exit 1; }\n");
     fprintf(f, "LOG=$OTA/apply.log\n");
     fprintf(f, "log(){ echo \"$(date '+%%H:%%M:%%S') $*\" >> $LOG; }\n");
-    fprintf(f, "fail(){ log \"FAILED: $1\"; echo \"failed\" > $OTA/state; exit 1; }\n");
+    /* ★ v1.15.2: 状态文件格式必须是 5 行（state/progress/message/from/to），
+       与 ota_load_state() 的 fscanf 对齐。原来只写一行 "failed"，
+       导致 App 看到的 message 是旧的。 */
+    fprintf(f, "setstate(){ printf '%%s\\n%%s\\n%%s\\n%%s\\n%%s\\n' \"$1\" \"$2\" \"$3\" \"" VERSION "\" \"%s\" > $OTA/state; }\n", ver);
+    fprintf(f, "fail(){ log \"FAILED: $1\"; setstate failed 0 \"$1\"; exit 1; }\n");
     fprintf(f, "\n");
     fprintf(f, ": > $LOG\n");
     fprintf(f, "log '=== OTA start, target %s ==='\n", ver);
@@ -2956,7 +3010,7 @@ static void ota_start_apply(const char *ver) {
     fprintf(f, "  fail 'new version not responding, rolled back'\n");
     fprintf(f, "fi\n");
     fprintf(f, "\n");
-    fprintf(f, "echo done > $OTA/state\n");
+    fprintf(f, "setstate done 100 '升级完成'\n");
     fprintf(f, "log '=== OTA done ==='\n");
     fclose(f);
     chmod(script, 0755);
@@ -2969,8 +3023,41 @@ static void ota_start_apply(const char *ver) {
     system(cmd);
 }
 
+/* ═══════════════════════════════════════════════════════════
+   ★ v1.15.2 安全修复：版本号白名单校验
+
+   漏洞（已实测复现）：ver 参数未经校验就拼进 apply.sh 的 URL：
+       ver=v99.0.0$(touch${IFS}/tmp/PWNED)
+   生成 URL='.../v99.0.0$(touch${IFS}/tmp/PWNED)/...'
+   shell 展开后以 root 执行任意命令。
+
+   任何本机 App 都能访问 127.0.0.1:8800 ⇒ 提权风险极高。
+
+   规则：只允许 [A-Za-z0-9._-]，必须以 v/V 开头，长度 2..31。
+   这是版本号的合理字符集（v1.15.2 / v1.15.2-beta.1）。
+   ═══════════════════════════════════════════════════════════ */
+static int ota_ver_valid(const char *v) {
+    if (!v || !v[0]) return 0;
+    if (v[0] != 'v' && v[0] != 'V') return 0;
+    size_t n = strlen(v);
+    if (n < 2 || n > 31) return 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = v[i];
+        int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+              || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+        if (!ok) return 0;
+    }
+    return 1;
+}
+
 static void handle_ota(int fd, const char *body, const char *method) {
+    ota_ensure_dir();
     if (!strcmp(method, "GET")) {
+        /* ★ v1.15.2: 先读状态文件再回内存值。
+           apply.sh 是独立进程，它写的状态本进程看不到 ——
+           不读文件的话，App 会一直看到 "downloading"，
+           即使升级其实已经 done/failed。 */
+        ota_load_state();
         char *j = ota_status_json();
         send_resp(fd, 200, "application/json", j);
         free(j);
@@ -2987,6 +3074,12 @@ static void handle_ota(int fd, const char *body, const char *method) {
     if (!ver[0]) {
         send_resp(fd, 400, "application/json",
             "{\"ok\":false,\"error\":\"缺少 ver 参数\"}");
+        return;
+    }
+    /* ★ 安全：白名单校验，防止命令注入（见 ota_ver_valid 注释） */
+    if (!ota_ver_valid(ver)) {
+        send_resp(fd, 400, "application/json",
+            "{\"ok\":false,\"error\":\"版本号格式非法（只允许字母数字._-，且以 v 开头）\"}");
         return;
     }
     if (ota_ver_cmp(ver, VERSION) <= 0) {
@@ -3073,8 +3166,23 @@ static int serve_file(int fd, const char *uri) {
     else snprintf(path, sizeof(path), "%s%s", WEBROOT, uri);
     if (strstr(path, "..")) { send_resp(fd, 404, "text/plain", "Not Found"); return -1; }
     FILE *f = fopen(path, "rb"); if (!f) { send_resp(fd, 404, "text/plain", "Not Found"); return -1; }
-    fseek(f, 0, SEEK_END); long len = ftell(f); fseek(f, 0, SEEK_SET);
-    char *body = malloc(len+1);
+    /* ★ v1.15.2: 目录也能被 fopen 打开，但 fseek/ftell 行为未定义
+       （Linux 返回 0 或大数，Android 上实测走 OOM 分支返 500）。
+       显式用 stat 判断类型，目录直接 404，避免误导性的「OOM」。
+       同时给文件大小设上限（WebUI 文件都很小，10MB 足够）。 */
+    struct stat st_sf;
+    if (fstat(fileno(f), &st_sf) != 0 || S_ISDIR(st_sf.st_mode)) {
+        fclose(f);
+        send_resp(fd, 404, "text/plain", "Not Found");
+        return -1;
+    }
+    if (st_sf.st_size < 0 || st_sf.st_size > 10 * 1024 * 1024) {
+        fclose(f);
+        send_resp(fd, 413, "text/plain", "File too large");
+        return -1;
+    }
+    long len = (long)st_sf.st_size;
+    char *body = malloc((size_t)len + 1);
     if (!body) { fclose(f); send_resp(fd, 500, "text/plain", "OOM"); return -1; }
     size_t rd = fread(body, 1, len, f); fclose(f);
     body[rd] = '\0';

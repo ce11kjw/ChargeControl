@@ -35,14 +35,13 @@ class DeviceRepository(context: Context) {
     private val auxCollector = AuxiliaryCollector(appContext)
 
     // ═══════ DataSources (核心 5 模块 + 静态) ═══════
-    private val cpuDataSource = CpuDataSource(appContext)
-    private val gpuDataSource = GpuDataSource()
+    /* v1.15.2: cpuDataSource 已移除 */
+    /* v1.15.2: gpuDataSource 已移除 */
     private val batteryDataSource = BatteryDataSource(appContext)
-    private val memoryDataSource = MemoryDataSource()
-    private val sensorDataSource = SensorDataSource(appContext)
-    private val systemDataSource = SystemDataSource()
-    private val oemDataSource = OemDataSource(appContext)
-
+    /* v1.15.2: memoryDataSource 已移除 */
+    /* v1.15.2: sensorDataSource 已移除（传感器页删除） */
+    /* v1.15.2: systemDataSource 已移除 */
+    /* v1.15.2: oemDataSource 已移除 */
     // ═══════ CpuCache ═══════
     private val cachedChip: CpuCache.KnownChip? by lazy {
         // ★ Android 12+ (API31) 官方 SoC 字段优先：Build.SOC_MODEL 直接给出型号(如 mt6989)与厂商(MediaTek)
@@ -97,7 +96,7 @@ class DeviceRepository(context: Context) {
     val gpsLiveData get() = auxCollector.gpsLiveData
 
     // 静态模块 LiveData
-    val sensorsLiveData = MutableLiveData<List<SensorItemInfo>>()
+    /* v1.15.2: sensorsLiveData 已移除 —— 传感器页删除后无任何订阅者 */
     val systemLiveData = MutableLiveData<SystemInfo>()
     val oemLiveData = MutableLiveData<OemInfo>()
 
@@ -172,7 +171,7 @@ class DeviceRepository(context: Context) {
         batteryJob?.cancel()   /* v1.14.0: 只保留电池 */
         policyObserverJob?.cancel()
         auxCollector.disableGps()
-        disableSensor()
+        /* v1.15.2: disableSensor() 已移除（传感器页删除） */
         disableStepCounter()
     }
 
@@ -204,8 +203,7 @@ class DeviceRepository(context: Context) {
                          else com.ce11kjw.chargecontrol.data.model.StorageInfo()
                 auxCollector.storageLiveData.postValue(st)
             }.onFailure { e -> Log.w(TAG, "存储信息采集失败", e) }
-            runCatching { sensorsLiveData.postValue(sensorDataSource.getAllSensors()); healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "sensors") }
-                .onFailure { e -> Log.w(TAG, "传感器列表采集失败", e); healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "sensors") }
+            /* ★ v1.15.2: 传感器页已删除 → 不再采集（原来每次 loadStaticData 都遍历全部传感器） */
             runCatching {
                 val oem = if (ms != null) {
                     com.ce11kjw.chargecontrol.data.model.OemInfo().also {
@@ -218,18 +216,6 @@ class DeviceRepository(context: Context) {
         }
     }
 
-    /**
-     * ★ 新增 (2026-08-22): 仅重采「传感器列表」一块。
-     * 用于 ACTIVITY_RECOGNITION 运行时权限授予后立刻回填步数传感器
-     * (API 29+ 未授权时 STEP_COUNTER/STEP_DETECTOR 直接不出现在 getSensorList),
-     * 避免为它重跑 loadStaticData() 的全量静态采集。
-     */
-    fun refreshSensors() {
-        scope.launch(Dispatchers.IO) {
-            runCatching { sensorsLiveData.postValue(sensorDataSource.getAllSensors()) }
-                .onFailure { e -> Log.w(TAG, "传感器列表刷新失败", e) }
-        }
-    }
 
     // ═══════ 核心采集块 (写入 SharedFlow + LiveData + History) ═══════
 
@@ -264,66 +250,11 @@ class DeviceRepository(context: Context) {
         }
     }
 
-    private suspend fun collectCpuBlock() {
-        try {
-            /* ★ v1.9.0: 纯模块取数（模块不在则不发数据，UI 显示不可用） */
-            val ms = refreshModuleStatus()
-            val cpu = if (ms != null) {
-                ModuleDataAdapter.toCpuInfo(ms)
-            } else {
-                // 模块离线：发一个空 CpuInfo，UI 层据此显示「数据不可用」
-                com.ce11kjw.chargecontrol.data.model.CpuInfo()
-            }
-            if (ms != null) cachedChip?.let { CpuCache.injectCpuInfo(it, cpu) }
-            _cpuFlow.emit(cpu); cpuLiveData.postValue(cpu)
-            if (!cpu.temperatureCelsius.isNaN()) historyCache.addPoint("cpu_temp", cpu.temperatureCelsius)
-            val maxFreq = cpu.cores.maxOfOrNull { it.currentFreqKHz } ?: 0L
-            if (maxFreq > 0) historyCache.addPoint("cpu_freq", maxFreq.toFloat())
-            if (!cpu.cpuUsagePercent.isNaN()) historyCache.addPoint("cpu_usage", cpu.cpuUsagePercent)
-            if (!cpu.deepSleepPercent.isNaN()) historyCache.addPoint("cpu_deep_sleep", cpu.deepSleepPercent)
-            healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "cpu")
-        } catch (e: Throwable) {
-            Log.w(TAG, "CPU采集失败", e)
-            healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "cpu")
-        }
-    }
+    /* v1.15.2: collectCpuBlock 已移除（对应页面删除，无调用者） */
 
-    private suspend fun collectGpuBlock() {
-        try {
-            val ms = refreshModuleStatus()
-            val gpu = if (ms != null) ModuleDataAdapter.toGpuInfo(ms)
-                      else com.ce11kjw.chargecontrol.data.model.GpuInfo()
-            if (ms != null) cachedChip?.let { CpuCache.injectGpuInfo(it, gpu) }
-            gpu.isThrottled = gpu.maxFreqKHz > 0 && gpu.frequencyKHz > 0 && gpu.frequencyKHz < gpu.maxFreqKHz * 0.7f
-            _gpuFlow.emit(gpu); gpuLiveData.postValue(gpu)
-            if (!gpu.loadPercentage.isNaN()) historyCache.addPoint("gpu_load", gpu.loadPercentage)
-            if (!gpu.temperatureCelsius.isNaN()) historyCache.addPoint("gpu_temp", gpu.temperatureCelsius)
-            if (gpu.frequencyKHz > 0 && gpu.maxFreqKHz > 0)
-                historyCache.addPoint("gpu_freq", gpu.frequencyKHz.toFloat() / gpu.maxFreqKHz * 100f)
-            healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "gpu")
-        } catch (e: Throwable) {
-            Log.w(TAG, "GPU采集失败", e)
-            healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "gpu")
-        }
-    }
+    /* v1.15.2: collectGpuBlock 已移除（对应页面删除，无调用者） */
 
-    private suspend fun collectMemoryBlock() {
-        try {
-            val ms = refreshModuleStatus()
-            val mem = if (ms != null) ModuleDataAdapter.toMemoryInfo(ms)
-                      else com.ce11kjw.chargecontrol.data.model.MemoryInfo()
-            // 内存核心指标 (total/used/available/free/swap/zram) 始终来自 /proc/meminfo,
-            // 几乎总是可用; dumpsys 仅用于 OOM 进程分类 (内存分布饼图) 的增强, 其不可用属于
-            // 降级而非数据异常, 不应触发数据源 WARN (否则在无 DUMP 权限的三方 App 设备上会
-            // 持续误报警告). 仅在采集抛异常时才上报 ERROR.
-            healthTracker.mark(HealthTracker.SourceHealth.Health.OK, "memory")
-            _memoryFlow.emit(mem); memoryLiveData.postValue(mem)
-            if (mem.totalKB > 0) historyCache.addPoint("ram_usage", mem.usedKB.toFloat() / mem.totalKB * 100f)
-        } catch (e: Throwable) {
-            Log.w(TAG, "内存采集失败", e)
-            healthTracker.mark(HealthTracker.SourceHealth.Health.ERROR, "memory")
-        }
-    }
+    /* v1.15.2: collectMemoryBlock 已移除（对应页面删除，无调用者） */
 
     private suspend fun collectBatteryBlock() {
         try {
@@ -378,38 +309,7 @@ class DeviceRepository(context: Context) {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
-    fun enableSensor(sensorType: Int) {
-        if (sensorListening) disableSensor()
-        sensorListening = true
-        try {
-            sensorDataSource.startListening(sensorType) { liveData ->
-                sensorLiveData.postValue(liveData)
-                val meta = SensorTypeMeta.fromTypeId(sensorType)
-                val seriesPrefix = "sensor_${sensorType}"
-                when (liveData.valueCount) {
-                    in 1..3 -> {
-                        val labels = meta?.axisLabelResIds?.map { appContext.getString(it) }
-                            ?: listOf("X", "Y", "Z")
-                        for (i in 0 until liveData.valueCount) {
-                            if (!liveData.values[i].isNaN())
-                                historyCache.addPoint("${seriesPrefix}_${labels.getOrElse(i) { "$i" }}", liveData.values[i])
-                        }
-                    }
-                }
-                pushSensorHistory(sensorType)
-            }
-        } catch (e: Throwable) { Log.w(TAG, "传感器实时监听启动失败", e) }
-    }
-
-    fun disableSensor() {
-        if (!sensorListening) return
-        sensorListening = false
-        try {
-            sensorDataSource.stopListening()
-            historyCache.clearSensorSeries()
-            sensorHistoryData.postValue(emptyMap())
-        } catch (e: Throwable) { Log.w(TAG, "传感器监听停止失败", e) }
-    }
+    /* v1.15.2: enableSensor/disableSensor 已移除（传感器页删除） */
 
     /** 设备是否支持 STEP_COUNTER（API 29+ 未授权时返回 false） */
     fun hasStepCounter(): Boolean = try {
