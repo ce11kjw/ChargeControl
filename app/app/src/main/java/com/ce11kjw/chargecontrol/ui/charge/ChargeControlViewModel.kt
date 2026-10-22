@@ -107,6 +107,9 @@ class ChargeControlViewModel : ViewModel() {
     val chargeLimit get() = ChargeControlApi.jint(status, "charge_limit", 80)
     val tempLimit get() = ChargeControlApi.jint(status, "temp_limit", 45)
     val chgTempLimit get() = ChargeControlApi.jint(status, "chg_temp_limit", 60)
+    /* ★ v1.15.3: 补上回充滞后与采样间隔（模块早就有这两个配置，App 之前没接） */
+    val resumeDelta get() = ChargeControlApi.jint(status, "resume_delta", 5)
+    val intervalSec get() = ChargeControlApi.jint(status, "interval", 5)
     val paused get() = ChargeControlApi.jbool(status, "paused")
     val fullOnce get() = ChargeControlApi.jint(status, "full_once")
     val capacity get() = ChargeControlApi.jint(status, "capacity")
@@ -266,6 +269,8 @@ class ChargeControlViewModel : ViewModel() {
     fun setChargeLimit(v: Int) = write("charge_limit" to v, msg = "充电上限 ${v}%")
     fun setTempLimit(v: Int) = write("temp_limit" to v, msg = "温度上限 ${v}°C")
     fun setChgTempLimit(v: Int) = write("chg_temp_limit" to v, msg = "充电IC上限 ${v}°C")
+    fun setResumeDelta(v: Int) = write("resume_delta" to v, msg = "回充滞后 ${v}%")
+    fun setInterval(v: Int) = write("interval" to v, msg = "采样间隔 ${v}s")
 
 
     fun togglePause() {

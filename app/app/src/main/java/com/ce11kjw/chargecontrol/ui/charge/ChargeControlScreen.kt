@@ -1,5 +1,6 @@
 package com.ce11kjw.chargecontrol.ui.charge
 
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -206,11 +207,23 @@ fun ChargeControlScreen(vm: ChargeControlViewModel = androidx.lifecycle.viewmode
                     }
                     CyberJoystickSwitch(checked = vm.limitEnabled, onCheckedChange = { vm.setLimitEnabled(it) })
                 }
-                if (vm.limitEnabled) {
-                    Spacer(Modifier.height(12.dp))
-                    SliderRow("充电上限", vm.chargeLimit, 50..100, "%") { vm.setChargeLimit(it) }
-                    SliderRow("电池温度上限", vm.tempLimit, 35..60, "°C") { vm.setTempLimit(it) }
-                    SliderRow("充电IC温度上限", vm.chgTempLimit, 40..80, "°C") { vm.setChgTempLimit(it) }
+                /* ★ v1.15.3: 滑块改为【始终显示】。
+                   原先包在 if (limitEnabled) 里 —— 开关没开就完全看不到滑块，
+                   用户无从调节（反馈："不给滑条我怎么控制"）。
+                   现在开关只决定"是否生效"，滑块随时可拖。
+                   未启用时整体降低透明度以示区别。 */
+                Spacer(Modifier.height(12.dp))
+                val dim = if (vm.limitEnabled) 1f else 0.45f
+                Column(Modifier.graphicsLayer(alpha = dim)) {
+                    SliderRow("充电上限", vm.chargeLimit, 20..100, "%") { vm.setChargeLimit(it) }
+                    SliderRow("电池温度上限", vm.tempLimit, 30..60, "°C") { vm.setTempLimit(it) }
+                    SliderRow("充电IC温度上限", vm.chgTempLimit, 40..90, "°C") { vm.setChgTempLimit(it) }
+                    SliderRow("回充滞后", vm.resumeDelta, 1..20, "%") { vm.setResumeDelta(it) }
+                    SliderRow("采样间隔", vm.intervalSec, 1..60, "s") { vm.setInterval(it) }
+                }
+                if (!vm.limitEnabled) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("开关关闭时以上设置不生效", fontSize = 10.sp, color = TextSecondary)
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -235,14 +248,22 @@ fun ChargeControlScreen(vm: ChargeControlViewModel = androidx.lifecycle.viewmode
                 Text("默认关闭，请确认理解后再开启", fontSize = 11.sp, color = WarningNeon)
                 Spacer(Modifier.height(12.dp))
 
+                /* ★ v1.15.3: 高级控制的滑块同样改为始终显示
+                   （原来必须开开关才出现，用户看不到可调项） */
                 AdvSwitch("真旁路（电源直供）", vm.bypassOn, vm.bypassOk) { vm.setBypass(it) }
-                if (vm.bypassOn) SliderRow("旁路最低电量", vm.bypassMin, 20..80, "%") { vm.setBypassMin(it) }
+                Column(Modifier.graphicsLayer(alpha = if (vm.bypassOn) 1f else 0.45f)) {
+                    SliderRow("旁路最低电量", vm.bypassMin, 20..80, "%") { vm.setBypassMin(it) }
+                }
 
                 AdvSwitch("恒压点调整", vm.cvOn, vm.cvOk) { vm.setCv(it) }
-                if (vm.cvOn) SliderRow("恒压点", if (vm.cvMv > 0) vm.cvMv else 4400, 4000..4500, "mV") { vm.setCvMv(it) }
+                Column(Modifier.graphicsLayer(alpha = if (vm.cvOn) 1f else 0.45f)) {
+                    SliderRow("恒压点", if (vm.cvMv > 0) vm.cvMv else 4400, 4000..4500, "mV") { vm.setCvMv(it) }
+                }
 
                 AdvSwitch("充电电流限流", vm.lcOn, true) { vm.setLc(it) }
-                if (vm.lcOn) SliderRow("限流值", if (vm.lcMa > 0) vm.lcMa else 3000, 500..6000, "mA") { vm.setLcMa(it) }
+                Column(Modifier.graphicsLayer(alpha = if (vm.lcOn) 1f else 0.45f)) {
+                    SliderRow("限流值", if (vm.lcMa > 0) vm.lcMa else 3000, 500..6000, "mA") { vm.setLcMa(it) }
+                }
 
                 AdvSwitch("系统原生夜间充电", vm.nightOn, vm.nightOk) { vm.setNight(it) }
             }
