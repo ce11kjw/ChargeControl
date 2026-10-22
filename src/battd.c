@@ -268,6 +268,14 @@ static int soh_delta_x10 = 0;          /* SOH 相对首次记录的变化(x10) *
 static int soh_first = -1;             /* 首次记录的 SOH */
 static int cycle_count = -1, health = -1;
 static int usb_online = 0, usb_power_max = 0, pd_type = 0;
+/* ★ v1.16.0: JEITA 温控状态 + 充电效率
+   用户反馈「打游戏时莫名降频」，实际是 JEITA 在限流。
+   这些字段让用户能看出「什么时候会被限速」。 */
+static int jeita_chg_index = -1;      /* JEITA 档位（越大越严格） */
+static int jeita_chg_fcc = -1;        /* JEITA 满充电流（0.1mA） */
+static int jeita_active = 0;          /* 1 = 当前处于 JEITA 限流状态 */
+static int chg_input_power_mw = -1;   /* 充电器输入功率（mW） */
+static int chg_efficiency_pct = -1;   /* 充电效率（电池功率/输入功率） */
 static int usb_curr_cache = 0, usb_volt_cache = 0;
 static char proto_name[32] = "未知";
 static char control_state[24] = "idle";
@@ -1361,7 +1369,24 @@ static void update_battery(void) {
     snprintf(path, sizeof(path), "%s/voltage_now", SYSFS);
     if ((v = read_int(path)) >= 0) bat_volt = v / 1000;
     snprintf(path, sizeof(path), "%s/current_now", SYSFS);
-    if ((v = read_int(path)) >= 0) bat_curr = v / 1000;
+    /* ★ v1.16.0 真机 bug 修复：本机 current_now 充电时为「负值」（-911000µA），
+       放电时为「正值」（+727000µA），符号约定与常识相反。
+       原写法 `if (v >= 0)` 会导致充电时电流不更新（永远显示上次的正值）。
+       现在只要读到有效值（read_int 失败才返回 -1，但 -1 也可能是合法值 1µA…）
+       就记录。用「读到非 -1」判断不可靠，改为：只要不是读取失败就记录。 */
+    /* ★ v1.16.0 真机重大修复：符号统一为「充电为正」
+       本机 current_now 原始约定（实测）：
+         充电中 = 负值（-911000µA）
+         放电中 = 正值（+727000µA）
+       而全项目其它代码（detect_charge_stage / 统计 / 前端）
+       都假设「充电为正」，导致：
+         · CC/CV 阶段永远判不出（bat_curr > 0 恒假）
+         · 充电中电流显示成上次的正值（旧 bug：if v>=0 过滤掉负值）
+       这里一次性归一：读原始值 → 除以 1000 → 取反（充电变正）。 */
+    {
+        int raw = read_int(path);
+        if (raw != -1) bat_curr = -raw / 1000;   /* 取反：充电为正 */
+    }
     snprintf(path, sizeof(path), "%s/status", SYSFS);
     read_str(path, bat_status, sizeof(bat_status));
     snprintf(path, sizeof(path), "%s/cycle_count", SYSFS);
@@ -1385,6 +1410,17 @@ static void update_battery(void) {
     bat_input_current_limit = read_int(SYSFS_USB "/input_current_limit");
     usb_curr_cache = read_int(SYSFS_USB "/current_now");
     usb_volt_cache = read_int(SYSFS_USB "/voltage_now");
+
+    /* ★ v1.16.0: JEITA 状态（usb/ 下的节点，部分机型没有 → -1） */
+    {
+        int idx = read_int(SYSFS_USB "/jeita_chg_index");
+        int fcc = read_int(SYSFS_USB "/jeita_chg_fcc");
+        jeita_chg_index = idx;
+        jeita_chg_fcc = fcc;
+        /* 判断是否在限流：fcc < 额定最大值 说明被降了
+           内核日志里 jeita:N 的 N 就是当前档位，>0 表示在限 */
+        jeita_active = (idx > 0) ? 1 : 0;
+    }
     read_str(SYSFS_USB "/real_type", proto_name, sizeof(proto_name));
     if (proto_name[0] == 0) read_str(SYSFS_USB "/type", proto_name, sizeof(proto_name));
     pd_type = read_int(SYSFS_USB "/pd_type");
@@ -1394,10 +1430,39 @@ static void update_battery(void) {
     int vol_mv = bat_volt > 0 ? bat_volt : 0;
     int cur_ma = bat_curr;
     if (vol_mv > 0 && cur_ma != 0) power_mw = vol_mv * cur_ma / 1000;
-    if (vol_mv > 0 && cur_ma < 0) {
+
+    /* ★ v1.16.0: 充电效率 = 电池实际收到的功率 / 充电器输入功率
+       usb_volt_cache / usb_curr_cache 是充电器侧的电压电流（µV / µA）。
+       效率低（< 80%）通常意味着：
+         · 充电器功率不足（打游戏时系统抢电）
+         · 无线充电损耗
+         · 线材质量差
+       只在「插着充电器 + 电池确实在充电」时计算。 */
+    chg_input_power_mw = -1;
+    chg_efficiency_pct = -1;
+    if (usb_online == 1 && usb_volt_cache > 0 && usb_curr_cache > 0) {
+        long long in_mw = (long long)usb_volt_cache * usb_curr_cache / 1000000000LL;  /* µV*µA/1e9 = mW */
+        chg_input_power_mw = (int)(in_mw > 0 ? in_mw : -1);
+        /* ★ 电池侧功率必须现场算「绝对值」，不能用全局 power_mw
+           （那个在 handle_status 里另有含义，且可能是充电器侧的值）。
+           本机 current_now 充电时为负，所以取绝对值。 */
+        long long bat_mw = 0;
+        if (vol_mv > 0 && cur_ma != 0) {
+            long long abs_ma = cur_ma < 0 ? -(long long)cur_ma : (long long)cur_ma;   /* 取绝对值，兼容两种约定 */
+            bat_mw = (long long)vol_mv * abs_ma / 1000;
+        }
+        if (in_mw > 0 && bat_mw > 0) {
+            long long eff = bat_mw * 100 / in_mw;
+            if (eff <= 0) chg_efficiency_pct = 0;
+            else if (eff > 100) chg_efficiency_pct = 100;   /* 采样误差，钳到 100 */
+            else chg_efficiency_pct = (int)eff;
+        }
+    }
+    /* ★ v1.16.0: 符号已归一为「充电为正」，这里改为 cur_ma > 0 */
+    if (vol_mv > 0 && cur_ma > 0) {
         int remain = bat_capacity >= 0 ? (charge_limit > 0 ? charge_limit - bat_capacity : 100 - bat_capacity) : 0;
         if (remain > 0 && cur_ma != 0) {
-            int cmA = -cur_ma; /* 充电电流为正 */
+            int cmA = cur_ma; /* 充电电流为正 */
             if (cmA > 0) est_full_min = (int)((long long)remain * charge_full_mah * 60 / cmA / 100);
         }
     }
@@ -2383,18 +2448,19 @@ static void handle_status(int fd) {
     /* 实时读取电流/电压（不依赖缓存）*/
     int cur_raw = read_int(SYSFS "/current_now");
     int vol_raw = read_int(SYSFS "/voltage_now");
-    int cur_ma = cur_raw / 1000;
+    /* ★ v1.16.0: 与 update_battery 保持同一符号约定（充电为正）
+       本机原始 current_now 充电为负、放电为正 → 取反 */
+    int cur_ma = -cur_raw / 1000;
     int vol_mv = vol_raw / 1000;
     /* usb 输入端（5s 缓存）优先 */
-    int usb_curr = usb_curr_cache;
-    int usb_volt = usb_volt_cache;
-    if (usb_curr > 0 && usb_volt > 0) {
-        power_mw = (int)(((long)usb_curr / 1000) * ((long)usb_volt / 1000) / 1000);
-        if (strcmp(bat_status, "Charging") != 0) power_mw = -power_mw;
-    } else if (cur_ma != 0 && vol_mv > 0) {
-        /* 电池侧：电流负=充电 → 功率正；电流正=放电 → 功率负 */
-        power_mw = ((long)vol_mv * (cur_ma < 0 ? -cur_ma : cur_ma)) / 1000;
-        if (cur_ma > 0) power_mw = -power_mw;
+    /* ★ v1.16.0 语义修正：power_mw 改为「电池侧净功率」
+       原实现优先用 USB 侧（充电器输入），但那和 chg_input_power_mw 重复，
+       且用户真正关心的是「电池实际充进/放出多少」。
+         充电 → 正数（充入功率）
+         放电 → 负数（放出功率）
+       充电器输入功率单独看 chg_input_power_mw。 */
+    if (cur_ma != 0 && vol_mv > 0) {
+        power_mw = ((long)vol_mv * cur_ma) / 1000;
     }
     int cap_raw = read_int("/sys/class/power_supply/bms/capacity_raw");
     int capacity_disp = cap_raw > 0 ? cap_raw : bat_capacity * 100;
@@ -2478,7 +2544,10 @@ static void handle_status(int fd) {
         "\"dev_screen_w\":%d,\"dev_screen_h\":%d,\"dev_screen_density\":%d,"
         "\"dev_thermal_zones\":%d,\"dev_thermal_types\":\"%s\","
         "\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
-        "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d,\"x_pp\":%d,\"x_pp_ok\":%d,\"x_cv\":%d,\"x_cv_mv\":%d,\"x_cv_ok\":%d,\"x_lc\":%d,\"x_lc_ma\":%d,\"x_nn\":%d,\"x_nn_ok\":%d,\"x_bmin\":%d,\"native_night\":%d,\"cl_tail\":\"%s\"}",
+        "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d,\"x_pp\":%d,\"x_pp_ok\":%d,\"x_cv\":%d,\"x_cv_mv\":%d,\"x_cv_ok\":%d,\"x_lc\":%d,\"x_lc_ma\":%d,\"x_nn\":%d,\"x_nn_ok\":%d,\"x_bmin\":%d,\"native_night\":%d,"
+        "\"jeita_chg_index\":%d,\"jeita_chg_fcc\":%d,\"jeita_active\":%d,"
+        "\"chg_input_power_mw\":%d,\"chg_efficiency_pct\":%d,"
+        "\"cl_tail\":\"%s\"}",
         CC_API_VERSION, CC_FEATURES,
         bat_capacity, capacity_disp, bat_temp, vol_mv, cur_ma, bat_status,
         limit_enabled, charge_limit, temp_limit, resume_delta, interval,
@@ -2532,6 +2601,8 @@ static void handle_status(int fd) {
         x_use_native_night, (access(SYSFS "/night_charging", W_OK) == 0),
         x_bypass_min_soc,
         read_int(SYSFS "/night_charging"),
+        jeita_chg_index, jeita_chg_fcc, jeita_active,
+        chg_input_power_mw, chg_efficiency_pct,
         cl_buf);
     /* 系统信息 */
     { int v = 0;
