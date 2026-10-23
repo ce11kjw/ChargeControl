@@ -32,7 +32,9 @@ class DeviceRepository(context: Context) {
     // ═══════ 提取的独立类 ═══════
     val healthTracker = HealthTracker()
     val sourceHealth get() = healthTracker.liveData  // 向后兼容
-    private val auxCollector = AuxiliaryCollector(appContext)
+    /* ★ v1.16.3: AuxiliaryCollector 已删除（GPS/WiFi/网络页面早已移除）
+       只保留存储（ExportHelper 导出诊断包时要用） */
+    val storageLiveData = MutableLiveData<StorageInfo>()
 
     // ═══════ DataSources (核心 5 模块 + 静态) ═══════
     /* v1.15.2: cpuDataSource 已移除 */
@@ -88,12 +90,6 @@ class DeviceRepository(context: Context) {
     val memoryLiveData = MutableLiveData<MemoryInfo>()
     val batteryLiveData = MutableLiveData<BatteryInfo>()
 
-    // 辅助模块 LiveData (委托 AuxiliaryCollector)
-    val storageLiveData get() = auxCollector.storageLiveData
-    val wifiLiveData get() = auxCollector.wifiLiveData
-    val mobileNetworkLiveData get() = auxCollector.mobileNetworkLiveData
-    val networkInterfacesLiveData get() = auxCollector.networkInterfacesLiveData
-    val gpsLiveData get() = auxCollector.gpsLiveData
 
     // 静态模块 LiveData
     /* v1.15.2: sensorsLiveData 已移除 —— 传感器页删除后无任何订阅者 */
@@ -170,7 +166,6 @@ class DeviceRepository(context: Context) {
         monitoring = false
         batteryJob?.cancel()   /* v1.14.0: 只保留电池 */
         policyObserverJob?.cancel()
-        auxCollector.disableGps()
         /* v1.15.2: disableSensor() 已移除（传感器页删除） */
         disableStepCounter()
     }
@@ -201,7 +196,7 @@ class DeviceRepository(context: Context) {
             runCatching {
                 val st = if (ms != null) ModuleDataAdapter.toStorageInfo(ms)
                          else com.ce11kjw.chargecontrol.data.model.StorageInfo()
-                auxCollector.storageLiveData.postValue(st)
+                storageLiveData.postValue(st)
             }.onFailure { e -> Log.w(TAG, "存储信息采集失败", e) }
             /* ★ v1.15.2: 传感器页已删除 → 不再采集（原来每次 loadStaticData 都遍历全部传感器） */
             runCatching {
@@ -288,8 +283,6 @@ class DeviceRepository(context: Context) {
 
     // ═══════ GPS / 传感器 ═══════
 
-    fun enableGps() = auxCollector.enableGps()
-    fun disableGps() = auxCollector.disableGps()
 
     @Volatile private var sensorListening = false
 
