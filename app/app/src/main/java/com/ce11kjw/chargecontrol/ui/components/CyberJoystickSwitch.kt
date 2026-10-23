@@ -1,11 +1,13 @@
 package com.ce11kjw.chargecontrol.ui.components
 
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.awaitPointerEvent
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.size
@@ -85,8 +87,9 @@ fun CyberJoystickSwitch(
 ) {
     val density = LocalDensity.current
     val context = LocalContext.current
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
+    /* ★ v1.16.1: 不再依赖 interactionSource（clickable 已移除）
+       改用 pointerInput 内部维护的按压状态驱动缩放动画 */
+    var isPressed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // ▸ 进度引擎: Animatable — 点击经 LaunchedEffect 弹簧; 拖拽经 snapTo 接管
@@ -128,51 +131,80 @@ fun CyberJoystickSwitch(
     val arcPx = with(density) { arcHeight.toPx() }
     val thumbDiameter = with(density) { (thumbR * 2f).toDp() }
 
-    // ══ 外层: 48dp 触控热区 + clickable(点击) + pointerInput(拖拽) ══
+    // ══ 外层: 48dp 触控热区 ══
+    //
+    //  ★ v1.16.1 关键修复（用户反馈「开关根本点不了」）：
+    //  原实现同时挂 `clickable` + `pointerInput(detectHorizontalDragGestures)`。
+    //  但 detectHorizontalDragGestures 内部会 awaitFirstDown() 并消费按下事件，
+    //  导致 clickable 的 onClick **永远收不到** → 开关完全点不动。
+    //  （Compose 里两个独立手势检测器挂在同一 Modifier 链上会互相抢事件）
+    //
+    //  现改为**单一 pointerInput 统一处理点击 + 拖拽**：
+    //   · 按下 → 记录起点
+    //   · 移动 < 8dp 且抬起 → 当成点击，切换状态
+    //   · 移动 >= 8dp → 进入拖拽，thumb 跟手，松手按过半判断
+    //  同时保留 clickable 只为无障碍语义（用 indication=null + onClick 置空，
+    //  实际点击由 pointerInput 处理），避免重复触发。
     Box(
         modifier = modifier
             .defaultMinSize(minWidth = trackWidth, minHeight = 48.dp)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                role = Role.Switch,
-                onClick = {
-                    try { HapticUtils.standardTap(context) } catch (_: Exception) {}
-                    currentOnCheckedChange(!currentChecked)
-                },
-            )
-            // ▸ 水平拖拽: thumb 跟随手指, 松手过半即切换, 未过半弹回原位
-            .pointerInput(thumbStartX, thumbEndX) {
+            .semantics {
+                role = Role.Switch
+                stateDescription = if (checked) "开启" else "关闭"
+            }
+            .pointerInput(thumbStartX, thumbEndX, currentChecked) {
                 var dragBase = 0f
                 var accumulatedPx = 0f
+                var downPos = Offset.Zero
+                var isDragging = false
                 val rangePx = (thumbEndX - thumbStartX).coerceAtLeast(1f)
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        dragBase = progress.value
-                        accumulatedPx = 0f
-                        scope.launch { progress.stop() }   // 停弹簧, drag 接管
-                    },
-                    onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
-                        accumulatedPx += dragAmount
-                        val p = (dragBase + accumulatedPx / rangePx).coerceIn(0f, 1f)
-                        scope.launch { progress.snapTo(p) }
-                    },
-                    onDragEnd = {
+                val touchSlopPx = 8.dp.toPx()
+
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    isPressed = true
+                    downPos = down.position
+                    accumulatedPx = 0f
+                    isDragging = false
+                    dragBase = progress.value
+                    try { HapticUtils.lightTap(context) } catch (_: Exception) {}
+
+                    var up: PointerInputChange? = null
+                    while (true) {
+                        val ev = awaitPointerEvent()
+                        val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!ch.pressed) { up = ch; break }
+                        val dx = ch.position.x - downPos.x
+                        val dy = ch.position.y - downPos.y
+                        if (!isDragging && kotlin.math.hypot(dx, dy) > touchSlopPx) {
+                            isDragging = true
+                            scope.launch { progress.stop() }
+                        }
+                        if (isDragging) {
+                            ch.consume()
+                            accumulatedPx = dx
+                            val p = (dragBase + accumulatedPx / rangePx).coerceIn(0f, 1f)
+                            scope.launch { progress.snapTo(p) }
+                        }
+                    }
+
+                    isPressed = false
+                    if (!isDragging) {
+                        // 点击：切换
+                        try { HapticUtils.standardTap(context) } catch (_: Exception) {}
+                        currentOnCheckedChange(!currentChecked)
+                    } else {
+                        // 拖拽结束：过半切换，否则弹回
                         val p = progress.value
                         val newChecked = p > 0.5f
                         if (newChecked != currentChecked) {
                             try { HapticUtils.standardTap(context) } catch (_: Exception) {}
-                            currentOnCheckedChange(newChecked)  // LaunchedEffect 从拖拽位置弹到目标
+                            currentOnCheckedChange(newChecked)
                         } else {
-                            // 未过半: 从拖拽位置弹回原态
                             scope.launch { progress.animateTo(if (currentChecked) 1f else 0f, springSpec) }
                         }
-                    },
-                    onDragCancel = {
-                        scope.launch { progress.animateTo(if (currentChecked) 1f else 0f, springSpec) }
-                    },
-                )
+                    }
+                }
             },
         contentAlignment = Alignment.Center,
     ) {
