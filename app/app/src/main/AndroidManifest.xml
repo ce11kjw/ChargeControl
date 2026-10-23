@@ -56,6 +56,16 @@
             </intent-filter>
         </activity>
 
+        <!-- ★ v1.17.0 电池告警服务（替代 TG 推送，走本地通知） -->
+        <service
+            android:name=".service.BatteryAlertService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="battery_charge_alert_monitoring" />
+        </service>
+
         <service
             android:name=".service.FloatingWindowService"
             android:exported="false"

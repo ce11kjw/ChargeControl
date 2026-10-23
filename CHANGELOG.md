@@ -1,5 +1,76 @@
 # Changelog
 
+## v1.17.0 (2026-10-24)
+
+### 🎯 提醒中心改造（用户要求：砍掉 TG，全走 App 通知）
+
+#### 🔴 核心修复：停充后不自动恢复（根因是 5 个写者互相覆盖）
+原 `apply_control()` 里有 **5 个独立写者**各写 `input_suspend`（温度/充IC/paused/full_once/
+软旁路/容量上限），谁最后执行谁说了算，导致：
+- 温度停充后被容量分支写 0 冲掉
+- 温度恢复**没有迟滞、没有保持时间** → 44.9/45.1°C 反复抖
+- 充IC 分支温度读不到（<0）时**永久卡在停充**
+
+**改为单一裁决器**：先收集所有停充理由 → 按优先级取最严重的一个 → **只写一次**。
+现在全项目只剩 **1 个** `input_suspend` 写者。
+
+优先级：电池过温 > 充IC过温 > 手动暂停 > 手动充满 > 夜间保持 > 软旁路 > 容量上限
+
+**恢复规则**：
+- `temp` → `≤ 上限-5°C` **且保持 60s**（可配 `rec_temp_hyst` / `rec_temp_hold`）
+- `chg_temp` → `< 上限-5°C`；**温度读不到时放行，不卡死**
+- `limit` → `≤ 上限-5%`（`rec_soc_hyst` 可配）
+- `paused` / `manual` → 不自动恢复
+
+**⭐ 拔插豁免**：检测 `usb_online` 0→1 ⇒ 清空停充状态 + **10 分钟限充豁免**。
+> 没有豁免的话，SOC 仍高于上限会立刻再次停充，用户体感是"插上也没用"。
+> 这个坑是实测发现的。
+
+#### ✨ 新增：异常事件 + 曲线快照
+- 环形缓冲 `{t, soc, temp, cur}` × 30（10s 一点 = 5 分钟）
+- 触发时**强制补一点**，保证快照含触发瞬间
+- 落盘 `/data/adb/battery-manager/events/evt-<ts>.json`，滚动保留 20 条
+- 事件类型：`temp_exceed` / `chg_temp_exceed` / `recovered` / `replug_reset`
+
+#### ✨ 新增 API
+```
+GET    /api/events          列表（不含 snapshot，轻量）
+GET    /api/event?id=evt-X  单条（含 snapshot）
+DELETE /api/events          清空
+```
+（`id` 严格校验 `evt-<纯数字>`，防路径穿越）
+
+#### ✨ status 新增 7 字段
+`suspend_active` / `suspend_reason` / `suspend_since` / `suspend_recover_in` /
+`rec_temp_hyst` / `rec_temp_hold` / `rec_soc_hyst`
+
+#### ✨ WebUI
+- **停充状态卡**：原因 + 已持续 + 预计恢复倒计时 + 拔插提示
+- **异常事件列表**：类型/时间/详情，点击跳到曲线高亮
+- **曲线预估虚线**：最近 10 分钟电量斜率外推，显示"预计 N 分钟到 X%"
+- 保养上限滑动条改为 **60~100% 步进 5**
+
+#### 🔴 修复：WebUI 结构 bug（原版详情页/设置页绑定全失效）
+`index.html` 第 163 行 `</div></div>` 多闭合一个，导致 `x-data` 容器在 164 行就关闭，
+**后续所有 tab 的 Alpine 指令都在作用域外**（Alpine 只初始化了 64/471 个元素）。
+修复后 174/174 配平，所有 tab 深度正常。
+
+#### 🗑️ 移除：TG/Webhook 推送
+- 删 `webhook_url` 全局变量、`extras.json` 字段、`high_temp_alert()` 里的发送逻辑
+- status 不再返回 `webhook` 字段
+- 理由（用户）：App 有实时曲线 + 本地通知零依赖，TG 重复且多一条故障链路
+
+#### 📱 App v1.17.0
+- 新增 `BatteryAlertService`（前台服务，5s 轮询）
+  - 4 个通知通道：`chrgc`保养 / `chrgw`异常 / `chrgp`阈值 / `chrgr`恢复
+  - 恢复通知**同原因 10 分钟去重**
+  - 点异常通知 → 带 `event_id` 跳曲线高亮
+- 新增 `BatteryEvent` / `EventSnapshotPoint` 数据模型
+- `ChargeControlApi` 新增 `fetchEvents()` / `fetchEvent(id)` / `clearEvents()`
+- 设置页新增「充电提醒」：保养上限滑动条（60-100 步进 5）+ 4 开关 + 电量阈值
+- 三语言文案（简体/繁体/英文）
+
+
 ## v1.13.0 (2026-10-16)
 
 ### 🔴 修复：health_rating 变量遮蔽导致全局值从未生效

@@ -1506,4 +1506,13 @@
     <string name="first_launch_desc">CAM-P 需要一些权限来读取硬件数据（定位、电话状态、身体活动、附近设备、通知）。所有数据仅保存在本机、绝不上传，你也可以稍后在系统设置中授权。</string>
     <string name="first_launch_grant">同意并授权</string>
     <string name="first_launch_later">稍后再说</string>
+
+    <string name="alert_title">充电提醒</string>
+    <string name="alert_desc">本地通知，无需 Telegram</string>
+    <string name="alert_maintenance_limit">保养充电上限</string>
+    <string name="alert_sw_maintenance">到达上限提醒</string>
+    <string name="alert_sw_warning">充电异常告警</string>
+    <string name="alert_sw_recover">自动恢复提醒</string>
+    <string name="alert_sw_percent">到指定电量提醒</string>
+    <string name="alert_percent_threshold">电量阈值</string>
 </resources>

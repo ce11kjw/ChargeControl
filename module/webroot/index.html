@@ -160,7 +160,6 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       <div class="temp-list">
         <div class="temp-item"><span class="n">充电协议</span><span class="v" x-text="s.proto_name || '—'"></span></div><div class="temp-item"><span class="n">协商功率</span><span class="v" x-text="s.power_max ? s.power_max + 'W' : '—'"></span></div><div class="temp-item"><span class="n">PD版本</span><span class="v" x-text="s.pd_type ? 'PD' + s.pd_type : '—'"></span></div><div class="temp-item"><span class="n">连接状态</span><span class="v" :style="s.usb_online ? 'color:var(--green)' : ''" x-text="s.usb_online ? '已连接' : '未连接'"></span></div><div class="temp-item"><span class="n">实时电流</span><span class="v" :style="s.current < 0 ? 'color:var(--green)' : (s.current > 0 ? 'color:var(--orange)' : '')" x-text="curDisplay()"></span></div><div class="temp-item"><span class="n">旁路充电</span><span class="v" :style="s.bypass_on ? 'color:var(--green)' : ''" x-text="(s.bypass_on ? (s.bypass_hw ? '已激活' : '已激活(软件)') : '未激活')"></span></div><div class="temp-item"><span class="n">充电类型</span><span class="v" x-text="['未知','N/A','Trickle','Fast','Standard','Adaptive','Custom','Long Life','Bypass'][s.charge_type+1] || '—'"></span></div><div class="temp-item"><span class="n">预计充满</span><span class="v" x-text="s.time_to_full > 0 ? Math.ceil(s.time_to_full/60) + '分' : (s.est_full_txt || '—')"></span></div><div class="temp-item"><span class="n">累计电量</span><span class="v" x-text="s.charge_counter > 0 ? (s.charge_counter/1000).toFixed(0) + 'mAh' : '—'"></span></div><div class="temp-item"><span class="n">输入限流</span><span class="v" x-text="s.input_current_limit > 0 ? (s.input_current_limit/1000).toFixed(0) + 'mA' : '—'"></span></div><div class="temp-item"><span class="n">PD 档位</span><span class="v" x-text="s.pd_pdo_count > 0 ? s.pd_pdo_count + ' 档 / ' + (s.pd_pdo_max_mv/1000).toFixed(1) + 'V ' + (s.pd_pdo_max_ma/1000).toFixed(1) + 'A' : '—'"></span></div><div class="temp-item"><span class="n">PD 状态</span><span class="v" x-text="s.pd_state || '—'"></span></div><div class="temp-item"><span class="n">JEITA 档</span><span class="v" :style="s.jeita_index >= 4 ? 'color:var(--orange)' : ''" x-text="s.jeita_index >= 0 ? s.jeita_index + ' (越高限流越强)' : '—'"></span></div><div class="temp-item"><span class="n">MTK 电量闸</span><span class="v" x-text="s.cc_limit_supported ? (s.cc_limit_val >= 0 ? s.cc_limit_val : '可读') : '不支持'"></span></div><div class="temp-item"><span class="n">系统旁路</span><span class="v" :style="s.power_path_en === 0 ? 'color:var(--green)' : ''" x-text="s.power_path_en < 0 ? '不支持' : (s.power_path_en ? '路径开启' : '旁路中')"></span></div>
       </div>
-    </div></div>
     </div>
 
     <div class="panel">
@@ -184,6 +183,8 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       <div class="info" style="justify-content:center;padding-top:8px;font-size:12px" x-text="lastUpdate"></div>
     </div>
   </div>
+  </div>
+</div>
 
 <div x-show="tab==='set'" x-transition:enter.duration.350ms.opacity>
     <div class="panel">
@@ -199,7 +200,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       <div style="font-size:13px;color:var(--txt2);padding:4px 0 6px"><i class="fa-solid fa-sliders" style="margin-right:4px"></i>高级设置</div>
       <div>
         <div class="row"><span class="lbl">充电上限 <b x-text="s.charge_limit + '%'"></b></span>
-          <input type="range" class="slider" min="20" max="100" x-model.number="s.charge_limit" @change="save()"></div>
+          <input type="range" class="slider" min="60" max="100" step="5" x-model.number="s.charge_limit" @change="save()"></div>
         <div class="row"><span class="lbl">温度上限 <b x-text="s.temp_limit + '°C'"></b></span>
           <input type="range" class="slider" min="30" max="60" x-model.number="s.temp_limit" @change="save()"></div>
         <div class="row"><span class="lbl">恢复充电 <b x-text="'低于上限 ' + s.resume_delta + '%'"></b></span>
@@ -345,6 +346,34 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       </div>
     </div>
 
+    <div class="panel" x-show="s.suspend_active" x-cloak
+         :style="'border-left:4px solid ' + (['temp','chg_temp'].includes(s.suspend_reason) ? '#f87171' : '#38bdf8')">
+      <h2>
+        <i class="fa-solid fa-pause-circle" style="margin-right:6px"
+           :style="'color:' + (['temp','chg_temp'].includes(s.suspend_reason) ? '#f87171' : '#38bdf8')"></i>
+        已停止充电
+        <span style="float:right;font-size:12px;font-weight:400;color:var(--txt2)"
+              x-text="suspReasonText(s.suspend_reason)"></span>
+      </h2>
+      <div class="row" style="border:none;padding-top:0">
+        <span class="lbl">原因</span>
+        <span class="v" x-text="suspReasonText(s.suspend_reason)"></span>
+      </div>
+      <div class="row">
+        <span class="lbl">已持续</span>
+        <span class="v" x-text="sinceText(s.suspend_since)"></span>
+      </div>
+      <div class="row" x-show="s.suspend_recover_in >= 0">
+        <span class="lbl">预计恢复</span>
+        <span class="v" style="color:#4ade80"
+              x-text="s.suspend_recover_in > 0 ? s.suspend_recover_in + ' 秒后自动恢复' : '条件已满足，下一轮恢复'"></span>
+      </div>
+      <div class="row" x-show="s.suspend_reason==='limit'">
+        <span class="lbl">提示</span>
+        <span class="v" style="color:var(--txt2);font-size:12px">拔掉充电器再插上可临时继续充 10 分钟</span>
+      </div>
+    </div>
+
     <!-- ★ v1.5.0 充电曲线：本次/最近一次充电的 电流+电量+阶段 -->
     <div class="panel">
       <h2><i class="fa-solid fa-bolt" style="margin-right:6px"></i>充电曲线</h2>
@@ -352,6 +381,30 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--txt2)">
         <span>x-text="curveInfo || '暂无充电采样数据（充电时每 30 秒记录一条）'"</span>
       </div>
+    </div>
+
+    <!-- ★ v1.17.0 异常事件历史 -->
+    <div class="panel">
+      <h2>
+        <i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;color:#fbbf24"></i>异常事件
+        <button class="btn" style="float:right;padding:2px 10px;font-size:12px" @click="clearEvents()">清空</button>
+      </h2>
+      <template x-if="events.length === 0">
+        <div style="color:var(--txt2);font-size:12px;padding:8px 0">
+          暂无异常事件（温度超限 / 充IC过温时会自动记录曲线快照）
+        </div>
+      </template>
+      <template x-for="ev in events" :key="ev.id">
+        <div class="row" style="cursor:pointer;align-items:flex-start" @click="openEvent(ev.id)">
+          <span class="lbl" style="min-width:0;flex:1">
+            <span x-text="eventTypeText(ev.type)"
+                  :style="'color:' + (ev.type==='recovered' ? '#4ade80' : (ev.type==='replug_reset' ? '#38bdf8' : '#f87171'))"></span>
+            <span style="color:var(--txt2);font-size:11px;margin-left:6px" x-text="fmtTime(ev.at)"></span>
+            <div style="font-size:11px;color:var(--txt2);margin-top:2px" x-text="eventDetailText(ev)"></div>
+          </span>
+          <span class="v" style="color:#38bdf8;font-size:12px">查看曲线 ›</span>
+        </div>
+      </template>
     </div>
 
     <!-- ★ v1.5.0 电池校准 -->
@@ -415,10 +468,10 @@ function app() {
     t(k) { return (this.i18n[this.s.lang?'en':'zh']||{})[k] || k; },
     tab: 'dash', 
     webhookUrl: '', whLoaded: false,
-    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, est_full_txt:'', health_degrade:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, bypass_hw:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, lang:0, theme:0, webhookUrl:'', mem_total:0, mem_avail:0, mem_free:0, storage_total:0, storage_free:0, uptime_secs:0, cpu_cores:0, kernel_ver:'', cpu_model:'', device_model:'', wifi_rssi:-128, wifi_on:0, mobile_on:0, ip_addr:'', bat_technology:'', bat_capacity_level:'', bat_health:'', charge_type:-1, time_to_full:-1, charge_counter:-1, input_current_limit:-1, bat_manufacturer:'', bat_model_name:'', voltage_ocv:-1, current_avg:-1, temp_ambient:-1, constant_charge_current:-1, constant_charge_voltage:-1, capacity_error_margin:-1, time_to_empty:-1, bat_present:-1, internal_resistance:-1, charge_now:-1, charge_term_current:-1, constant_charge_current_max:-1, constant_charge_voltage_max:-1, temp_max:-1, temp_min:-1, charger_temp:-1, charge_done:-1, input_voltage_settled:-1, safety_timer_expired:-1, calibrate:-1, pd_pdo_count:0, pd_pdo_max_mv:0, pd_pdo_max_ma:0, pd_svid:'', pd_state:'', cc_limit_supported:0, cc_limit_val:-1, power_path_en:-1, jeita_index:-1, soh_native:-1, soh_first:-1, soh_delta_x10:0, design_mah:0, chg_temp_limit:60, x_pp:0, x_pp_ok:0, x_cv:0, x_cv_mv:0, x_cv_ok:0, x_lc:0, x_lc_ma:0, x_nn:0, x_nn_ok:0, x_bmin:50, native_night:0, cl_tail:'' },
+    s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, est_full_txt:'', health_degrade:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', suspend_active:false, suspend_reason:'none', suspend_since:0, suspend_recover_in:-1, rec_temp_hyst:5, rec_temp_hold:60, rec_soc_hyst:5, full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, bypass_hw:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, lang:0, theme:0, webhookUrl:'', mem_total:0, mem_avail:0, mem_free:0, storage_total:0, storage_free:0, uptime_secs:0, cpu_cores:0, kernel_ver:'', cpu_model:'', device_model:'', wifi_rssi:-128, wifi_on:0, mobile_on:0, ip_addr:'', bat_technology:'', bat_capacity_level:'', bat_health:'', charge_type:-1, time_to_full:-1, charge_counter:-1, input_current_limit:-1, bat_manufacturer:'', bat_model_name:'', voltage_ocv:-1, current_avg:-1, temp_ambient:-1, constant_charge_current:-1, constant_charge_voltage:-1, capacity_error_margin:-1, time_to_empty:-1, bat_present:-1, internal_resistance:-1, charge_now:-1, charge_term_current:-1, constant_charge_current_max:-1, constant_charge_voltage_max:-1, temp_max:-1, temp_min:-1, charger_temp:-1, charge_done:-1, input_voltage_settled:-1, safety_timer_expired:-1, calibrate:-1, pd_pdo_count:0, pd_pdo_max_mv:0, pd_pdo_max_ma:0, pd_svid:'', pd_state:'', cc_limit_supported:0, cc_limit_val:-1, power_path_en:-1, jeita_index:-1, soh_native:-1, soh_first:-1, soh_delta_x10:0, design_mah:0, chg_temp_limit:60, x_pp:0, x_pp_ok:0, x_cv:0, x_cv_mv:0, x_cv_ok:0, x_lc:0, x_lc_ma:0, x_nn:0, x_nn_ok:0, x_bmin:50, native_night:0, cl_tail:'' },
     logContent: '', lastUpdate: '', updateMsg: '', latestVer: '', timer: null, chart: null, fullTimer: null, loaded: false,
     /* ★ v1.5.0 */
-    curveChart: null, curveInfo: '', curveTimer: null,
+    curveChart: null, curveInfo: '', curveTimer: null, events: [], evtHighlight: null, curveEta: -1,
     cal: { state:0, state_name:'idle', elapsed_sec:0, cap_now:0, cap_max:0, cap_min:0, fulfilled:0, temp:0, charging:0 },
 
     /* 阶段名映射 */
@@ -465,6 +518,59 @@ function app() {
       const dur = d.length > 1 ? Math.round((last.t - d[0].t)/60) : 0;
       this.curveInfo = `${d.length} 条采样 · 跨度 ${dur} 分钟 · 当前阶段：${this.stageName(last.st)} · ${last.i} mA / ${last.v} mV`;
     },
+
+    /* ===== v1.17.0 停充状态 / 事件 ===== */
+    suspReasonText(r) {
+      return {temp:'电池过温', chg_temp:'充电IC过温', limit:'已达充电上限',
+              paused:'手动暂停', full:'手动充满中', bypass:'软旁路',
+              manual:'手动停充', none:'无'}[r] || r;
+    },
+    sinceText(ts) {
+      if (!ts) return '—';
+      const d = Math.max(0, Math.floor(Date.now()/1000) - ts);
+      if (d < 60) return d + ' 秒';
+      if (d < 3600) return Math.floor(d/60) + ' 分 ' + (d%60) + ' 秒';
+      return Math.floor(d/3600) + ' 小时 ' + Math.floor((d%3600)/60) + ' 分';
+    },
+    fmtTime(ts) {
+      if (!ts) return '';
+      const d = new Date(ts * 1000);
+      const p = n => String(n).padStart(2,'0');
+      return (d.getMonth()+1) + '/' + d.getDate() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+    },
+    eventTypeText(t) {
+      return {temp_exceed:'电池过温', chg_temp_exceed:'充电IC过温',
+              recovered:'已恢复充电', replug_reset:'重新插电'}[t] || t;
+    },
+    eventDetailText(ev) {
+      const d = ev.detail || {};
+      if (ev.type === 'temp_exceed') return d.temp + '°C（上限 ' + d.limit + '°C）';
+      if (ev.type === 'chg_temp_exceed') return d.chg_temp + '°C（上限 ' + d.limit + '°C）';
+      if (ev.type === 'recovered') return '原因「' + this.suspReasonText(d.prev_reason) + '」持续 ' + d.duration_s + ' 秒';
+      if (ev.type === 'replug_reset') return '原停充原因「' + this.suspReasonText(d.prev_reason) + '」';
+      return '';
+    },
+    async loadEvents() {
+      const d = await this.fetchJson(this.API_BASE + '/api/events');
+      this.events = (d && Array.isArray(d.events)) ? d.events : [];
+    },
+    async clearEvents() {
+      if (!confirm('确定清空全部异常事件记录？')) return;
+      await fetch(this.API_BASE + '/api/events', { method: 'DELETE' });
+      this.events = [];
+      this.evtHighlight = null;
+    },
+    async openEvent(id) {
+      const d = await this.fetchJson(this.API_BASE + '/api/event?id=' + encodeURIComponent(id));
+      if (!d || !Array.isArray(d.snapshot) || !d.snapshot.length) {
+        alert('该事件没有曲线快照');
+        return;
+      }
+      this.evtHighlight = d;
+      this.tab = 'stats';
+      await this.loadCurve();
+    },
+
 
     async loadCal() {
       const d = await this.fetchJson(this.API_BASE + '/api/calibrate');
@@ -692,11 +798,13 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
 
     init() {
       this.poll(); this.loadHistory(); this.loadCurve(); this.loadCal();
+      /* v1.17.0: 事件列表延后加载，避开首屏 Chart.js 初始化 */
+      setTimeout(() => this.loadEvents(), 400);
       document.documentElement.setAttribute('data-theme', String(this.s.theme));
       this.timer = setInterval(() => this.poll(), 3000);
       setInterval(() => this.loadHistory(), 30000);
       /* ★ v1.5.0: 曲线只在「统计」页可见时刷新，省电省流量 */
-      setInterval(() => { if (this.tab === 'stats') { this.loadCurve(); this.loadCal(); } }, 30000);
+      setInterval(() => { if (this.tab === 'stats') { this.loadCurve(); this.loadCal(); this.loadEvents(); } }, 30000);
       setInterval(() => { if (this.tab === 'log') this.refreshLog(); }, 10000);
     }
   };

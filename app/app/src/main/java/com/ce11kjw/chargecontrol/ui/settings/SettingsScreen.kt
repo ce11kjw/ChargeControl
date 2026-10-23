@@ -70,6 +70,11 @@ import com.ce11kjw.chargecontrol.ui.theme.TextSecondary
 import com.ce11kjw.chargecontrol.AppSettings
 import com.ce11kjw.chargecontrol.HapticUtils
 import org.koin.androidx.compose.koinViewModel
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Notifications
 
 private val refreshOptions = listOf(500L, 1000L, 2000L, 3000L, 5000L)
 
@@ -145,6 +150,8 @@ fun SettingsScreen(viewModel: SettingsViewModel = koinViewModel()) {
         CyberNightlightBarSettingsCard()
 
         // ═══ 模块更新（OTA 热更新，不重启手机）═══
+        ChargeAlertSettingsCard()
+
         ModuleUpdateCard()
 
         // ═══ App 信息 ═══
@@ -946,3 +953,121 @@ private fun ModuleUpdateCard() {
     }
 }
 
+/* ═══════════════════════════════════════════════════════════
+   v1.17.0 充电提醒（替代 TG 推送，全走本地通知）
+   用户拍板：保养上限用滑动条，不给固定默认值
+   ═══════════════════════════════════════════════════════════ */
+@Composable
+private fun ChargeAlertSettingsCard() {
+    val ctx = LocalContext.current
+    val sp = remember { ctx.getSharedPreferences("charge_alert", android.content.Context.MODE_PRIVATE) }
+
+    var limit by remember { mutableFloatStateOf(sp.getInt("limit", 80).toFloat()) }
+    var percent by remember { mutableFloatStateOf(sp.getInt("percent_threshold", 90).toFloat()) }
+    var aMaint by remember { mutableStateOf(sp.getBoolean("alert_maintenance", true)) }
+    var aWarn by remember { mutableStateOf(sp.getBoolean("alert_warning", true)) }
+    var aPct by remember { mutableStateOf(sp.getBoolean("alert_percent", true)) }
+    var aRec by remember { mutableStateOf(sp.getBoolean("alert_recover", true)) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Notifications, null, tint = NeonPurpleBright, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.size(8.dp))
+                Column {
+                    Text(stringResource(R.string.alert_title), fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                    Text(stringResource(R.string.alert_desc), fontSize = 11.sp, color = TextSecondary)
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+
+            /* ── 保养上限滑动条 60~100 步进 5 ── */
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.alert_maintenance_limit), fontSize = 13.sp, color = TextPrimary)
+                Text("${limit.toInt()}%", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = NeonPurpleBright)
+            }
+            Spacer(Modifier.height(6.dp))
+            FancySlider(
+                value = limit,
+                onValueChange = { limit = it },
+                onValueChangeFinished = {
+                    val v = (limit.toInt() / 5 * 5).coerceIn(60, 100)
+                    limit = v.toFloat()
+                    sp.edit().putInt("limit", v).apply()
+                },
+                valueRange = 60f..100f,
+                steps = 7,   // 65,70,75,80,85,90,95
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("60%", fontSize = 10.sp, color = NeonSteelBlue.copy(alpha = 0.7f))
+                Text("80%", fontSize = 10.sp, color = NeonSteelBlue.copy(alpha = 0.7f))
+                Text("100%", fontSize = 10.sp, color = NeonSteelBlue.copy(alpha = 0.7f))
+            }
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider(color = TextSecondary.copy(alpha = 0.2f))
+            Spacer(Modifier.height(12.dp))
+
+            /* ── 四个开关 ── */
+            AlertSwitchRow(stringResource(R.string.alert_sw_maintenance), aMaint) {
+                aMaint = it; sp.edit().putBoolean("alert_maintenance", it).apply()
+            }
+            AlertSwitchRow(stringResource(R.string.alert_sw_warning), aWarn) {
+                aWarn = it; sp.edit().putBoolean("alert_warning", it).apply()
+            }
+            AlertSwitchRow(stringResource(R.string.alert_sw_recover), aRec) {
+                aRec = it; sp.edit().putBoolean("alert_recover", it).apply()
+            }
+            AlertSwitchRow(stringResource(R.string.alert_sw_percent), aPct) {
+                aPct = it; sp.edit().putBoolean("alert_percent", it).apply()
+            }
+
+            if (aPct) {
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.alert_percent_threshold), fontSize = 13.sp, color = TextPrimary)
+                    Text("${percent.toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NeonPurpleBright)
+                }
+                FancySlider(
+                    value = percent,
+                    onValueChange = { percent = it },
+                    onValueChangeFinished = {
+                        val v = (percent.toInt() / 5 * 5).coerceIn(50, 100)
+                        percent = v.toFloat()
+                        sp.edit().putInt("percent_threshold", v).apply()
+                    },
+                    valueRange = 50f..100f,
+                    steps = 9,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlertSwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontSize = 13.sp, color = TextPrimary)
+        androidx.compose.material3.Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = androidx.compose.material3.SwitchDefaults.colors(
+                checkedThumbColor = NeonPurpleBright,
+                checkedTrackColor = NeonPurpleBright.copy(alpha = 0.35f),
+            ),
+        )
+    }
+}

@@ -41,17 +41,44 @@ static int x_limit_current_ma = 0;  /* 目标电流 mA (0=不改) */
 static int x_use_native_night = 0;  /* 用系统原生夜间充电 */
 static int x_bypass_min_soc = 50;   /* 旁路最低电量护栏（低于此不允许旁路）*/
 static int x_orig_cv = -1;          /* 原始恒压点备份（用于还原）*/
-static int chg_temp_suspended = 0;  /* 新增：充电IC 过温标志 */
+static int chg_temp_suspended = 0;  /* @deprecated v1.17.0: 由 susp_reason 取代 */
 static int resume_delta = 5;
 static int interval = 5;
 static int limit_enabled = 1;
-static int temp_suspended = 0;
+static int temp_suspended = 0;      /* @deprecated v1.17.0: 由 susp_reason 取代 */
 static time_t last_save = 0;
 static int full_once = 0;
 static time_t full_until = 0;
 static int history_enabled = 1;
 static int paused = 0;
 static int last_suspend_val = -1;
+
+/* ===== v1.17.0 提醒中心：停充状态机 + 事件环形缓冲 ===== */
+#define EVT_DIR        "/data/adb/battery-manager/events"
+#define EVT_KEEP       20
+#define RING_SIZE      30          /* 30 点 x 10s = 5 分钟 */
+#define RING_STEP_SEC  10
+#define TEMP_HYST      5           /* 温度恢复迟滞 °C（3 太窄，44°C 还在停充体感差） */
+#define TEMP_HOLD_SEC  60          /* 温度恢复需保持秒数 */
+
+typedef struct { long t; int soc; int temp_x10; int cur_ma; } ring_pt_t;
+static ring_pt_t evt_ring[RING_SIZE];
+static int  evt_ring_idx = 0;
+static int  evt_ring_cnt = 0;
+static long evt_ring_last = 0;
+
+enum { SUSP_NONE = 0, SUSP_TEMP, SUSP_CHG_TEMP, SUSP_LIMIT, SUSP_PAUSED,
+       SUSP_FULL, SUSP_BYPASS, SUSP_MANUAL };
+static int  susp_reason = SUSP_NONE;
+static long susp_since = 0;
+static int  susp_applied = 0;
+static long temp_ok_since = 0;
+static int  last_usb_online = -1;
+static long replug_grace_until = 0;   /* 拔插后限充豁免截止 */
+static int  night_hold = 0;           /* 夜间模式：到量后保持停充（由状态机统一裁决）*/
+static int  rec_temp_hyst = TEMP_HYST;
+static int  rec_temp_hold = TEMP_HOLD_SEC;
+static int  rec_soc_hyst  = 5;
 static long prev_cpu_ticks = 0;
 static long prev_proc_ticks = 0;
 static char proc_name_buf[32] = "";
@@ -72,7 +99,6 @@ static int stats_count = 0;
 static int night_enabled = 0;
 static int night_start_h = 23, night_end_h = 7;
 static int scene = 0;
-static char webhook_url[256] = "";
 static int lang = 0;
 static int theme = 0;
 static time_t session_30s = 0;
@@ -1649,76 +1675,236 @@ static void apply_power_path(void) {
     }
 }
 
-static void apply_control(void) {
-    char path[MAX_LINE];
-    snprintf(path, sizeof(path), "%s/input_suspend", SYSFS);
 
-    /* 温度保护永远优先（手动充满期间也生效）*/
-    if (bat_temp >= temp_limit) {
-        if (write_str(path, "1") < 0) log_event("写input_suspend失败(温度保护)");
-        temp_suspended = 1;
-        return;
-    }
-    if (temp_suspended) {
-        if (!paused) {
-            if (write_str(path, "0") < 0) log_event("写input_suspend失败(恢复)");
-        }
-        temp_suspended = 0;
-    }
-    /* ★ 新增：充电IC 过温保护（电池温度正常但充电IC 过热时也停充，防烧） */
-    if (chg_temp > 0 && chg_temp >= chg_temp_limit) {
-        if (write_str(path, "1") < 0) log_event("写input_suspend失败(充电IC过温)");
-        if (!chg_temp_suspended) log_event("充电IC过温保护触发");
-        chg_temp_suspended = 1;
-        return;
-    }
-    if (chg_temp_suspended) {
-        if (!paused && chg_temp > 0 && chg_temp < chg_temp_limit - 5) {
-            if (write_str(path, "0") < 0) log_event("写input_suspend失败(IC恢复)");
-            chg_temp_suspended = 0;
-        } else {
-            return;   /* 未降到恢复线以下，保持停充 */
-        }
-    }
-    if (paused) {
-        if (write_str(path, "1") < 0) log_event("写input_suspend失败(暂停)");
-        return;
-    }
-
-    /* 手动充满：仅跳过容量上限 */
-    if (full_once) {
-        if (time(NULL) >= full_until) {
-            full_once = 0;
-            log_event("手动充满结束，恢复充电限制");
-        } else {
-            if (write_str(path, "0") < 0) log_event("写input_suspend失败(充满)");
-            return;
-        }
-    }
-
-    /* 软旁路：维持电量在 [55,60]，充电器直供系统 */
-    if (bypass_soft) {
-        int ns2 = -1;
-        if (bat_capacity >= BYPASS_HI) ns2 = 1;
-        else if (bat_capacity <= BYPASS_LO) ns2 = 0;
-        if (ns2 >= 0 && ns2 != last_suspend_val) {
-            if (write_str(path, ns2 ? "1" : "0") < 0) log_event("写input_suspend失败(软旁路)");
-            last_suspend_val = ns2;
-        }
-        return;
-    }
-    if (!limit_enabled) {
-        if (write_str(path, "0") < 0) log_event("写input_suspend失败(关闭)");
-        temp_suspended = 0; return;
-    }
-    int new_suspend = -1;
-    if (bat_capacity >= charge_limit) new_suspend = 1;
-    else if (bat_capacity <= charge_limit - resume_delta) new_suspend = 0;
-    if (new_suspend >= 0 && new_suspend != last_suspend_val) {
-        if (write_str(path, new_suspend ? "1" : "0") < 0) log_event("写input_suspend失败");
-        last_suspend_val = new_suspend;
+/* ============ v1.17.0 停充裁决器 ============
+   原实现有 5 个独立写者各写 input_suspend，互相覆盖；温度恢复无迟滞无保持，
+   充IC分支温度读不到时直接 return 卡死。
+   改为「先收集理由 -> 统一裁决 -> 只写一次」。 */
+static const char *susp_reason_name(int r) {
+    switch (r) {
+        case SUSP_TEMP:     return "temp";
+        case SUSP_CHG_TEMP: return "chg_temp";
+        case SUSP_LIMIT:    return "limit";
+        case SUSP_PAUSED:   return "paused";
+        case SUSP_FULL:     return "full";
+        case SUSP_BYPASS:   return "bypass";
+        case SUSP_MANUAL:   return "manual";
+        default:            return "none";
     }
 }
+
+static void evt_ring_push(long now) {
+    if (evt_ring_last && now - evt_ring_last < RING_STEP_SEC) return;
+    evt_ring_last = now;
+    ring_pt_t *p = &evt_ring[evt_ring_idx];
+    p->t = now;
+    p->soc = bat_capacity;
+    p->temp_x10 = bat_temp * 10;
+    p->cur_ma = (current_avg > 0 ? current_avg : bat_curr);
+    evt_ring_idx = (evt_ring_idx + 1) % RING_SIZE;
+    if (evt_ring_cnt < RING_SIZE) evt_ring_cnt++;
+}
+
+/* 强制采一点（事件触发时用，保证快照含触发瞬间） */
+static void evt_ring_push_force(long now) {
+    evt_ring_last = 0;
+    evt_ring_push(now);
+}
+
+static void evt_dump(const char *type, const char *detail_json) {
+    evt_ring_push_force((long)time(NULL));
+    mkdir(EVT_DIR, 0755);
+    char path[320];
+    long ts = (long)time(NULL);
+    snprintf(path, sizeof(path), "%s/evt-%ld.json", EVT_DIR, ts);
+    FILE *f = fopen(path, "w");
+    if (!f) { log_event("evt_dump: 文件创建失败"); return; }
+    fprintf(f, "{\"id\":\"evt-%ld\",\"type\":\"%s\",\"at\":%ld,\"detail\":%s,\"snapshot\":[",
+            ts, type, ts, detail_json);
+    int st = (evt_ring_idx - evt_ring_cnt + RING_SIZE * 2) % RING_SIZE;
+    for (int i = 0; i < evt_ring_cnt; i++) {
+        ring_pt_t *p = &evt_ring[(st + i) % RING_SIZE];
+        if (i) fprintf(f, ",");
+        fprintf(f, "{\"t\":%ld,\"soc\":%d,\"temp\":%.1f,\"cur\":%d}",
+                (p->t - ts), p->soc, p->temp_x10 / 10.0, p->cur_ma);
+    }
+    fprintf(f, "]}\n");
+    fclose(f);
+    chmod(path, 0644);
+    char msg[128];
+    snprintf(msg, sizeof(msg), "事件快照已保存: %s", type);
+    log_event(msg);
+
+    /* 滚动保留 EVT_KEEP 条 */
+    DIR *d = opendir(EVT_DIR);
+    if (!d) return;
+    struct { char name[128]; time_t mt; } list[64];
+    int n = 0;
+    struct dirent *de;
+    struct stat stt;
+    char full[320];
+    while ((de = readdir(d)) && n < 64) {
+        if (strncmp(de->d_name, "evt-", 4)) continue;
+        int need = (int)strlen(EVT_DIR) + 1 + (int)strlen(de->d_name) + 1;
+        if (need > (int)sizeof(full)) continue;
+        snprintf(full, sizeof(full), "%s/%s", EVT_DIR, de->d_name);
+        if (stat(full, &stt) != 0) continue;
+        strncpy(list[n].name, de->d_name, sizeof(list[n].name) - 1);
+        list[n].name[sizeof(list[n].name) - 1] = 0;
+        list[n].mt = stt.st_mtime;
+        n++;
+    }
+    closedir(d);
+    while (n > EVT_KEEP) {
+        int oldest = 0;
+        for (int i = 1; i < n; i++) if (list[i].mt < list[oldest].mt) oldest = i;
+        int need = (int)strlen(EVT_DIR) + 1 + (int)strlen(list[oldest].name) + 1;
+        if (need <= (int)sizeof(full)) {
+            snprintf(full, sizeof(full), "%s/%s", EVT_DIR, list[oldest].name);
+            unlink(full);
+        }
+        list[oldest] = list[n - 1];
+        n--;
+    }
+}
+
+static void susp_transition(int new_reason, long now) {
+    if (new_reason == susp_reason) return;
+    char msg[160];
+    if (new_reason != SUSP_NONE) {
+        snprintf(msg, sizeof(msg), "停充生效: %s", susp_reason_name(new_reason));
+        log_event(msg);
+        if (new_reason == SUSP_TEMP) {
+            char dj[128];
+            snprintf(dj, sizeof(dj), "{\"temp\":%.1f,\"limit\":%d}", bat_temp * 1.0, temp_limit);
+            evt_dump("temp_exceed", dj);
+        } else if (new_reason == SUSP_CHG_TEMP) {
+            char dj[128];
+            snprintf(dj, sizeof(dj), "{\"chg_temp\":%.1f,\"limit\":%d}", chg_temp * 1.0, chg_temp_limit);
+            evt_dump("chg_temp_exceed", dj);
+        }
+        susp_since = now;
+        temp_ok_since = 0;
+    } else {
+        long dur = susp_since ? (now - susp_since) : 0;
+        snprintf(msg, sizeof(msg), "停充恢复: 原因=%s 持续=%lds",
+                 susp_reason_name(susp_reason), dur);
+        log_event(msg);
+        char dj[128];
+        snprintf(dj, sizeof(dj), "{\"prev_reason\":\"%s\",\"duration_s\":%ld}",
+                 susp_reason_name(susp_reason), dur);
+        evt_dump("recovered", dj);
+        susp_since = 0;
+        temp_ok_since = 0;
+    }
+    susp_reason = new_reason;
+}
+
+void apply_control(void) {
+    long now = (long)time(NULL);
+    char path[MAX_LINE];
+    snprintf(path, sizeof(path), "%s/input_suspend", SYSFS);
+    evt_ring_push(now);
+
+    /* ---- 拔插检测：插回就清状态 + 给 10 分钟限充豁免 ---- */
+    int usb_now = (usb_online > 0) ? 1 : 0;
+    if (last_usb_online >= 0 && usb_now == 1 && last_usb_online == 0) {
+        log_event("检测到重新插入充电器，清空停充状态");
+        if (susp_reason != SUSP_NONE) {
+            char dj[96];
+            snprintf(dj, sizeof(dj), "{\"prev_reason\":\"%s\",\"by\":\"replug\"}",
+                     susp_reason_name(susp_reason));
+            evt_dump("replug_reset", dj);
+        }
+        susp_reason = SUSP_NONE; susp_since = 0;
+        temp_ok_since = 0; last_suspend_val = -1;
+        susp_applied = -1;
+        /* 用户拔插 = "我要充"，否则 SOC 仍高于上限会立刻再次停充 */
+        replug_grace_until = now + 600;
+    }
+    last_usb_online = usb_now;
+
+    /* ---- 收集理由（优先级从高到低） ---- */
+    int want = 0;
+    int reason = SUSP_NONE;
+
+    /* 1) 电池过温：迟滞 + 保持 */
+    if (bat_temp > 0 && bat_temp >= temp_limit) {
+        want = 1; reason = SUSP_TEMP; temp_ok_since = 0;
+    } else if (susp_reason == SUSP_TEMP && bat_temp > 0) {
+        if (bat_temp <= temp_limit - rec_temp_hyst) {
+            if (!temp_ok_since) temp_ok_since = now;
+            if (now - temp_ok_since >= rec_temp_hold) { want = 0; reason = SUSP_NONE; }
+            else { want = 1; reason = SUSP_TEMP; }
+        } else {
+            temp_ok_since = 0;
+            want = 1; reason = SUSP_TEMP;
+        }
+    }
+
+    /* 2) 充电IC 过温（读不到时不卡死） */
+    if (reason == SUSP_NONE && chg_temp > 0) {
+        if (chg_temp >= chg_temp_limit) { want = 1; reason = SUSP_CHG_TEMP; }
+        else if (susp_reason == SUSP_CHG_TEMP) {
+            if (chg_temp < chg_temp_limit - 5) { want = 0; reason = SUSP_NONE; }
+            else { want = 1; reason = SUSP_CHG_TEMP; }
+        }
+    } else if (reason == SUSP_NONE && susp_reason == SUSP_CHG_TEMP && chg_temp <= 0) {
+        want = 0; reason = SUSP_NONE;
+    }
+
+    /* 3) 手动暂停 */
+    if (reason == SUSP_NONE && paused) { want = 1; reason = SUSP_PAUSED; }
+
+    /* 4) 手动充满 */
+    if (reason == SUSP_NONE && full_once) {
+        if (now >= full_until) { full_once = 0; log_event("手动充满结束，恢复充电限制"); }
+        else { want = 0; reason = SUSP_FULL; }
+    }
+
+    /* 5) 软旁路 [BYPASS_LO, BYPASS_HI] */
+    if (reason == SUSP_NONE && bypass_soft && bat_capacity > 0) {
+        if (bat_capacity >= BYPASS_HI) { want = 1; reason = SUSP_BYPASS; }
+        else if (bat_capacity <= BYPASS_LO) { want = 0; reason = SUSP_BYPASS; }
+        else { want = susp_applied ? 1 : 0; reason = SUSP_BYPASS; }
+    }
+
+    /* 5.5) 夜间模式保持（到量后不充，早上解除） */
+    if (reason == SUSP_NONE && night_hold) { want = 1; reason = SUSP_LIMIT; }
+
+    /* 6) 容量上限（迟滞 + 拔插豁免） */
+    if (reason == SUSP_NONE && limit_enabled && !bypass_soft && bat_capacity > 0) {
+        int soc_h = (rec_soc_hyst > 0 ? rec_soc_hyst : resume_delta);
+        if (replug_grace_until > now) {
+            want = 0; reason = SUSP_NONE;
+        } else if (bat_capacity >= charge_limit) {
+            want = 1; reason = SUSP_LIMIT;
+        } else if (bat_capacity <= charge_limit - soc_h) {
+            want = 0; reason = SUSP_NONE;
+        } else if (susp_reason == SUSP_LIMIT) {
+            want = 1; reason = SUSP_LIMIT;
+        } else {
+            want = 0; reason = SUSP_NONE;
+        }
+    }
+
+    /* 7) 全部关闭 -> 放行（硬保护已在上方拦截） */
+    if (reason == SUSP_NONE && !limit_enabled && !bypass_soft && !paused && !full_once) {
+        want = 0;
+    }
+
+    /* ---- 统一裁决：只写一次 ---- */
+    if (want != susp_applied) {
+        if (write_str(path, want ? "1" : "0") < 0) {
+            log_event(want ? "写input_suspend失败(停充)" : "写input_suspend失败(恢复)");
+        } else {
+            susp_applied = want;
+            last_suspend_val = want;
+        }
+    }
+    susp_transition(reason, now);
+}
+
 static void load_config(void) {
     FILE *f = fopen(CONFIG, "r"); if (!f) return;
     char line[MAX_LINE];
@@ -1748,6 +1934,9 @@ static void load_config(void) {
         else if (!strcmp(k, "xnight")) x_use_native_night = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "xminsoc")) { x = atoi(v); x_bypass_min_soc = (x >= 20 && x <= 80) ? x : 50; }
         else if (!strcmp(k, "xorigcv")) { x = atoi(v); x_orig_cv = (x > 0) ? x : -1; }
+        else if (!strcmp(k, "rec_temp_hyst")) { x = atoi(v); rec_temp_hyst = (x >= 0 && x <= 10) ? x : TEMP_HYST; }
+        else if (!strcmp(k, "rec_temp_hold")) { x = atoi(v); rec_temp_hold = (x >= 0 && x <= 600) ? x : TEMP_HOLD_SEC; }
+        else if (!strcmp(k, "rec_soc_hyst"))  { x = atoi(v); rec_soc_hyst  = (x >= 1 && x <= 20) ? x : 5; }
     }
     fclose(f);
 }
@@ -1760,6 +1949,9 @@ static void save_config(void) {
     fprintf(f, "interval=%d\n", interval);
     fprintf(f, "enabled=%d\n", limit_enabled);
     fprintf(f, "history_enabled=%d\n", history_enabled);
+    fprintf(f, "rec_temp_hyst=%d\n", rec_temp_hyst);
+    fprintf(f, "rec_temp_hold=%d\n", rec_temp_hold);
+    fprintf(f, "rec_soc_hyst=%d\n", rec_soc_hyst);
     /* ★ v1.4.0: 高级控制开关 + 恒压点原值备份（重启可还原） */
     fprintf(f, "xpp=%d\n", x_en_power_path);
     fprintf(f, "xcv=%d\n", x_set_cv_en);
@@ -1783,13 +1975,7 @@ static void load_extras(void) {
     if (!f) return;
     char buf[512]; size_t n = fread(buf, 1, sizeof(buf)-1, f); fclose(f);
     buf[n] = 0;
-    char *p = strstr(buf, "\"webhook\":\"");
-    if (p) {
-        p += 11; int i = 0;
-        while (*p && *p != '"' && i < 255) webhook_url[i++] = *p++;
-        webhook_url[i] = 0;
-    }
-    /* 逐字段解析（save_extras 中 webhook 位于 scene 与 lang 之间，整串 sscanf 会失配）*/
+    /* 逐字段解析（整串 sscanf 会因字段增删失配，故逐项 strstr）*/
     char *q;
     if ((q = strstr(buf, "\"night\":"))) night_enabled = atoi(q + 8);
     if ((q = strstr(buf, "\"ns\":"))) night_start_h = atoi(q + 5);
@@ -1820,9 +2006,9 @@ static void save_extras(void) {
     if (!f) return;
     /* ★ v1.4.0: 追加 xorigcv（恒压点原值备份）。
        不存它的话，重启后 x_orig_cv=-1，用户关掉恒压点调整会还原不回去。 */
-    fprintf(f, "{\"night\":%d,\"ns\":%d,\"ne\":%d,\"scene\":%d,\"webhook\":\"%s\",\"lang\":%d,\"theme\":%d,\"bypass_soft\":%d,"
+    fprintf(f, "{\"night\":%d,\"ns\":%d,\"ne\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"bypass_soft\":%d,"
         "\"xpp\":%d,\"xcv\":%d,\"xcvmv\":%d,\"xlc\":%d,\"xlcma\":%d,\"xnn\":%d,\"xbminsoc\":%d,\"xorigcv\":%d}",
-        night_enabled, night_start_h, night_end_h, scene, webhook_url, lang, theme, bypass_soft,
+        night_enabled, night_start_h, night_end_h, scene, lang, theme, bypass_soft,
         x_en_power_path, x_set_cv_en, x_set_cv_mv, x_limit_current_en, x_limit_current_ma,
         x_use_native_night, x_bypass_min_soc, x_orig_cv);
     fclose(f);
@@ -1880,14 +2066,16 @@ static int in_night_window(void) {
     return h < night_end_h;
 }
 
-static void apply_night_mode(void) { static time_t nl = 0; time_t tn = time(NULL); if (tn - nl < 30) return; nl = tn;
-    if (!night_enabled) return;
-    /* 手动暂停时，夜间模式让位用户 */
-    if (paused) return;
-    if (in_night_window() && bat_capacity >= charge_limit) {
-        if (write_str(SYSFS "/input_suspend", "1") < 0) log_event("night write fail");
-    } else if (night_enabled && !in_night_window() && bat_capacity < charge_limit && bat_curr <= 0) {
-        if (write_str(SYSFS "/input_suspend", "0") < 0) log_event("night resume fail");
+/* ★ v1.17.0: 夜间模式不再直接写 input_suspend（会成为第 6 个写者，
+   覆盖温度保护），改为设置 night_hold 标志，由 apply_control() 统一裁决。 */
+static void apply_night_mode(void) {
+    int want_hold = 0;
+    if (night_enabled && !paused && in_night_window() && bat_capacity >= charge_limit)
+        want_hold = 1;
+    if (want_hold != night_hold) {
+        night_hold = want_hold;
+        log_event(want_hold ? "夜间模式：到量保持停充" : "夜间模式：解除保持");
+        apply_control();   /* 立即生效，不必等下一轮 */
     }
 }
 
@@ -1895,33 +2083,6 @@ static void high_temp_alert(void) { static time_t hl = 0; time_t tn = time(NULL)
     if (bat_temp >= 50 && !alerted_high) {
         alerted_high = 1;
         log_event("⚠️ high temp alert");
-        if (webhook_url[0]) {
-            char cmd[512];
-            /* 安全：URL 必须是 http:// 或 https:// 开头，且不含 shell 特殊字符 */
-            if ((strncmp(webhook_url, "http://", 7) == 0 || strncmp(webhook_url, "https://", 8) == 0) &&
-                !strchr(webhook_url, '\'') && !strchr(webhook_url, '"') &&
-                !strchr(webhook_url, '$') && !strchr(webhook_url, ';') &&
-                !strchr(webhook_url, '`') && !strchr(webhook_url, '\\') &&
-                !strchr(webhook_url, '|') && !strchr(webhook_url, '&') &&
-                !strchr(webhook_url, '<')) {
-                /* ★ v1.3.1: 用 busybox wget 代替 curl（Android 无 curl） */
-                const char *bb = NULL;
-                if (access("/data/adb/ap/bin/busybox", X_OK) == 0) bb = "/data/adb/ap/bin/busybox";
-                else if (access("/data/adb/ksu/bin/busybox", X_OK) == 0) bb = "/data/adb/ksu/bin/busybox";
-                else if (access("/data/adb/magisk/busybox", X_OK) == 0) bb = "/data/adb/magisk/busybox";
-                if (bb) {
-                    snprintf(cmd, sizeof(cmd), "%s wget -q -T 5 -O /dev/null --post-data='temp=%d' '%s' >/dev/null 2>&1",
-                             bb, bat_temp, webhook_url);
-                    FILE *wh = popen(cmd, "r");
-                    if (wh) pclose(wh);
-                    log_event("webhook sent (busybox)");
-                } else {
-                    log_event("webhook skipped: no busybox");
-                }
-            } else {
-                log_event("webhook URL invalid chars");
-            }
-        }
     }
     if (bat_temp < 45) alerted_high = 0;
 }
@@ -2308,6 +2469,114 @@ static void handle_calibrate(int fd, const char *body, const char *method) {
     free(j);
 }
 
+/* ===== v1.17.0 事件 API ===== */
+static void handle_events_list(int fd) {
+    DIR *d = opendir(EVT_DIR);
+    if (!d) { send_resp(fd, 200, "application/json", "{\"events\":[],\"count\":0}"); return; }
+    char *out = malloc(16384);
+    if (!out) { closedir(d); send_resp(fd, 500, "text/plain", "oom"); return; }
+    struct { char name[128]; time_t mt; } list[64];
+    int n = 0;
+    struct dirent *de;
+    struct stat stt;
+    char full[320];
+    while ((de = readdir(d)) && n < 64) {
+        if (strncmp(de->d_name, "evt-", 4)) continue;
+        int need = (int)strlen(EVT_DIR) + 1 + (int)strlen(de->d_name) + 1;
+        if (need > (int)sizeof(full)) continue;
+        snprintf(full, sizeof(full), "%s/%s", EVT_DIR, de->d_name);
+        if (stat(full, &stt) != 0) continue;
+        strncpy(list[n].name, de->d_name, sizeof(list[n].name) - 1);
+        list[n].name[sizeof(list[n].name) - 1] = 0;
+        list[n].mt = stt.st_mtime;
+        n++;
+    }
+    closedir(d);
+    for (int i = 1; i < n; i++) {
+        for (int j = i; j > 0 && list[j].mt > list[j-1].mt; j--) {
+            char tn[128];
+            memcpy(tn, list[j].name, sizeof(tn));
+            memcpy(list[j].name, list[j-1].name, sizeof(list[j].name));
+            memcpy(list[j-1].name, tn, sizeof(list[j-1].name));
+            time_t tm = list[j].mt; list[j].mt = list[j-1].mt; list[j-1].mt = tm;
+        }
+    }
+    int off = 0;
+    off += snprintf(out + off, 16384 - off, "{\"events\":[");
+    int first = 1, cnt = 0;
+    for (int i = 0; i < n && cnt < 20; i++) {
+        int need = (int)strlen(EVT_DIR) + 1 + (int)strlen(list[i].name) + 1;
+        if (need > (int)sizeof(full)) continue;
+        snprintf(full, sizeof(full), "%s/%s", EVT_DIR, list[i].name);
+        FILE *f = fopen(full, "r");
+        if (!f) continue;
+        char head[1024];
+        size_t r = fread(head, 1, sizeof(head) - 1, f);
+        fclose(f);
+        head[r] = 0;
+        /* 头部在 ,"snapshot" 前截断 ⇒ 事件对象未闭合，需补 '}' */
+        char *sp = strstr(head, ",\"snapshot\"");
+        if (sp) *sp = 0;
+        if (!first) off += snprintf(out + off, 16384 - off, ",");
+        first = 0;
+        off += snprintf(out + off, 16384 - off, "%s}", head);
+        cnt++;
+        if (off > 15000) break;
+    }
+    snprintf(out + off, 16384 - off, "],\"count\":%d}", cnt);
+    send_resp(fd, 200, "application/json", out);
+    free(out);
+}
+
+static void handle_event_one(int fd, const char *id) {
+    if (!id || !*id) { send_resp(fd, 400, "application/json", "{\"ok\":false,\"err\":\"missing id\"}"); return; }
+    if (strncmp(id, "evt-", 4) != 0 || strstr(id, "..") || strchr(id, '/')) {
+        send_resp(fd, 400, "application/json", "{\"ok\":false,\"err\":\"bad id\"}"); return;
+    }
+    for (const char *q = id + 4; *q; q++) {
+        if (*q < '0' || *q > '9') {
+            send_resp(fd, 400, "application/json", "{\"ok\":false,\"err\":\"bad id\"}"); return;
+        }
+    }
+    char path[320];
+    int need = (int)strlen(EVT_DIR) + 1 + (int)strlen(id) + 6;
+    if (need > (int)sizeof(path)) { send_resp(fd, 400, "application/json", "{\"ok\":false}"); return; }
+    snprintf(path, sizeof(path), "%s/%s.json", EVT_DIR, id);
+    FILE *f = fopen(path, "r");
+    if (!f) { send_resp(fd, 404, "application/json", "{\"ok\":false,\"err\":\"not found\"}"); return; }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz <= 0 || sz > 262144) { fclose(f); send_resp(fd, 500, "application/json", "{\"ok\":false}"); return; }
+    char *buf = malloc(sz + 1);
+    if (!buf) { fclose(f); send_resp(fd, 500, "text/plain", "oom"); return; }
+    size_t rd = fread(buf, 1, sz, f);
+    fclose(f);
+    buf[rd] = 0;
+    send_resp(fd, 200, "application/json", buf);
+    free(buf);
+}
+
+static void handle_events_clear(int fd) {
+    DIR *d = opendir(EVT_DIR);
+    if (!d) { send_resp(fd, 200, "application/json", "{\"ok\":true,\"deleted\":0}"); return; }
+    struct dirent *de;
+    int n = 0;
+    char full[320];
+    while ((de = readdir(d))) {
+        if (strncmp(de->d_name, "evt-", 4)) continue;
+        int need = (int)strlen(EVT_DIR) + 1 + (int)strlen(de->d_name) + 1;
+        if (need > (int)sizeof(full)) continue;
+        snprintf(full, sizeof(full), "%s/%s", EVT_DIR, de->d_name);
+        if (unlink(full) == 0) n++;
+    }
+    closedir(d);
+    char resp[96];
+    snprintf(resp, sizeof(resp), "{\"ok\":true,\"deleted\":%d}", n);
+    log_event("事件历史已清空");
+    send_resp(fd, 200, "application/json", resp);
+}
+
 static char *history_json(void) {
     FILE *f = fopen(HISTORY, "r"); if (!f) return strdup("[]");
     fseek(f, 0, SEEK_END); long sz = ftell(f); rewind(f);
@@ -2493,6 +2762,19 @@ static void handle_status(int fd) {
         if (loss_per_cycle > 0.001f)
             est_cycles_left = (int)((health - 60.0f) / loss_per_cycle);
     }
+    /* v1.17.0: 停充状态与恢复倒计时 */
+    long _now_s = (long)time(NULL);
+    int  _rec_in = -1;
+    if (susp_reason == SUSP_TEMP) {
+        _rec_in = (temp_ok_since > 0) ? (int)(rec_temp_hold - (_now_s - temp_ok_since)) : -1;
+    } else if (susp_reason == SUSP_LIMIT) {
+        int _sh = (rec_soc_hyst > 0 ? rec_soc_hyst : resume_delta);
+        _rec_in = (replug_grace_until > _now_s) ? (int)(replug_grace_until - _now_s)
+                                                : 0;
+        (void)_sh;
+    }
+    if (_rec_in < 0) _rec_in = -1;
+
     snprintf(body, 32768,
         "{\"api_version\":%d,\"features\":\"%s\","
         "\"capacity\":%d,\"capacity_disp\":%d,\"temp\":%d,\"voltage\":%d,\"current\":%d,"
@@ -2504,6 +2786,8 @@ static void handle_status(int fd) {
         "\"power_mw\":%d,\"est_full_min\":%d,\"est_full_txt\":\"%s\",\"health_degrade\":%.1f,"
         "\"usb_online\":%d,\"proto_name\":\"%s\",\"pd_type\":%d,\"power_max\":%d,"
         "\"control_state\":\"%s\",\"full_once\":%d,\"full_until\":%ld,"
+        "\"suspend_active\":%d,\"suspend_reason\":\"%s\",\"suspend_since\":%ld,\"suspend_recover_in\":%d,"
+        "\"rec_temp_hyst\":%d,\"rec_temp_hold\":%d,\"rec_soc_hyst\":%d,"
         "\"history_enabled\":%d,\"paused\":%d,\"proc_name\":\"%s\",\"proc_pid\":%d,\"cpu_pct\":%d,"
         "\"mem_total\":%d,\"mem_avail\":%d,\"mem_free\":%d,\"storage_total\":%d,\"storage_free\":%d,\"uptime_secs\":%d,\"cpu_cores\":%d,\"kernel_ver\":\"%s\",\"cpu_model\":\"%s\",\"device_model\":\"%s\","
         /* v1.6.0 系统字段 */
@@ -2543,7 +2827,7 @@ static void handle_status(int fd) {
         "\"dev_has_nfc\":%d,\"dev_has_ir\":%d,\"dev_has_uwb\":%d,\"dev_has_wireless_chg\":%d,"
         "\"dev_screen_w\":%d,\"dev_screen_h\":%d,\"dev_screen_density\":%d,"
         "\"dev_thermal_zones\":%d,\"dev_thermal_types\":\"%s\","
-        "\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"webhook\":\"%s\",\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
+        "\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d,\"x_pp\":%d,\"x_pp_ok\":%d,\"x_cv\":%d,\"x_cv_mv\":%d,\"x_cv_ok\":%d,\"x_lc\":%d,\"x_lc_ma\":%d,\"x_nn\":%d,\"x_nn_ok\":%d,\"x_bmin\":%d,\"native_night\":%d,"
         "\"jeita_chg_index\":%d,\"jeita_chg_fcc\":%d,\"jeita_active\":%d,"
         "\"chg_input_power_mw\":%d,\"chg_efficiency_pct\":%d,"
@@ -2556,7 +2840,9 @@ static void handle_status(int fd) {
         charge_full, est_cycles_left,
         power_mw, est_full_min, est_full_txt, health_degrade,
         usb_online, proto_name, pd_type, usb_power_max,
-        control_state, full_once, (long)full_until, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
+        control_state, full_once, (long)full_until,
+        (susp_reason != SUSP_NONE), susp_reason_name(susp_reason), susp_since, _rec_in,
+        rec_temp_hyst, rec_temp_hold, rec_soc_hyst, history_enabled, hw_paused, proc_name_buf, proc_pid_val, cpu_pct,
         mem_total, mem_avail, mem_free, storage_total, storage_free, uptime_secs, cpu_cores, kernel_ver, cpu_model, device_model,
         /* ★ v1.6.0 新增系统字段 */
         cpu_usage_total, cpu_idle_pct, cpu_deep_sleep_pct, cpu_arch, cpu_abi,
@@ -2591,7 +2877,7 @@ static void handle_status(int fd) {
         dev_dual_sim, dev_sim_operator,
         dev_has_nfc, dev_has_ir, dev_has_uwb, dev_has_wireless_chg,
         dev_screen_w, dev_screen_h, dev_screen_density,
-        dev_thermal_zones, dev_thermal_types, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, webhook_url, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high,
+        dev_thermal_zones, dev_thermal_types, wifi_rssi, wifi_on, mobile_on, ip_addr, bat_technology, bat_capacity_level, bat_health, bat_charge_type, bat_time_to_full, bat_charge_counter, bat_input_current_limit, bat_manufacturer, bat_model_name, voltage_ocv, current_avg, temp_ambient, constant_charge_current, constant_charge_voltage, capacity_error_margin, time_to_empty, bat_present, internal_resistance, charge_now, charge_term_current, constant_charge_current_max, constant_charge_voltage_max, temp_max, temp_min, charger_temp, charge_done, input_voltage_settled, safety_timer_expired, calibrate, bypass_ok, bypass_on, bypass_supported, sess_active, sess_min, sess_mah, stats_count, stats_min, stats_mah, night_enabled, scene, lang, theme, alerted_high,
         pd_pdo_count, pd_pdo_max_mv, pd_pdo_max_ma, pd_svid, pd_state,
         cc_limit_supported, cc_limit_val, power_path_en, jeita_index,
         soh_native, soh_first, soh_delta_x10, design_mah, chg_temp_limit,
@@ -2686,13 +2972,6 @@ static void handle_limit(int fd, const char *body) {
             else if (!strcmp(key, "x_limit_ma") || !strcmp(key, "xccma")) { int v = atoi(dec); if (v > 0 && v <= 6000) x_limit_current_ma = v; }
             else if (!strcmp(key, "x_native_night") || !strcmp(key, "xnight")) x_use_native_night = atoi(dec) ? 1 : 0;
             else if (!strcmp(key, "x_bypass_min_soc") || !strcmp(key, "xminsoc")) { int v = atoi(dec); if (v >= 20 && v <= 90) x_bypass_min_soc = v; }
-            else if (!strcmp(key, "webhook")) {
-                char wb[256]; strncpy(wb, dec, 255); wb[255] = '\0';
-                url_decode(wb);
-                if (strlen(wb) < 255 && !strchr(wb, '\"') && !strchr(wb, '\\'))
-                    strcpy(webhook_url, wb);
-                else log_event("webhook invalid chars");
-            }
         }
         save_extras();
         free(copy);
@@ -2721,9 +3000,9 @@ static void handle_pause(int fd, const char *body) {
     } else {
         paused = 0;
         log_event("manual resume");
-        /* 恢复后立即写 0（中间地带 apply_control 不会写，避免卡死）*/
-        if (bat_temp < temp_limit)
-            write_str(SYSFS "/input_suspend", "0");
+        /* ★ v1.17.0: 不再直写 input_suspend —— 由下方 apply_control() 统一裁决。
+           直写会让状态机的 susp_applied 与实际硬件状态失配。 */
+        susp_applied = -1;   /* 强制状态机重写一次 */
     }
     apply_control();
     send_resp(fd, 200, "application/json", "{\"ok\":true}");
@@ -3257,11 +3536,16 @@ static int serve_file(int fd, const char *uri) {
     if (!body) { fclose(f); send_resp(fd, 500, "text/plain", "OOM"); return -1; }
     size_t rd = fread(body, 1, len, f); fclose(f);
     body[rd] = '\0';
+    /* ★ v1.17.0: 用实际文件路径判断 MIME。
+       原实现用 uri 判断 —— 访问 "/" 时 uri 没有 .html 后缀，
+       会返回 text/plain，浏览器把整页渲染成源码。 */
     const char *ct = "text/plain";
-    if (strstr(uri, ".html")) ct = "text/html";
-    else if (strstr(uri, ".css")) ct = "text/css";
-    else if (strstr(uri, ".js")) ct = "application/javascript";
-    else if (strstr(uri, ".svg")) ct = "image/svg+xml";
+    if (strstr(path, ".html")) ct = "text/html; charset=utf-8";
+    else if (strstr(path, ".css")) ct = "text/css; charset=utf-8";
+    else if (strstr(path, ".js")) ct = "application/javascript; charset=utf-8";
+    else if (strstr(path, ".svg")) ct = "image/svg+xml";
+    else if (strstr(path, ".png")) ct = "image/png";
+    else if (strstr(path, ".json")) ct = "application/json; charset=utf-8";
     char head[512];
     int n = snprintf(head, sizeof(head),
         "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n", ct, rd);
@@ -3315,6 +3599,20 @@ static void handle_client(int fd) {
     if (!strcmp(uri, "/api/update-check")) { handle_update_check(fd); return; }
     if (!strcmp(uri, "/api/ota")) { handle_ota(fd, body, method); return; }
     /* v1.3.1: /api/update-apply 已移除（改用 APatch 管理器的 updateJson 渠道）*/
+    if (!strcmp(uri, "/api/events") && !strcmp(method, "GET")) { handle_events_list(fd); return; }
+    if (!strcmp(uri, "/api/events") && !strcmp(method, "DELETE")) { handle_events_clear(fd); return; }
+    if (!strncmp(uri, "/api/event?", 11) && !strcmp(method, "GET")) {
+        char *p = strstr(uri, "id=");
+        if (p) {
+            p += 3; char id[64]; int i = 0;
+            while (*p && *p != '&' && i < 63) id[i++] = *p++;
+            id[i] = 0;
+            handle_event_one(fd, id);
+        } else {
+            send_resp(fd, 400, "application/json", "{\"ok\":false,\"err\":\"missing id\"}");
+        }
+        return;
+    }
     if (!strcmp(uri, "/api/history")) { char *j = history_json(); send_resp(fd, 200, "application/json", j); free(j); return; }
     /* ★ v1.5.0 充电曲线 & 校准 */
     if (!strcmp(uri, "/api/curve"))     { handle_curve(fd, body); return; }

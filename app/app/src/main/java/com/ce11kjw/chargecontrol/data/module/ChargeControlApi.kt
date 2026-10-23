@@ -3,6 +3,8 @@ package com.ce11kjw.chargecontrol.data.module
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.ce11kjw.chargecontrol.data.model.BatteryEvent
+import com.ce11kjw.chargecontrol.data.model.EventSnapshotPoint
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -387,5 +389,92 @@ object ChargeControlApi {
             Log.w(TAG, "postCalibrate failed: ${e.message}")
             false
         }
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       v1.17.0 异常事件（温度超限 / 充IC过温 / 恢复 / 拔插）
+       ═══════════════════════════════════════════════════════════ */
+
+    /** 事件列表（不含 snapshot，轻量；最多 20 条，新的在前） */
+    suspend fun fetchEvents(): List<BatteryEvent> = withContext(Dispatchers.IO) {
+        try {
+            val txt = getText("/api/events") ?: return@withContext emptyList()
+            val root = JSONObject(txt)
+            val arr = root.optJSONArray("events") ?: return@withContext emptyList()
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    add(parseEvent(o))
+                }
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "fetchEvents failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** 单条事件（含 snapshot 曲线快照） */
+    suspend fun fetchEvent(id: String): BatteryEvent? = withContext(Dispatchers.IO) {
+        try {
+            val enc = URLEncoder.encode(id, "UTF-8")
+            val txt = getText("/api/event?id=$enc") ?: return@withContext null
+            val root = JSONObject(txt)
+            if (!root.optBoolean("ok", true) && root.has("err")) return@withContext null
+            parseEvent(root, withSnapshot = true)
+        } catch (e: Throwable) {
+            Log.w(TAG, "fetchEvent failed: ${e.message}")
+            null
+        }
+    }
+
+    /** 清空全部事件 */
+    suspend fun clearEvents(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val conn = (URL("$BASE/api/events").openConnection() as HttpURLConnection).apply {
+                connectTimeout = CONNECT_TIMEOUT; readTimeout = READ_TIMEOUT
+                requestMethod = "DELETE"
+            }
+            val ok = conn.responseCode == 200
+            conn.disconnect()
+            ok
+        } catch (e: Throwable) {
+            Log.w(TAG, "clearEvents failed: ${e.message}")
+            false
+        }
+    }
+
+    private fun parseEvent(o: JSONObject, withSnapshot: Boolean = false): BatteryEvent {
+        val detailObj = o.optJSONObject("detail")
+        val detail = mutableMapOf<String, Any>()
+        if (detailObj != null) {
+            detailObj.keys().forEach { k ->
+                val v = detailObj.opt(k)
+                if (v != null) detail[k] = v
+            }
+        }
+        val snap = mutableListOf<EventSnapshotPoint>()
+        if (withSnapshot) {
+            val arr = o.optJSONArray("snapshot")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val p = arr.optJSONObject(i) ?: continue
+                    snap.add(
+                        EventSnapshotPoint(
+                            t = p.optLong("t", 0L),
+                            soc = p.optInt("soc", -1),
+                            temp = p.optDouble("temp", 0.0),
+                            cur = p.optInt("cur", 0)
+                        )
+                    )
+                }
+            }
+        }
+        return BatteryEvent(
+            id = o.optString("id", ""),
+            type = o.optString("type", ""),
+            at = o.optLong("at", 0L),
+            detail = detail,
+            snapshot = snap
+        )
     }
 }
