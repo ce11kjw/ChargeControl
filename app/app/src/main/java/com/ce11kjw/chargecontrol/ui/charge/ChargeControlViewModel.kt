@@ -248,6 +248,10 @@ class ChargeControlViewModel : ViewModel() {
             }
             // 模块对同一开关可能以长名或短名回传（v1.4.0 起两者都输出），两个都试
             val aliases: List<String> = when (k) {
+                /* ★ v1.16.2: 写入键名 和 读回字段名 不一定相同！
+                   limit_enabled 写入时叫 `enabled`，但 status 里输出的是 `limit_enabled`。
+                   这里为每个写入键列出它可能的回读名。 */
+                "enabled"          -> listOf("limit_enabled")
                 "x_power_path"     -> listOf("x_pp")
                 "x_set_cv_en"      -> listOf("x_cv")
                 "x_set_cv_mv"      -> listOf("x_cv_mv")
@@ -265,7 +269,7 @@ class ChargeControlViewModel : ViewModel() {
         return true
     }
 
-    fun setLimitEnabled(v: Boolean) = write("limit_enabled" to if (v) 1 else 0, msg = "充电限制")
+    fun setLimitEnabled(v: Boolean) = write("enabled" to if (v) 1 else 0, msg = "充电限制")
     fun setChargeLimit(v: Int) = write("charge_limit" to v, msg = "充电上限 ${v}%")
     fun setTempLimit(v: Int) = write("temp_limit" to v, msg = "温度上限 ${v}°C")
     fun setChgTempLimit(v: Int) = write("chg_temp_limit" to v, msg = "充电IC上限 ${v}°C")
