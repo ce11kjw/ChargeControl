@@ -1,8 +1,8 @@
 package com.ce11kjw.chargecontrol.ui.components
 
+import androidx.compose.ui.semantics.role
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.ui.input.pointer.awaitPointerEvent
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
