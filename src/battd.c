@@ -265,6 +265,7 @@ static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 
 /* 充电阶段：0=未充 1=预充 2=恒流CC 3=恒压CV 4=充满 */
 static int chg_stage = 0;
+void reset_charge_session(void);   /* v1.18.0: 拨插/充满时重置 CC/CV 峰值统计 */
 static int prev_curr = 0;           /* 上一次电流，用于判断 CC/CV 拐点 */
 static int cc_peak = 0;             /* 本轮充电的电流峰值（CV 判据基准 + 迟滞） */
 static int prev_volt = 0;
@@ -1821,6 +1822,8 @@ void apply_control(void) {
         susp_applied = -1;
         /* 用户拔插 = "我要充"，否则 SOC 仍高于上限会立刻再次停充 */
         replug_grace_until = now + 600;
+        /* ★ v1.18.0: 新充电会话，重置 CC/CV 峰值统计 */
+        reset_charge_session();
     }
     last_usb_online = usb_now;
 
@@ -2095,31 +2098,97 @@ static void high_temp_alert(void) { static time_t hl = 0; time_t tn = time(NULL)
      - 充电中且电流明显下降、电压接近恒压点 → 3 恒压 CV
      - status=Full 或充电完成 → 4 充满
    电流单位 mA（bat_curr 已是 mA），电压 mV。 */
+/* ★ v1.18.0: 充电阶段判定（重写）
+   ============================================================
+   依据 Linux 内核 include/linux/power_supply.h 官方定义：
+     POWER_SUPPLY_CHARGE_TYPE_TRICKLE   (slow speed)                  → 预充
+     POWER_SUPPLY_CHARGE_TYPE_FAST      (fast speed)                  → 恒流 CC
+     POWER_SUPPLY_CHARGE_TYPE_TAPER_EXT = 50 (charging in CV phase)   → 恒压 CV
+
+   但 MTK (mt6375) 未导出 charge_type 节点（实测本机 usb/quick_charge_type=0 无意义，
+   battery/ 下无 charge_type），只能从电流/电压推断。
+
+   ── 旧实现的三处缺陷（2026-10-24 用 160 点真实充电数据实测暴露）──
+   实测序列（电量 / 电流 / 判出的阶段）：
+      9%~24%   869mA 恒定   st=2  ✅ 真 CC
+      25%      0mA          st=2  ❌ 峰值被污染
+      26%~29%  233mA        st=2  ❌ 应判 CV
+      91%      139mA        st=2  ❌ 只剩 CC 的 16%，仍判 CC
+   缺陷：
+     ① `if (bat_curr > cc_peak) cc_peak = bat_curr;`  —— 电流读到 0 且 cc_peak<=0 时被拉成 0
+     ② `if (cc_peak <= 0) cc_peak = bat_curr;`        —— cc_peak=0 时直接赋当前值，
+        之后 139mA 成为"新峰值"，CV 永远判不出来
+     ③ `bat_curr > 0` 作为必要门槛 —— 读不到电流时直接放弃判断
+
+   ── 新判据 ──
+   · 无效采样过滤：电流 <= CUR_VALID_MA(50) 时保持上次阶段，不参与峰值统计
+     （MTK 的 current_now 在 BMS 采样间隙可能为 0；实测 40/40 非零，但历史数据 57% 为 0）
+   · cc_peak 只在 CC/预充阶段累积（进 CV 后冻结）
+   · 进入 CV（三条同时）：
+       a) 电压 >= 恒压点 - 80mV    （官方 TAPER 的物理前提）
+       b) 电流 < cc_peak * 60%
+       c) 连续 CV_ENTER_CNT 次成立  （去抖）
+   · 退出 CV（迟滞）：
+       a) 电流 > cc_peak * 75%      或
+       b) 电压掉出 恒压点 - 150mV
+   · 充电会话切换（充满 / 拔插）→ reset_charge_session()
+   ──────────────────────────────────────────────────────────── */
+#define CUR_VALID_MA     50
+#define CV_NEAR_MV       80
+#define CV_FAR_MV        150
+#define CV_ENTER_PCT     60
+#define CV_EXIT_PCT      75
+#define CV_ENTER_CNT     2
+
+static int cv_enter_cnt = 0;
+static int last_valid_curr = 0;
+
+void reset_charge_session(void) {
+    cc_peak = 0;
+    cv_enter_cnt = 0;
+}
+
 static int detect_charge_stage(void) {
     int charging = strcmp(bat_status, "Charging") == 0;
     int full = strcmp(bat_status, "Full") == 0;
-    if (full) return 4;
-    if (!charging) return 0;
-    if (bat_capacity >= 0 && bat_capacity < 10 && bat_curr < 300) return 1;
 
-    /* CV 判据 + 迟滞（v1.5.0 修正抖动）
-       首次实测：仅比较「本轮电流 < 上轮峰值 60%」会在电流小幅波动时
-       于 CC<->CV 反复横跳（实测 39s CC / 44s CV 来回切）。
-       现在：
-         · cc_peak 记录本轮充电的电流峰值（充电开始时重置）
-         · 进入 CV 需 电流 < 峰值 60%（较严）
-         · 退出 CV 需 电流 > 峰值 75%（较松）—— 两阈值拉开形成迟滞带
-         · 且必须电压确实接近恒压点，避免低温大电流误判 */
-    int cv_mv = x_orig_cv > 0 ? x_orig_cv : 4430;
-    if (bat_curr > cc_peak) cc_peak = bat_curr;
-    if (cc_peak <= 0) cc_peak = bat_curr;
+    if (full) { reset_charge_session(); return 4; }
+    if (!charging) { reset_charge_session(); return 0; }
 
-    int near_cv = (bat_volt >= cv_mv - 80);
-    if (chg_stage == 3) {
-        if (bat_curr > cc_peak * 75 / 100 || !near_cv) return 2;
-        return 3;
+    /* 预充：低电量 + 小电流（同样要过滤无效采样） */
+    if (bat_capacity >= 0 && bat_capacity < 10) {
+        int cur = (bat_curr > 0) ? bat_curr : last_valid_curr;
+        if (cur > 0 && cur < 300) return 1;
     }
-    if (near_cv && bat_curr > 0 && bat_curr < cc_peak * 6 / 10) return 3;
+
+    /* 无效采样：保持上次阶段，不污染统计（旧实现正是在这里把 cc_peak 拉成 0） */
+    if (bat_curr <= CUR_VALID_MA) {
+        return (chg_stage >= 1 && chg_stage <= 4) ? chg_stage : 2;
+    }
+    last_valid_curr = bat_curr;
+
+    int cv_mv = x_orig_cv > 0 ? x_orig_cv : 4430;
+    int near_cv = (bat_volt >= cv_mv - CV_NEAR_MV);
+    int far_cv  = (bat_volt <  cv_mv - CV_FAR_MV);
+
+    /* 已在 CV：先判退出 */
+    if (chg_stage == 3) {
+        cv_enter_cnt = 0;
+        int still_cv = !far_cv;
+        if (cc_peak > 0 && bat_curr > cc_peak * CV_EXIT_PCT / 100) still_cv = 0;
+        return still_cv ? 3 : 2;
+    }
+
+    /* 在 CC/预充：累积峰值后判断是否进入 CV */
+    if (bat_curr > cc_peak) cc_peak = bat_curr;
+
+    int enter_cond = near_cv && cc_peak > 0
+                     && bat_curr < cc_peak * CV_ENTER_PCT / 100;
+    if (enter_cond) {
+        if (++cv_enter_cnt >= CV_ENTER_CNT) { cv_enter_cnt = 0; return 3; }
+    } else {
+        cv_enter_cnt = 0;
+    }
     return 2;
 }
 
