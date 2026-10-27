@@ -102,6 +102,18 @@ static int scene = 0;
 static int lang = 0;
 static int theme = 0;
 static time_t session_30s = 0;
+
+/* ═══ v1.19.0: 充电预估学习（方案 B）═══ */
+#define CP_FILE        "/data/adb/battery-manager/charge_profile.json"
+#define CP_MIN_SESSION_MIN  5      /* 会话最短时长（分钟）才入库 */
+#define CP_MAX_SEGS         10     /* 电量桶 0-10,10-20,...,90-100 */
+#define CP_MIN_SAMPLES      3      /* 低于此样本数标记「数据不足」 */
+
+/* 会话内按 10% 区间累计耗时 */
+typedef struct { long start_t; int start_soc; long last_t; int last_soc;
+                 long dur_sec[CP_MAX_SEGS]; int nseg; } charge_sess_t;
+static charge_sess_t cp_sess = {0};
+
 static int alerted_high = 0;
 static long stats_min = 0, stats_mah = 0;
 
@@ -265,6 +277,7 @@ static int bat_capacity = -1, bat_temp = -1, bat_volt = -1, bat_curr = -1;
 
 /* 充电阶段：0=未充 1=预充 2=恒流CC 3=恒压CV 4=充满 */
 static int chg_stage = 0;
+static void cp_finalize(void);  /* v1.19.0: 充电预估学习结算 */
 void reset_charge_session(void);   /* v1.18.0: 拨插/充满时重置 CC/CV 峰值统计 */
 static int prev_curr = 0;           /* 上一次电流，用于判断 CC/CV 拐点 */
 static int cc_peak = 0;             /* 本轮充电的电流峰值（CV 判据基准 + 迟滞） */
@@ -2034,8 +2047,25 @@ static void handle_charging_state(void) {
         /* v1.3.1: 记录硬件累计电荷起点(uAh) */
         sess_start_counter = read_int(SYSFS "/charge_counter");
         if (sess_start_counter < 0) sess_start_counter = -1;
+        /* v1.19.0: 充电预估学习 —— 记录会话起点 */
+        cp_sess.start_t = time(NULL); cp_sess.start_soc = bat_capacity;
+        cp_sess.last_t  = time(NULL); cp_sess.last_soc  = bat_capacity;
+        memset(cp_sess.dur_sec, 0, sizeof(cp_sess.dur_sec));
+        cp_sess.nseg = 0;
     } else if (charging) {
         sess_min = (int)((time(NULL) - sess_start) / 60);
+        /* v1.19.0: 每跨一个 10% 边界，记录该区间耗时 */
+        if (bat_capacity >= 0 && cp_sess.last_soc >= 0) {
+            int b_prev = cp_sess.last_soc / 10;
+            int b_now  = bat_capacity / 10;
+            if (b_now > b_prev && b_now <= CP_MAX_SEGS) {
+                long dur = (long)(time(NULL) - cp_sess.last_t);
+                cp_sess.dur_sec[b_prev] += dur;
+                cp_sess.last_t  = time(NULL);
+                cp_sess.last_soc = bat_capacity;
+                if (b_prev < CP_MAX_SEGS) cp_sess.nseg = b_prev + 1;
+            }
+        }
     }
     if (!charging && sess_active) {
         sess_active = 0;
@@ -2044,6 +2074,8 @@ static void handle_charging_state(void) {
             save_stats();
         }
         sess_start_counter = -1;
+        /* v1.19.0: 会话结束 → 结算入库 */
+        cp_finalize();
     }
     /* v1.3.1: 优先用硬件 charge_counter 差值(精确)，回退到容量估算 */
     if (sess_active) {
@@ -2057,6 +2089,233 @@ static void handle_charging_state(void) {
         }
         if (sess_mah < 0) sess_mah = 0;
     }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   v1.19.0: 充电预估学习 —— 会话结算 + 持久化
+   ═══════════════════════════════════════════════════════════ */
+
+/* 从 charge_profile.json 读（若无则初始化空库） */
+static void cp_load(void);
+
+/* 把会话结果写入 charge_profile.json */
+static void cp_finalize(void) {
+    if (cp_sess.start_t <= 0) return;
+    long dur_min = (long)((time(NULL) - cp_sess.start_t) / 60);
+    if (dur_min < CP_MIN_SESSION_MIN || cp_sess.nseg < 1) {
+        cp_sess.start_t = 0;
+        return;
+    }
+    /* 读旧库 */
+    long  ver = 1, samples = 0;
+    double sum_min[CP_MAX_SEGS]; long nseg[CP_MAX_SEGS];
+    double med_min[CP_MAX_SEGS];
+    double vmin[CP_MAX_SEGS], vmax[CP_MAX_SEGS];
+    for (int i = 0; i < CP_MAX_SEGS; i++) {
+        sum_min[i] = 0; nseg[i] = 0; med_min[i] = 0; vmin[i] = 0; vmax[i] = 0;
+    }
+    FILE *f = fopen(CP_FILE, "r");
+    if (f) {
+        char buf[4096];
+        size_t rd = fread(buf, 1, sizeof(buf)-1, f);
+        fclose(f);
+        buf[rd] = 0;
+        char *p = strstr(buf, "\"samples\":");
+        if (p) samples = atol(p + 10);
+        for (int i = 0; i < CP_MAX_SEGS; i++) {
+            char key[16];
+            snprintf(key, sizeof(key), "\"%d-%d\"", i*10, i*10+10);
+            p = strstr(buf, key);
+            if (p) {
+                char *s2 = strchr(p, '{');
+                if (s2) {
+                    double mn=0, sx=0; long n=0;
+                    if (sscanf(s2, "{\"n\":%ld,\"sum_min\":%lf,\"median_min\":%lf,\"min\":%lf,\"max\":%lf}",
+                               &n, &sx, &mn, &vmin[i], &vmax[i]) == 5) {
+                        nseg[i] = n; sum_min[i] = sx; med_min[i] = mn;
+                    }
+                }
+            }
+        }
+    }
+    /* 本次会话的各区段耗时并入 */
+    for (int i = 0; i < CP_MAX_SEGS && i < cp_sess.nseg; i++) {
+        double dm = cp_sess.dur_sec[i] / 60.0;   /* 秒 → 分钟 */
+        if (dm <= 0) continue;
+        nseg[i]++;
+        sum_min[i] += (double)dm;
+        if (med_min[i] <= 0) med_min[i] = dm;
+        else med_min[i] = (med_min[i] * (nseg[i]-1) + dm) / nseg[i];
+        if (vmin[i] <= 0 || dm < vmin[i]) vmin[i] = dm;
+        if (dm > vmax[i]) vmax[i] = dm;
+    }
+    samples++;
+    /* 电压曲线：取该区间的典型电压（最近一次的电压值） */
+    double volt[CP_MAX_SEGS];
+    for (int i = 0; i < CP_MAX_SEGS; i++) {
+        volt[i] = (i < cp_sess.nseg && cp_sess.dur_sec[i] > 0) ? bat_volt : 0;
+    }
+
+    /* 写回（原子：tmp → rename） */
+    FILE *w = fopen(CP_FILE ".tmp", "w");
+    if (!w) { cp_sess.start_t = 0; return; }
+    fprintf(w, "{\"version\":1,\"updated\":%ld,\"samples\":%ld,\"segments\":{",
+            (long)time(NULL), samples);
+    int first_seg = 1;
+    for (int i = 0; i < CP_MAX_SEGS; i++) {
+        if (nseg[i] <= 0) continue;
+        if (!first_seg) fprintf(w, ",");
+        first_seg = 0;
+        fprintf(w, "\"%d-%d\":{\"n\":%ld,\"sum_min\":%.1f,\"median_min\":%.1f,\"min\":%.1f,\"max\":%.1f}",
+                i*10, i*10+10, nseg[i], sum_min[i], med_min[i], vmin[i], vmax[i]);
+    }
+    fprintf(w, "},\"volt_curve\":{");
+    int first = 1;
+    for (int i = 0; i < CP_MAX_SEGS; i++) {
+        if (nseg[i] <= 0 || volt[i] <= 0) continue;
+        if (!first) fprintf(w, ",");
+        fprintf(w, "\"%d\":%d", i*10, (int)volt[i]);
+        first = 0;
+    }
+    fprintf(w, "}}\n");
+    fclose(w);
+    rename(CP_FILE ".tmp", CP_FILE);
+    cp_sess.start_t = 0;
+    char msg[64];
+    snprintf(msg, sizeof(msg), "充电学习入库: %ld 秒 / %d 段",
+             (long)(time(NULL) - cp_sess.start_t), cp_sess.nseg);
+    log_event(msg);
+}
+
+/* 占位：cp_load 由预估接口读取，当前无需主动加载 */
+static void cp_load(void) { }
+
+/* 预估 JSON：GET /api/charge_profile */
+static void handle_charge_profile(int fd) {
+    FILE *f = fopen(CP_FILE, "r");
+    if (!f) { send_resp(fd, 404, "application/json", "{\"ok\":false,\"err\":\"no data\"}"); return; }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f); fseek(f, 0, SEEK_SET);
+    if (sz <= 0 || sz > 8192) { fclose(f); send_resp(fd, 500, "application/json", "{\"ok\":false}"); return; }
+    char *buf = malloc(sz + 1);
+    if (!buf) { fclose(f); send_resp(fd, 500, "text/plain", "oom"); return; }
+    size_t rd = fread(buf, 1, sz, f); fclose(f);
+    buf[rd] = 0;
+    send_resp(fd, 200, "application/json", buf);
+    free(buf);
+}
+
+/* 预估计算：GET /api/eta?to=80
+   返回：{"ok":true,"to":80,"from":65,"eta_min":23,"eta_txt":"23分","scale":1.12,"confidence":"high"}
+   confidence: high(样本≥5) / medium(≥3) / low(<3，回退线性) */
+static void handle_eta(int fd, const char *qs) {
+    int to = 100;
+    if (qs) {
+        const char *p = strstr(qs, "to=");
+        if (p) to = atoi(p + 3);
+        if (to < 20 || to > 100) to = 100;
+    }
+    int from = bat_capacity;
+    if (from < 0 || from >= to) {
+        send_resp(fd, 200, "application/json",
+            "{\"ok\":false,\"err\":\"already at or above target\"}");
+        return;
+    }
+    /* 读 charge_profile */
+    FILE *f = fopen(CP_FILE, "r");
+    if (!f) {
+        /* 无历史数据：回退线性外推 */
+        if (power_mw > 0 && charge_full_mah > 0) {
+            int remain = ((to - from) * charge_full_mah) / 100;
+            int cmA = power_mw * 1000 / (bat_volt > 0 ? bat_volt : 4000);
+            if (cmA > 0) {
+                int eta = (remain * 60) / cmA;
+                char resp[256];
+                snprintf(resp, sizeof(resp),
+                    "{\"ok\":true,\"to\":%d,\"from\":%d,\"eta_min\":%d,\"confidence\":\"none\",\"note\":\"no history, linear fallback\"}",
+                    to, from, eta);
+                send_resp(fd, 200, "application/json", resp);
+                return;
+            }
+        }
+        send_resp(fd, 404, "application/json",
+            "{\"ok\":false,\"err\":\"no history data and no power reading\"}");
+        return;
+    }
+    char buf[8192];
+    size_t rd = fread(buf, 1, sizeof(buf)-1, f);
+    fclose(f); buf[rd] = 0;
+
+    /* 解析各段中位数 */
+    double med[CP_MAX_SEGS]; long nn[CP_MAX_SEGS];
+    long samples = 0;
+    for (int i = 0; i < CP_MAX_SEGS; i++) { med[i] = 0; nn[i] = 0; }
+    char *p = strstr(buf, "\"samples\":");
+    if (p) samples = atol(p + 10);
+    for (int i = 0; i < CP_MAX_SEGS; i++) {
+        char key[16];
+        snprintf(key, sizeof(key), "\"%d-%d\"", i*10, i*10+10);
+        p = strstr(buf, key);
+        if (p) {
+            char *s2 = strchr(p, '{');
+            if (s2) {
+                double sx=0, mn=0; long n=0;
+                sscanf(s2, "{\"n\":%ld,\"sum_min\":%lf,\"median_min\":%lf", &n, &sx, &mn);
+                nn[i] = n; med[i] = mn;
+            }
+        }
+    }
+
+    /* 计算总预估：从 from 到 to 逐段累加 */
+    double eta_min = 0;   /* 累加各段中位数（单位=分钟） */
+    int cnt_ok = 0;
+    for (int i = from / 10; i < to / 10 && i < CP_MAX_SEGS; i++) {
+        if (nn[i] > 0 && med[i] > 0) { eta_min += med[i]; cnt_ok++; }
+    }
+    /* 部分段缺失：用相邻段插值 */
+    if (cnt_ok < (to/10 - from/10)) {
+        for (int i = from / 10; i < to / 10 && i < CP_MAX_SEGS; i++) {
+            if (nn[i] == 0 || med[i] <= 0) {
+                /* 找最近的有数据的段 */
+                for (int d = 1; d < CP_MAX_SEGS; d++) {
+                    if (i+d < CP_MAX_SEGS && med[i+d] > 0) { eta_min += med[i+d]; break; }
+                    if (i-d >= 0 && med[i-d] > 0) { eta_min += med[i-d]; break; }
+                }
+            }
+        }
+    }
+
+    /* 速率修正：当前会话已走过的段，实测速率 vs 历史（均为秒） */
+    double scale = 1.0;
+    if (cp_sess.start_t > 0 && cp_sess.nseg > 0) {
+        double hist = 0, real = 0;
+        for (int i = cp_sess.start_soc/10; i < cp_sess.last_soc/10 && i < CP_MAX_SEGS; i++) {
+            if (med[i] > 0 && cp_sess.dur_sec[i] > 0) {
+                hist += med[i];                              /* 历史（分钟） */
+                real += cp_sess.dur_sec[i] / 60.0;            /* 实测（分钟） */
+            }
+        }
+        if (hist > 0.5 && real > 0.5) {
+            double r = hist / real;   /* <1 = 当前比历史快 */
+            scale = r > 2.0 ? 2.0 : (r < 0.5 ? 0.5 : r);  /* 夹在 0.5~2 倍 */
+        }
+    }
+    eta_min = eta_min * scale;   /* med 已是分钟，仅做速率修正 */
+
+    const char *conf = "high";
+    if (samples < 3) conf = "low";
+    else if (samples < 5) conf = "medium";
+
+    int eta_i = (int)(eta_min + 0.5);
+    char txt[32];
+    if (eta_i >= 60) snprintf(txt, sizeof(txt), "%d小时%d分", eta_i/60, eta_i%60);
+    else snprintf(txt, sizeof(txt), "%d分", eta_i);
+
+    char resp[512];
+    snprintf(resp, sizeof(resp),
+        "{\"ok\":true,\"to\":%d,\"from\":%d,\"eta_min\":%d,\"eta_txt\":\"%s\",\"scale\":%.2f,\"confidence\":\"%s\",\"samples\":%ld}",
+        to, from, eta_i, txt, scale, conf, samples);
+    send_resp(fd, 200, "application/json", resp);
 }
 
 static int in_night_window(void) {
@@ -3680,6 +3939,12 @@ static void handle_client(int fd) {
         } else {
             send_resp(fd, 400, "application/json", "{\"ok\":false,\"err\":\"missing id\"}");
         }
+        return;
+    }
+    if (!strcmp(uri, "/api/charge_profile")) { handle_charge_profile(fd); return; }
+    if (!strncmp(uri, "/api/eta?", 9) && !strcmp(method, "GET")) {
+        char *p = strstr(uri, "?");
+        handle_eta(fd, p ? p + 1 : NULL);
         return;
     }
     if (!strcmp(uri, "/api/history")) { char *j = history_json(); send_resp(fd, 200, "application/json", j); free(j); return; }
