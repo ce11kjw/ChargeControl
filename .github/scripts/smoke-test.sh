@@ -78,11 +78,37 @@ print(f'  慢客户端占用时正常请求 {t:.3f}s ✅')
 "
 
 echo "── 全部端点 ──"
-for ep in /api/status /api/curve /api/sessions /api/calibrate /api/log; do
+for ep in /api/status /api/curve /api/sessions /api/calibrate /api/log /api/events; do
   CODE=$(curl -sS -m 5 -o /dev/null -w "%{http_code}" "http://127.0.0.1:8800$ep")
-  printf "  %-16s → %s\n" "$ep" "$CODE"
+  printf "  %-20s → %s\n" "$ep" "$CODE"
   [ "$CODE" = "200" ] || { echo "::error::$ep 返回 $CODE"; exit 1; }
 done
+
+# ── v1.19.0 新增：charge_profile / eta（无历史数据时返回 404，是正确行为）──
+echo "── v1.19.0 新端点 ──"
+for ep in /api/charge_profile /api/eta?to=80; do
+  CODE=$(curl -sS -m 5 -o /dev/null -w "%{http_code}" "http://127.0.0.1:8800$ep")
+  printf "  %-20s → %s (允许 200/404)\n" "$ep" "$CODE"
+  case "$CODE" in 200|404) ;; *) echo "::error::$ep 返回 $CODE"; exit 1 ;; esac
+done
+
+# ── v1.17.0 新增：suspend 7 字段 + events 结构校验 ──
+echo "── v1.17.0 suspend 字段 ──"
+python3 - <<'PYEOF'
+import json, urllib.request, sys
+d = json.load(urllib.request.urlopen("http://127.0.0.1:8800/api/status", timeout=5))
+need = ["suspend_active","suspend_reason","suspend_since","suspend_recover_in",
+        "rec_temp_hyst","rec_temp_hold","rec_soc_hyst"]
+miss = [k for k in need if k not in d]
+if miss:
+    print(f"  ::error::缺字段 {miss}"); sys.exit(1)
+print(f"  ✅ 7 个 suspend 字段齐全 (reason={d['suspend_reason']})")
+# 事件接口结构
+e = json.load(urllib.request.urlopen("http://127.0.0.1:8800/api/events", timeout=5))
+if "events" not in e or "count" not in e:
+    print("  ::error::/api/events 结构不对"); sys.exit(1)
+print(f"  ✅ /api/events 结构正确 (count={e['count']})")
+PYEOF
 
 echo "── 内存 / fd 稳定性（30 秒）──"
 A=$(awk '/VmRSS/{print $2}' /proc/$PID/status)
