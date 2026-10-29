@@ -1,5 +1,50 @@
 # Changelog
 
+## v1.19.2 (2026-10-29)
+
+### 🎨 WebUI 四项 UI 优化（砍 App 后补齐体验）
+
+#### 1️⃣ 卡片拖拽排序（对齐 App 的 sh.calvin.reorderable）
+App 用的是 Compose 专用库，无法直接搬到 WebUI。改用 **pointer events 自己实现**
+（移动端 HTML5 drag&drop 的 touch 支持极差，dragstart 根本不触发）。
+
+- **长按 400ms** 才进入拖拽（防误触，滚动页面不会误拖）
+- 拖拽中：卡片浮起 `scale(1.03) rotate(1deg)` + 紫色描边 + 阴影
+- 拖动经过其他卡片时**实时换位**（DOM 重排，实时反馈）
+- 松手存 `localStorage.cc_card_order`，刷新后保持
+- 「调整布局」按钮切换编辑态，编辑态才显示 ⠿ 手柄
+- 触屏 + 鼠标统一用 pointer events
+
+#### 2️⃣ 仪表盘折叠详情（41 字段不再平铺）
+「充电详情」+「系统信息」两个 panel 改成点击标题展开/收起，默认收起。
+- 标题右侧显示 `展开 ▾ / 收起 ▴`
+- 状态存 `localStorage.cc_fold`
+- 首屏可视字段从 41 项减到 **19 项**
+
+#### 3️⃣ 统计页拆二级 tab（6 panel → 3+3）
+```
+[曲线] 充电统计 + 温度分析 + 充电曲线
+[事件] 停充状态卡 + 异常事件 + 电池校准
+```
+- 顶部胶囊式切换器，选中态紫色高亮 + 阴影
+- 「事件」tab 带**红点角标**显示事件数
+- 停充卡用 `s.suspend_active && subTab==='events'` 双重条件
+
+#### 4️⃣ 设置页滑块大字档位
+4 个滑动条的当前值改为 **22px 加粗紫色** + `tabular-nums`（数字等宽，
+拖动时不抖动）。原来是 13px 普通字重，拖的时候看不清。
+
+### 验证（puppeteer 实测）
+```
+拖拽:   4 个卡片 + 调整布局按钮  ✅
+折叠:   toggleFold false→true     ✅
+二级tab: 2 个 tab，curve 显示 3 panel，events 显示 2 panel ✅
+大字档位: 4 处，22px              ✅
+JS 错误: 0                        ✅
+div/template/script: 185/185, 2/2, 5/5  ✅
+```
+
+
 ## v1.19.1 (2026-10-29)
 
 ### 🎯 战略转型：砍 App，WebUI 改 PWA
