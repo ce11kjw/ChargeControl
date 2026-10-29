@@ -1,5 +1,44 @@
 # Changelog
 
+## v1.19.5 (2026-10-29)
+
+### 📦 包体瘦身：13MB → 约 1MB（去掉 App APK）
+
+用户反馈：「是不是又把 app 打包在一起了，14mb 的包」
+
+**实测包内构成**：
+| 文件 | 大小 | 占比 |
+|---|---|---|
+| **ChargeControl.apk** | **14,459,363 B** | **94%** |
+| bin/battd | 796,024 B | 5% |
+| webroot/index.html | 75,992 B | 0.5% |
+| 其他（脚本+图标+js） | ~50,000 B | 0.3% |
+
+**真模块本体只有约 930KB，APK 占了 14.4MB。**
+
+而 App 里 42%（4612 行）是 HDR 夜光 + 视觉特效 + 悬浮窗 —— 用户已明确不要。
+WebUI 也早已改 PWA 可替代。
+
+### 改动
+**build-module.yml**：
+- 删掉 `Set up JDK 17` / `Set up Android SDK` / `Gradle cache` / `Build App APK`（33 行）
+- `Build module zip` 不再 `cp APK`，改为 `rm -f module/ChargeControl.apk`
+- `Verify` 增加：确认**不含 APK**、**包体 < 2MB**（防止回归）
+- `Create Release` 只上传 zip + sha256
+
+`build` job 从 14 步 → 9 步，CI 也快了（不用跑 Gradle）。
+
+**App 仍然可用**：`build-app.yml` 独立构建，需要 App 的从那里下载。
+`customize.sh` 找不到 APK 时打印「zip 内未找到 APK，跳过」，不报错。
+
+### 预期结果
+| | 旧包 | 新包 |
+|---|---|---|
+| 大小 | 12.99 MB | **约 1 MB** |
+| 下载耗时（10Mbps） | ~10s | **~1s** |
+| 热更新耗时 | 长 | 短 |
+
+
 ## v1.19.4 (2026-10-29)
 
 ### 🎯 真正的热更新（参考 FileManager 的实现方式）
