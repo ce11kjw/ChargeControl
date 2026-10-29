@@ -3868,7 +3868,12 @@ static int serve_file(int fd, const char *uri) {
        原实现用 uri 判断 —— 访问 "/" 时 uri 没有 .html 后缀，
        会返回 text/plain，浏览器把整页渲染成源码。 */
     const char *ct = "text/plain";
-    if (strstr(path, ".html")) ct = "text/html; charset=utf-8";
+    /* ★ v1.19.1: PWA manifest 必须用 application/manifest+json，否则 Chrome 拒载。
+       ⚠️ 必须排在 .js / .json 之前 —— "manifest.json" 含 ".js" 会被抢先匹配成
+       application/javascript（实测踩过）。 */
+    if (strstr(path, "manifest.json") || strstr(path, "manifest.webmanifest"))
+        ct = "application/manifest+json; charset=utf-8";
+    else if (strstr(path, ".html")) ct = "text/html; charset=utf-8";
     else if (strstr(path, ".css")) ct = "text/css; charset=utf-8";
     else if (strstr(path, ".js")) ct = "application/javascript; charset=utf-8";
     else if (strstr(path, ".svg")) ct = "image/svg+xml";

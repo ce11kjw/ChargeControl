@@ -1,5 +1,66 @@
 # Changelog
 
+## v1.19.1 (2026-10-29)
+
+### 🎯 战略转型：砍 App，WebUI 改 PWA
+
+用户决策：
+- **HDR 夜光不要了**（App 独有 2807 行）
+- **悬浮窗不要了**（App 独有 451 行）
+- **WebUI 改造成 PWA**（可加到主屏幕，看起来像 App）
+
+背景：App 共 11099 行，其中 42%（4612 行）是 HDR 夜光 + 视觉特效 + 悬浮窗，
+跟电池监控无关。而模块 WebUI 的 17 个 panel 已覆盖 App 的全部功能，
+还多了手动充满/手动暂停/高级控制/电池校准。⇒ 维护两套不划算。
+
+### ✨ PWA 支持
+新增文件：
+- `manifest.json` —— name/display=standalone/icons/shortcuts
+- `sw.js` —— Service Worker（Cache First 静态 + Network Only API）
+- `icon-192.png` / `icon-512.png` / `icon-maskable-512.png` —— 纯 Python 生成，零依赖
+
+index.html 新增：
+- `<link rel="manifest">` + `theme-color`（深/浅两套）
+- `apple-mobile-web-app-*`（iOS 全屏）
+- `apple-touch-icon` + `icon` 多尺寸
+- Service Worker 注册（失败静默，不影响功能）
+- 支持 `manifest.shortcuts` 的 `?tab=stats` 直达
+
+**缓存策略**：
+| 类型 | 策略 |
+|---|---|
+| `/api/*` | **Network Only**（绝不缓存，否则看到过期数据） |
+| 同源静态 | Cache First + 后台静默更新 |
+| 跨域 CDN | Cache First |
+
+### 🔴 修复：service.sh 导致模块升级后 battd 不更新（严重）
+```sh
+# 原实现
+if [ ! -x "$DIR/battd" ]; then cp ... fi
+```
+只在「文件不存在」时复制。升级模块后 `$DIR/battd` 已存在（旧版），
+**永远不会被替换** ⇒ 用户装了新模块，实际跑的仍是旧二进制。
+
+实测踩过：模块 `bin/battd` = 796024 字节(10-28)，
+数据目录还是 730424 字节(10-17)，进程跑旧的，所有新功能都不生效。
+
+修复：改用 **sha256 对比**，不一致就同步（幂等）。webroot 同样逐文件对比。
+
+### 🔴 修复：manifest.json 被误判成 application/javascript
+`strstr(path, ".js")` 会匹配 `manifest.json` 里的 `.js`。
+⇒ 把 manifest 判断提到 `.js`/`.json` 之前，返回 `application/manifest+json`。
+（Chrome 严格要求此 MIME，否则拒绝加载 manifest）
+
+### 验证
+```
+/manifest.json   → application/manifest+json  ✅
+/sw.js           → application/javascript      ✅
+/icon-192.png    → image/png                   ✅
+/                → text/html                   ✅
+浏览器：manifest 解析 OK / SW activated / themeColor #8B5CF6
+```
+
+
 ## v1.19.0 (2026-10-28)
 
 ### 🎯 充电预估学习（方案 B）+ 高级温度分析

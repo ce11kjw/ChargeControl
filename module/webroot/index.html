@@ -2,8 +2,23 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>电池管家</title>
+
+<!-- ═══ PWA（v1.19.1：砍 App 后 WebUI 取代它）═══ -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#8B5CF6">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#7C3AED">
+<!-- iOS：添加到主屏幕后全屏 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="电池管家">
+<link rel="apple-touch-icon" href="icon-192.png">
+<!-- 华为/小米等国产浏览器 -->
+<meta name="applicable-device" content="mobile">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="TempCurveView.js"></script>
@@ -485,7 +500,7 @@ function app() {
     API_BASE: 'http://127.0.0.1:8800',
     i18n: {zh: {night:'<i class="fa-regular fa-moon" style="margin-right:6px"></i>夜间模式', scene:'<i class="fa-solid fa-gamepad" style="margin-right:6px"></i>快捷场景', webhook:'<i class="fa-solid fa-bell" style="margin-right:6px"></i>WebHook', lang:'<i class="fa-solid fa-language" style="margin-right:6px"></i>语言', theme:'<i class="fa-solid fa-palette" style="margin-right:6px"></i>主题', scene_gaming:'<i class="fa-solid fa-gamepad" style="margin-right:4px"></i>游戏 (70%)', scene_sleep:'<i class="fa-regular fa-moon" style="margin-right:4px"></i>睡眠 (夜间模式)', scene_trip:'<i class="fa-solid fa-plane" style="margin-right:4px"></i>出差 (停充)', scene_custom:'<i class="fa-solid fa-gear" style="margin-right:4px"></i>自定义', webhook_hint:'WebHook URL (温度>50°C 触发)', alert_high:'<i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>高温告警中'}, en: {night:'<i class="fa-regular fa-moon" style="margin-right:6px"></i>Night Mode', scene:'<i class="fa-solid fa-gamepad" style="margin-right:6px"></i>Scenes', webhook:'<i class="fa-solid fa-bell" style="margin-right:6px"></i>WebHook', lang:'<i class="fa-solid fa-language" style="margin-right:6px"></i>Language', theme:'<i class="fa-solid fa-palette" style="margin-right:6px"></i>Theme', scene_gaming:'<i class="fa-solid fa-gamepad" style="margin-right:4px"></i>Gaming (70%)', scene_sleep:'<i class="fa-regular fa-moon" style="margin-right:4px"></i>Sleep (Night)', scene_trip:'<i class="fa-solid fa-plane" style="margin-right:4px"></i>Trip (Pause)', scene_custom:'<i class="fa-solid fa-gear" style="margin-right:4px"></i>Custom', webhook_hint:'WebHook URL (triggered temp>50°C)', alert_high:'<i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>High Temp Alert'}},
     t(k) { return (this.i18n[this.s.lang?'en':'zh']||{})[k] || k; },
-    tab: 'dash', 
+    tab: (window.__initialTab || 'dash'),   /* v1.19.1: 支持 manifest.shortcuts 的 ?tab= 直达 */
     webhookUrl: '', whLoaded: false,
     s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, est_full_txt:'', health_degrade:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', suspend_active:false, suspend_reason:'none', suspend_since:0, suspend_recover_in:-1, rec_temp_hyst:5, rec_temp_hold:60, rec_soc_hyst:5, full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, bypass_hw:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, lang:0, theme:0, webhookUrl:'', mem_total:0, mem_avail:0, mem_free:0, storage_total:0, storage_free:0, uptime_secs:0, cpu_cores:0, kernel_ver:'', cpu_model:'', device_model:'', wifi_rssi:-128, wifi_on:0, mobile_on:0, ip_addr:'', bat_technology:'', bat_capacity_level:'', bat_health:'', charge_type:-1, time_to_full:-1, charge_counter:-1, input_current_limit:-1, bat_manufacturer:'', bat_model_name:'', voltage_ocv:-1, current_avg:-1, temp_ambient:-1, constant_charge_current:-1, constant_charge_voltage:-1, capacity_error_margin:-1, time_to_empty:-1, bat_present:-1, internal_resistance:-1, charge_now:-1, charge_term_current:-1, constant_charge_current_max:-1, constant_charge_voltage_max:-1, temp_max:-1, temp_min:-1, charger_temp:-1, charge_done:-1, input_voltage_settled:-1, safety_timer_expired:-1, calibrate:-1, pd_pdo_count:0, pd_pdo_max_mv:0, pd_pdo_max_ma:0, pd_svid:'', pd_state:'', cc_limit_supported:0, cc_limit_val:-1, power_path_en:-1, jeita_index:-1, soh_native:-1, soh_first:-1, soh_delta_x10:0, design_mah:0, chg_temp_limit:60, x_pp:0, x_pp_ok:0, x_cv:0, x_cv_mv:0, x_cv_ok:0, x_lc:0, x_lc_ma:0, x_nn:0, x_nn_ok:0, x_bmin:50, native_night:0, cl_tail:'' },
     logContent: '', lastUpdate: '', updateMsg: '', latestVer: '', timer: null, chart: null, fullTimer: null, loaded: false,
@@ -866,6 +881,39 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
     }
   };
 }
+</script>
+
+<script>
+/* ═══ v1.19.1 PWA：注册 Service Worker ═══
+   只在 localhost / 127.0.0.1 / HTTPS 下注册（浏览器硬性要求）。
+   内核管理器 WebView 可能不支持，失败了静默忽略，不影响功能。 */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js', { scope: './' })
+      .then(reg => {
+        console.log('[PWA] SW registered, scope:', reg.scope);
+        // 有新版本时提示
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener('statechange', () => {
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+              console.log('[PWA] 新版本已就绪，下次打开生效');
+            }
+          });
+        });
+      })
+      .catch(err => console.warn('[PWA] SW 注册失败（不影响使用）:', err.message));
+  });
+}
+
+/* 支持 manifest.shortcuts 的 ?tab= 直达 */
+(function(){
+  const p = new URLSearchParams(location.search).get('tab');
+  if (p && ['dash','set','log','stats','detail'].includes(p)) {
+    window.__initialTab = p;
+  }
+})();
 </script>
 </body>
 </html>

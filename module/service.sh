@@ -18,13 +18,45 @@ done
 
 mkdir -p "$DIR"
 
-# 首次安装：铺运行目录
-if [ ! -x "$DIR/battd" ]; then
-  cp "$MODDIR/bin/battd" "$DIR/battd" 2>/dev/null
-  chmod 755 "$DIR/battd" 2>/dev/null
-  cp "$MODDIR/batt.conf" "$DIR/batt.conf" 2>/dev/null
+# ★ v1.19.1 修复：按 sha256 同步，而不是「文件不存在才复制」
+#
+# 原实现 `if [ ! -x "$DIR/battd" ]` 只在首次安装时复制。
+# 模块升级后 $DIR/battd 已存在（旧版），永远不替换 →
+# 用户装了新模块，实际跑的仍是旧二进制。
+# 实测踩过：模块 bin/battd 是 796024 字节(10-28)，
+# 数据目录还是 730424 字节(10-17)，进程跑旧的。
+#
+# 现在：每次都对比 sha256，不一致就覆盖（幂等，不会无谓拷贝）。
+_sha() { [ -f "$1" ] && sha256sum "$1" 2>/dev/null | cut -d' ' -f1 || echo ""; }
+
+SRC_BIN="$MODDIR/bin/battd"
+DST_BIN="$DIR/battd"
+if [ -f "$SRC_BIN" ]; then
+  S1=$(_sha "$SRC_BIN")
+  S2=$(_sha "$DST_BIN")
+  if [ "$S1" != "$S2" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') 同步 battd: ${S2:-无} → $S1" >> "$DIR/battd.stdout"
+    cp -f "$SRC_BIN" "$DST_BIN" 2>/dev/null
+    chmod 755 "$DST_BIN" 2>/dev/null
+  fi
+fi
+
+# batt.conf：只在目标不存在时复制（保留用户配置）
+[ -f "$DIR/batt.conf" ] || cp "$MODDIR/batt.conf" "$DIR/batt.conf" 2>/dev/null
+
+# webroot：逐个文件对比，避免旧版残留
+if [ -d "$MODDIR/webroot" ]; then
   mkdir -p "$DIR/webroot"
-  cp -r "$MODDIR/webroot/." "$DIR/webroot/" 2>/dev/null
+  for f in "$MODDIR"/webroot/*; do
+    [ -f "$f" ] || continue
+    b=$(basename "$f")
+    a=$(_sha "$f")
+    c=$(_sha "$DIR/webroot/$b")
+    if [ "$a" != "$c" ]; then
+      cp -f "$f" "$DIR/webroot/$b" 2>/dev/null
+      echo "$(date '+%Y-%m-%d %H:%M:%S') 同步 webroot/$b" >> "$DIR/battd.stdout"
+    fi
+  done
 fi
 
 # 每次开机都同步最新脚本

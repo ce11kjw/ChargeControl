@@ -1,0 +1,23 @@
+{
+  "name": "电池管家 ChargeControl",
+  "short_name": "电池管家",
+  "description": "电池监控与充电控制 · ChargeControl WebUI",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#080B14",
+  "theme_color": "#8B5CF6",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "categories": ["utilities", "productivity"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "充电曲线", "url": "./?tab=stats", "description": "查看温度与充电曲线" },
+    { "name": "充电控制", "url": "./?tab=set", "description": "调整充电上限" }
+  ]
+}
