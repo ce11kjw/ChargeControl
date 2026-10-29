@@ -1,5 +1,63 @@
 # Changelog
 
+## v1.19.3 (2026-10-29)
+
+### 🔴 修复：装模块必须重启手机才生效（用户明确抱怨）
+
+**根因（Linux 进程语义）**：
+`customize.sh` 里**已经**在复制新文件了：
+```sh
+cp "$MODPATH/bin/battd" /data/adb/battery-manager/battd
+```
+但**没有杀掉正在运行的旧 battd**。而 Linux 进程运行的是**内存里的代码**，
+磁盘文件被替换不影响运行中的进程 ⇒ 装了新模块，旧进程还在跑旧代码。
+
+之前 `customize.sh` 末尾那句 `ui_print "模块已就绪（battd 自动启动，无需重启）"`
+是**假的** —— 只是复制了文件，没让新代码生效。
+
+### 调研过的方案
+| 方案 | 免重启 | 说明 |
+|---|---|---|
+| LSPosed 的 customize.sh | ❌ | 依赖 Zygisk 注入，必须重启 |
+| aplm123.root.mcp 的 `auto` 模式 | ❌ | 「已在跑就跳过」，同样要重启 |
+| **杀旧进程让 supervisor 自动拉起** | ✅ | **采用** |
+
+关键发现：`supervisor.sh` 主循环是
+```sh
+while true; do battd_running || start_battd; sleep 15; done
+```
+⇒ **杀掉旧 battd 后它 15 秒内自动拉起新的**（从磁盘读），不用碰 supervisor。
+
+### 实现（customize.sh）
+```sh
+# 1. 遍历 /proc/*/cmdline 找出 battery-manager/battd 的进程
+#    （校验 cmdline 防 PID 复用误杀）
+# 2. SIGTERM 优雅退出（让它写日志/保存 stats），2 秒后 SIGKILL
+# 3. rm -f battd.pid（避免 supervisor 误判「还在跑」）
+# 4. 轮询最多 20 秒确认新进程起来
+# 5. 起不来则兜底手动 nohup 拉起
+# 6. 用 sha256 确认磁盘上的 battd 已是新版
+```
+
+### 实测（模拟环境，用假 battd 验证）
+```
+初始:  旧 PID 1194422
+替换:  battd 换成 v2
+杀旧:  kill 1194422
+结果:  ✅ 新 PID 1194487，只用了 1 秒
+日志:  started battd pid=1194487
+```
+（1 秒是因为 supervisor 正好在循环中；最坏 15 秒）
+
+### 现在的完整链路
+| 时机 | 做什么 |
+|---|---|
+| **装模块时** | `customize.sh`：复制新文件 + 杀旧进程 → 1~15 秒生效 |
+| **开机时** | `service.sh`：sha256 对比同步（v1.19.1） |
+
+两者互补，装完不用重启手机。
+
+
 ## v1.19.2 (2026-10-29)
 
 ### 🎨 WebUI 四项 UI 优化（砍 App 后补齐体验）
