@@ -1,5 +1,80 @@
 # Changelog
 
+## v1.19.4 (2026-10-29)
+
+### 🎯 真正的热更新（参考 FileManager 的实现方式）
+
+用户提示：「/sdcard/下载/压缩包/FileManagerV7.3.1.zip 就是支持热更新的」
+
+#### 拆解 FileManager 的做法
+```
+customize.sh 末尾:
+  nohup sh "$MODPATH/update.sh" "$MODPATH" >/dev/null 2>&1 &
+  ui_print "等待安装完成，无需重启"
+
+update.sh:
+  PARENT_PID=$PPID
+  while [ -d "/proc/$PARENT_PID" ]; do sleep 0.5; done   # 等安装器退出
+  kill 旧进程 → rm -rf 旧目录 → cp -a $MODPATH → 启动新的
+```
+
+#### ⚠️ 实测发现 FileManager 的 $PPID 方案不可靠
+本机实测（三种启动方式都一样）：
+```
+nohup &        → PPID=1
+setsid &       → PPID=1
+nohup setsid & → PPID=1
+```
+`$PPID` 被 init 收养成 1，而 `/proc/1` 永远存在 ⇒ **死循环**。
+（FileManager 能用是因为它的 customize.sh 被 source，$PPID 恰是安装器；
+  不同管理器的 source 行为不同，不可依赖。）
+
+#### 改进：三重判据
+```sh
+# 1. 固定等待 3 秒（安装器通常立即结束）
+sleep 3
+# 2. 轮询安装器进程是否还在（最多 30s）
+#    匹配 --install-module / module install / apd install / pm install
+# 3. 文件稳定性：连续 2 次采样 size+mtime 的 md5 不变
+#    → 确认安装器不再写 $MODPATH
+```
+
+#### 完整流程（新增 module/update.sh）
+```
+① 管理器解压 zip 到 $MODPATH
+② 执行 customize.sh（节点探测 + APK 安装 + 设权限）
+③ customize.sh 末尾 nohup 拉起 update.sh（脱离安装器）
+④ 安装器退出 → 管理器显示"安装成功"
+⑤ update.sh 等文件稳定
+⑥ 停 supervisor → 停 battd
+⑦ 备份旧模块目录 → cp -a 新目录 → 原子重命名
+⑧ 同步运行目录（battd / webroot / supervisor.sh）
+⑨ 启动 supervisor → 验证新进程 → 失败则回滚
+```
+
+**对比 v1.19.3**：
+| | v1.19.3 | v1.19.4 |
+|---|---|---|
+| 做法 | customize.sh 里直接 cp + kill | 独立 update.sh 后台执行 |
+| 竞态 | ⚠️ 安装器还在写 $MODPATH | ✅ 等文件稳定后 |
+| 更新范围 | 只换 battd + webroot | ✅ **整个模块目录** |
+| 回滚 | ❌ 无 | ✅ 失败自动回滚 |
+| 日志 | ❌ 无 | ✅ hot-update.log |
+
+#### 实测（模拟完整安装流程）
+```
+旧: v1.0
+  ↓
+✅ 8s 后新进程起来 (PID 1523293 → 1525414)
+
+模块版本:    v2.0        ✅
+模块 webroot: v2 NEW     ✅
+运行 webroot: v2 NEW     ✅
+manifest:    新增文件也同步 ✅
+```
+日志：`等待安装器收尾 → 文件已稳定 → 停 supervisor → 停 battd → 备份 → 替换 → 同步 → 启动`
+
+
 ## v1.19.3 (2026-10-29)
 
 ### 🔴 修复：装模块必须重启手机才生效（用户明确抱怨）

@@ -64,123 +64,59 @@ while [ $Z -lt 82 ]; do
 done
 if [ $found -eq 0 ]; then ui_print "  [N] 未找到关键热区"; fi
 
-# 释放二进制
-mkdir -p /data/adb/battery-manager
-cp "$MODPATH/bin/battd" /data/adb/battery-manager/battd
-chmod 755 /data/adb/battery-manager/battd
-
-# 复制配置
-cp "$MODPATH/batt.conf" /data/adb/battery-manager/batt.conf
-
-# 复制 webui
+# 运行目录由 update.sh 负责同步（v1.19.4）
+# 这里只保证目录存在，避免后续 ui_print 检测节点时出错
 mkdir -p /data/adb/battery-manager/webroot
-cp -r "$MODPATH/webroot/." /data/adb/battery-manager/webroot/
 
-# 复制 supervisor（保证 battd 常驻）
-cp "$MODPATH/supervisor.sh" /data/adb/battery-manager/supervisor.sh 2>/dev/null
-chmod 755 /data/adb/battery-manager/supervisor.sh 2>/dev/null
+# 给 update.sh 设权限（必须可执行）
+[ -f "$MODPATH/update.sh" ] && chmod 755 "$MODPATH/update.sh" 2>/dev/null
+
 
 # ═══════════════════════════════════════════════════════════
-# ★ v1.19.3 免重启生效：杀掉旧 battd，让 supervisor 自动拉起新的
+# ★ v1.19.4 热更新：交给独立的 update.sh 在后台执行
 #
-# 原理（Linux）：进程运行时用内存里的代码，磁盘文件被替换不影响运行中的进程。
-#   所以只 cp 新文件是不够的，旧进程还在跑旧代码。
+# 参考 nyehueh/File Manager v7.3.1 的做法：
+#   customize.sh 只负责「解压 + 设权限 + 装 APK」，
+#   真正的「替换模块目录 + 重启进程」交给 update.sh 后台做。
 #
-# supervisor.sh 的主循环：
-#     while true; do battd_running || start_battd; sleep 15; done
-#   ⇒ 杀掉旧 battd 后，15 秒内自动拉起**新的**（从磁盘读取）。
+# 为什么不能在这里直接做：
+#   · 此刻管理器还在操作 $MODPATH（解压临时目录），后面可能还会写文件
+#   · 安装器进程未退出时替换 /data/adb/modules/chargecontrol 有竞态
+#   · 此时杀 battd 也可能被 supervisor 立刻拉回旧的
 #
-# 安全措施：
-#   1. 只杀 cmdline 含 battery-manager/battd 的进程（防 PID 复用误杀）
-#   2. 先 SIGTERM 让它优雅退出（写日志/保存 stats），2 秒后再 SIGKILL
-#   3. 最多等 20 秒确认新进程起来
+# update.sh 会先等父进程（安装器）退出，再执行替换，最干净。
 # ═══════════════════════════════════════════════════════════
-ui_print "- 应用更新（无需重启）"
+ui_print "- 准备热更新"
 
-DIR=/data/adb/battery-manager
-NEW_SHA=$(sha256sum "$DIR/battd" 2>/dev/null | cut -d' ' -f1)
-
-# 找出正在跑的 battd（校验 cmdline，防误杀）
-_old_pids=""
-for _p in /proc/[0-9]*; do
-  _pid=${_p#/proc/}
-  [ -r "$_p/cmdline" ] || continue
-  _cmd=$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)
-  case "$_cmd" in
-    *battery-manager/battd*)
-      _old_pids="$_old_pids $_pid"
-      ;;
-  esac
-done
-
-if [ -n "$_old_pids" ]; then
-  ui_print "  停止旧进程:$_old_pids"
-  # SIGTERM 优雅退出
-  for _pid in $_old_pids; do
-    kill -TERM "$_pid" 2>/dev/null
-  done
-  sleep 2
-  # 仍在的强杀
-  for _pid in $_old_pids; do
-    if [ -d "/proc/$_pid" ]; then
-      kill -KILL "$_pid" 2>/dev/null
-    fi
-  done
-  rm -f "$DIR/battd.pid" 2>/dev/null
-
-  # 等 supervisor 拉起来（主循环 15 秒一轮，最多等 20 秒）
-  ui_print "  等待 supervisor 自动重启…"
-  _w=0
-  while [ $_w -lt 20 ]; do
-    sleep 1
-    _w=$((_w+1))
-    _new_pid=""
-    for _p in /proc/[0-9]*; do
-      _pid=${_p#/proc/}
-      [ -r "$_p/cmdline" ] || continue
-      _cmd=$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)
-      case "$_cmd" in
-        *battery-manager/battd*) _new_pid=$_pid; break ;;
-      esac
-    done
-    [ -n "$_new_pid" ] && break
-  done
-
-  if [ -n "$_new_pid" ]; then
-    ui_print "  [Y] 已重启，新 PID=$_new_pid（用时 ${_w}s）"
-  else
-    ui_print "  [!] 20 秒内未自动重启，尝试手动拉起"
-    # 兜底：直接起（不走 supervisor，supervisor 会自己发现并接管）
-    if [ -x "$DIR/battd" ]; then
-      ( cd "$DIR" && nohup ./battd >> battd.stdout 2>&1 < /dev/null & ) 2>/dev/null
-      sleep 2
-    fi
-    # 再不行就提示重启
-    _still=""
-    for _p in /proc/[0-9]*; do
-      _pid=${_p#/proc/}
-      [ -r "$_p/cmdline" ] || continue
-      _cmd=$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)
-      case "$_cmd" in
-        *battery-manager/battd*) _still=$_pid; break ;;
-      esac
-    done
-    if [ -n "$_still" ]; then
-      ui_print "  [Y] 手动拉起成功，PID=$_still"
-    else
-      ui_print "  [!] 仍未启动，请重启手机或检查模块状态"
-    fi
-  fi
-else
-  ui_print "  当前无运行实例（首次安装，开机后自动启动）"
+UPDATE_SH=""
+if [ -f "$MODPATH/update.sh" ]; then
+  UPDATE_SH="$MODPATH/update.sh"
 fi
 
-# 确认磁盘上的版本已更新
-_cur_sha=$(sha256sum "$DIR/battd" 2>/dev/null | cut -d' ' -f1)
-if [ "$_cur_sha" = "$NEW_SHA" ] && [ -n "$NEW_SHA" ]; then
-  ui_print "  [Y] battd 已更新 (${NEW_SHA%"${NEW_SHA#???????}"}…)"
+if [ -z "$UPDATE_SH" ]; then
+  ui_print "  [!] zip 内缺少 update.sh，回退到直接复制模式"
+  # 兜底：老方式（直接复制，不杀进程）
+  mkdir -p /data/adb/battery-manager/webroot
+  cp -f "$MODPATH/bin/battd" /data/adb/battery-manager/battd 2>/dev/null
+  chmod 755 /data/adb/battery-manager/battd 2>/dev/null
+  cp -f "$MODPATH/batt.conf" /data/adb/battery-manager/batt.conf 2>/dev/null
+  cp -rf "$MODPATH/webroot/." /data/adb/battery-manager/webroot/ 2>/dev/null
+  cp -f "$MODPATH/supervisor.sh" /data/adb/battery-manager/supervisor.sh 2>/dev/null
+  ui_print "  [!] 已复制文件，但需重启或手动重启服务才能生效"
 else
-  ui_print "  [!] battd 校验不一致"
+  chmod 755 "$UPDATE_SH" 2>/dev/null
+
+  # 先铺一份运行目录（update.sh 会再做一次，这里保证「装完立刻能用」）
+  mkdir -p /data/adb/battery-manager/webroot 2>/dev/null
+  [ -f "/data/adb/battery-manager/batt.conf" ] || \
+    cp -f "$MODPATH/batt.conf" /data/adb/battery-manager/batt.conf 2>/dev/null
+
+  # ★ 关键：后台拉起 update.sh，把解压目录传进去
+  #   nohup + & 让它脱离安装器进程，安装器退出后继续跑
+  nohup sh "$UPDATE_SH" "$MODPATH" >/dev/null 2>&1 &
+
+  ui_print "  热更新已排队，安装完成后自动执行"
+  ui_print "  （约 10-20 秒生效，无需重启手机）"
 fi
 
 ui_print "- MTK 扩展节点探测"
@@ -287,7 +223,8 @@ else
 fi
 
 ui_print "- 安装完成"
-ui_print "  新版本已生效，无需重启手机"
+ui_print "  热更新在后台运行，约 10-20 秒生效，无需重启手机"
+ui_print "  可稍后刷新模块列表查看状态"
 if [ -f "$PERSIST_APK" ]; then
   ui_print "  App 已就位，后续可用 App 内「模块更新」升级"
 fi
