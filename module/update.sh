@@ -24,6 +24,17 @@ set -u
 
 SRC="${1:-}"
 MOD_DIR=/data/adb/modules/chargecontrol
+# ══════════════════════════════════════════════════════════
+# ★ v2.1.3: 临时/备份目录必须放在 modules 之外
+#
+# APatch/KernelSU 用 module.prop 的 id 作为 LazyColumn 的 key。
+# 如果在 /data/adb/modules/ 下留了带 module.prop 的副本
+# （如 chargecontrol.pre-v201 / .old-run / .new），
+# 就会出现两个 id=chargecontrol ⇒ 管理器崩溃：
+#   IllegalArgumentException: Key "chargecontrol" was already used
+# ══════════════════════════════════════════════════════════
+BACKUP_DIR=/data/adb/chargecontrol-backup
+NEW_DIR=/data/adb/chargecontrol-new
 DATA_DIR=/data/adb/battery-manager
 LOG=$DATA_DIR/hot-update.log
 
@@ -96,6 +107,22 @@ fi
 if [ ! -f "$SRC/module.prop" ] || [ ! -f "$SRC/bin/battd" ]; then
   log "FATAL: 源目录结构不完整（缺 module.prop 或 bin/battd）"
   exit 1
+fi
+
+# ═══ v2.1.3: 清理历史遗留的重复 ID 模块目录 ═══
+#   老版本 update.sh 的备份是 $MOD_DIR.old-run / .pre-hot-update，
+#   都在 /data/adb/modules/ 下，带 module.prop，会撞管理器 key。
+_STALE_DIRS=""
+for _d in /data/adb/modules/chargecontrol*; do
+  [ -d "$_d" ] || continue
+  [ "$_d" = "/data/adb/modules/chargecontrol" ] && continue
+  _STALE_DIRS="$_STALE_DIRS $_d"
+done
+if [ -n "$_STALE_DIRS" ]; then
+  for _d in $_STALE_DIRS; do
+    rm -rf "$_d" 2>/dev/null
+    log "清理遗留备份目录: $_d"
+  done
 fi
 
 NEW_VER=$(grep '^version=' "$SRC/module.prop" 2>/dev/null | cut -d= -f2)
@@ -181,17 +208,14 @@ fi
 
 # ── 4. 替换模块目录（旧目录先备份）──
 log "备份旧模块目录"
-# v2.1.2: 用 mv 替代 cp -a —— 同一文件系统下 mv 是原子重命名（毫秒级），
-#          cp -a 要逐个文件复制（979KB 但小文件多，实测 12 秒）
-rm -rf "$MOD_DIR.pre-hot-update" 2>/dev/null
-_OLD_MOD="$MOD_DIR.old-run"
-rm -rf "$_OLD_MOD" 2>/dev/null
+# v2.1.3: 备份到 modules 之外（/data/adb/chargecontrol-backup）
+#          避免带 module.prop 的副本撞管理器的 LazyColumn key
+rm -rf "$BACKUP_DIR" 2>/dev/null
 if [ -d "$MOD_DIR" ]; then
-  if mv "$MOD_DIR" "$_OLD_MOD" 2>/dev/null; then
-    log "  旧目录已移走（mv，毫秒级）"
+  if mv "$MOD_DIR" "$BACKUP_DIR" 2>/dev/null; then
+    log "  旧目录已移走 → $BACKUP_DIR（mv，毫秒级）"
   else
-    # 跨文件系统才 fallback 到 cp
-    cp -a "$MOD_DIR" "$_OLD_MOD" 2>/dev/null && log "  旧目录已复制（fallback）"
+    cp -a "$MOD_DIR" "$BACKUP_DIR" 2>/dev/null && log "  旧目录已复制（fallback）"
   fi
 fi
 
@@ -200,15 +224,18 @@ log "替换模块目录"
 # 本意是「不要把 update.sh 带进目标」，但删的是**解压目录**里的文件，
 # 导致 cp -a 后模块目录缺少 update.sh ⇒ 下次热更新失效。
 # update.sh 是热更新的执行者，应该被复制进模块目录。
-rm -rf "$MOD_DIR.new" 2>/dev/null
-if ! cp -a "$SRC" "$MOD_DIR.new" 2>>"$LOG"; then
+rm -rf "$NEW_DIR" 2>/dev/null
+if ! cp -a "$SRC" "$NEW_DIR" 2>>"$LOG"; then
   log "FATAL: 复制失败，旧目录保持不动"
-  rm -rf "$MOD_DIR.new" 2>/dev/null
+  rm -rf "$NEW_DIR" 2>/dev/null
+  # 恢复旧目录
+  [ -d "$BACKUP_DIR" ] && mv "$BACKUP_DIR" "$MOD_DIR"
   exit 1
 fi
-if ! mv "$MOD_DIR.new" "$MOD_DIR" 2>>"$LOG"; then
+if ! mv "$NEW_DIR" "$MOD_DIR" 2>>"$LOG"; then
   log "FATAL: 重命名失败，回滚"
-  [ -d "$_OLD_MOD" ] && mv "$_OLD_MOD" "$MOD_DIR"
+  rm -rf "$NEW_DIR" 2>/dev/null
+  [ -d "$BACKUP_DIR" ] && mv "$BACKUP_DIR" "$MOD_DIR"
   exit 1
 fi
 log "  新目录就位"
@@ -273,12 +300,12 @@ _new_pid="$(find_pids "battd" | head -1)"
 
 if [ -n "$_new_pid" ]; then
   log "SUCCESS: 新 battd pid=$_new_pid, version=$NEW_VER"
-  rm -rf "$_OLD_MOD" "$MOD_DIR.pre-hot-update" 2>/dev/null   # 成功就清备份
+  rm -rf "$BACKUP_DIR" "$NEW_DIR" 2>/dev/null   # 成功就清备份
   log "=== 热更新完成 ==="
 else
   log "FAIL: 新进程未启动，回滚"
-  if [ -d "$_OLD_MOD" ]; then
-    rm -rf "$MOD_DIR" && mv "$_OLD_MOD" "$MOD_DIR"
+  if [ -d "$BACKUP_DIR" ]; then
+    rm -rf "$MOD_DIR" && mv "$BACKUP_DIR" "$MOD_DIR"
     cp -f "$MOD_DIR/bin/battd" "$DATA_DIR/battd" 2>/dev/null
     nohup "$DATA_DIR/battd" >> "$DATA_DIR/battd.stdout" 2>&1 < /dev/null &
     log "  已回滚"
