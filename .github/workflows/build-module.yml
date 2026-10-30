@@ -133,11 +133,6 @@ jobs:
           cp src/battd module/bin/battd
           chmod 755 module/bin/battd
 
-          # ★ v1.19.5: 不再打包 App APK
-          #   App 里 42% 是 HDR 夜光 + 特效 + 悬浮窗（用户已确认不要），
-          #   WebUI 已改 PWA 可替代。带 APK 会让包从 1MB 膨胀到 13MB。
-          #   需要 App 的用户从 build-app.yml 的产物单独下载。
-          rm -f module/ChargeControl.apk 2>/dev/null || true
           # 模块 zip 内固定命名 ChargeControl.zip，配合 update.json 的
           # releases/latest/download/ChargeControl.zip 永久链接
           rm -f ChargeControl.zip
@@ -154,9 +149,9 @@ jobs:
             unzip -l ChargeControl.zip | grep -q "$f" \
               || { echo "::error::zip 缺少 $f"; exit 1; }
           done
-          # v1.19.5: 确认不再带 APK（包体应该 < 2MB）
-          if unzip -l ChargeControl.zip | grep -q 'ChargeControl.apk'; then
-            echo "::error::仍然包含 ChargeControl.apk（应已移除）"
+          # v2.0.0: App 已移除，包内不应有 .apk 文件
+          if unzip -l ChargeControl.zip | grep -q "\.apk"; then
+            echo "::error::包内不应包含 .apk 文件"
             exit 1
           fi
           SIZE=$(stat -c%s ChargeControl.zip)

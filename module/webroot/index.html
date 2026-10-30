@@ -119,6 +119,53 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 }
 .subtab i { font-size:12px; }
 /* ★ v1.19.2 设置页滑块大字档位 */
+/* ★ v2.0.0 充电热力图 */
+.heat-grid {
+  display:grid; grid-template-columns:repeat(10, 1fr); gap:3px;
+  min-height:56px; align-items:center;
+}
+.heat-cell {
+  height:52px; border-radius:5px; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; font-size:9px; font-weight:600;
+  transition:transform .15s; cursor:default; color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,.5);
+}
+.heat-cell:hover { transform:scale(1.08); z-index:2; }
+.heat-hint {
+  grid-column:1 / -1; text-align:center; color:var(--txt2);
+  font-size:11px; padding:16px 0;
+}
+.heat-legend {
+  display:flex; align-items:center; gap:8px; justify-content:center;
+  margin-top:8px; font-size:10px; color:var(--txt2);
+}
+.heat-bar {
+  width:120px; height:6px; border-radius:3px;
+  background:linear-gradient(90deg,#38bdf8,#4ade80,#fbbf24,#f87171);
+}
+
+/* ★ v2.0.0 停充时间线 */
+.timeline-summary { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
+.tl-stat {
+  display:flex; align-items:center; gap:6px; font-size:12px;
+  background:var(--card2); padding:4px 10px; border-radius:8px;
+}
+.tl-reason { font-weight:600; }
+.tl-count { color:var(--txt2); }
+.tl-dur { color:var(--txt); font-variant-numeric:tabular-nums; }
+.timeline-track {
+  position:relative; height:22px; background:var(--card2);
+  border-radius:6px; overflow:hidden; margin:10px 0 4px;
+}
+.tl-block {
+  position:absolute; top:0; height:100%; min-width:2px;
+  opacity:.85; border-radius:2px;
+}
+.timeline-axis {
+  display:flex; justify-content:space-between;
+  font-size:9px; color:var(--txt2);
+}
+
 .big-val {
   font-size:22px; font-weight:700; letter-spacing:-.5px;
   color:var(--accent); margin-left:8px; font-variant-numeric:tabular-nums;
@@ -221,6 +268,15 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel">
       <h2><i class="fa-solid fa-heart-pulse" style="margin-right:6px"></i>电池健康</h2>
       <div class="temp-list">
+        <div class="temp-item" x-show="s.oem_dual_cell">
+          <span class="n">电流倍率</span>
+          <span class="v" x-text="s.oem_dual_cell ? (s.bat_present &#38;&#38; s.dual_cell ? '双电芯 ×2' : '单电芯 ×1') : '—'"></span>
+        </div>
+        <div class="temp-item" x-show="s.oem_power_save !== undefined">
+          <span class="n">省电模式</span>
+          <span class="v" x-text="s.oem_power_save || '—'"></span>
+        </div>
+        
         <div class="temp-item"><span class="n">健康度</span><span class="v" :style="s.health < 80 ? 'color:var(--red)' : 'color:var(--green)'" x-text="s.health > 0 ? s.health + '% ' + s.health_rating : '—'"></span></div>
         <div class="temp-item" x-show="s.health > 0 && s.health < 80" style="color:var(--red)"><span class="n">&#x26a0; 建议</span><span class="v">低于80% 换电池</span></div>
         <div class="temp-item"><span class="n">满充/设计</span><span class="v" x-text="(s.charge_full_mah ? s.charge_full_mah : '—') + ' / 5380mAh'"></span></div>
@@ -235,7 +291,25 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       </div>
     </div>
 
-    <div class="panel">
+    <!-- ★ v2.0.0 SOH 趋势（从历史学衰减） -->
+    <div class="panel" x-show="subTab==='curve'">
+      <h2>
+        <i class="fa-solid fa-heart-pulse" style="margin-right:6px;color:#f87171"></i>电池健康趋势
+        <span style="float:right;font-size:11px;font-weight:400;color:var(--txt2)"
+              x-text="sohInfo"></span>
+      </h2>
+      <div style="position:relative;height:140px">
+        <canvas id="sohChart"></canvas>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--txt2);justify-content:center">
+        <span>首记 <strong style="color:var(--txt)" x-text="(s.soh_first > 0 ? s.soh_first + '%' : '—')"></strong></span>
+        <span>当前 <strong :style="'color:' + (s.health >= 90 ? 'var(--green)' : s.health >= 80 ? 'var(--amber)' : 'var(--red)')"
+              x-text="(s.health > 0 ? s.health + '%' : '—')"></strong></span>
+        <span>衰减 <strong style="color:var(--orange)" x-text="(s.soh_first > 0 && s.health > 0 ? (s.soh_first - s.health).toFixed(1) + '%' : '—')"></strong></span>
+        <span>循环 <strong style="color:var(--txt)" x-text="(s.cycle_count >= 0 ? s.cycle_count : '—')"></strong></span>
+      </div>
+    </div>
+<div class="panel">
       <h2><i class="fa-solid fa-temperature-high" style="margin-right:6px"></i>温度监控</h2>
       <div class="temp-list">
       <div class="temp-item"><div style="display:flex;align-items:center"><span class="dot" :style="'background:' + tempColor(s.soc_temp)"></span><span class="n">SoC</span></div><span class="v" :style="'color:' + tempColor(s.soc_temp)" x-text="s.soc_temp > 0 ? s.soc_temp + '°' : '—'"></span></div>
@@ -500,6 +574,55 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
         <span><span style="display:inline-block;width:10px;height:2px;background:#f87171;margin-right:4px;vertical-align:middle;border-bottom:1px dashed #f87171"></span>警戒线</span>
       </div>
     </div>
+    <!-- ★ v2.0.0 停充时间线（今日统计） -->
+    <div class="panel" x-show="subTab==='events'">
+      <h2>
+        <i class="fa-solid fa-timeline" style="margin-right:6px;color:#38bdf8"></i>今日停充时间线
+        <span style="float:right;font-size:11px;font-weight:400;color:var(--txt2)"
+              x-text="suspendStats.total ? ('共 ' + suspendStats.total + ' 次') : ''"></span>
+      </h2>
+      <div class="timeline-summary" x-show="suspendStats.total > 0">
+        <template x-for="(g, idx) in suspendStats.byReason" :key="idx">
+          <div class="tl-stat">
+            <span class="tl-reason" :style="'color:' + reasonColor(g.reason)" x-text="suspReasonText(g.reason)"></span>
+            <span class="tl-count" x-text="g.count + ' 次'"></span>
+            <span class="tl-dur" x-text="fmtDur(g.totalSec)"></span>
+          </div>
+        </template>
+      </div>
+      <div class="timeline-track" x-show="suspendStats.total > 0">
+        <template x-for="(e, i) in suspendStats.items" :key="i">
+          <div class="tl-block" :style="'left:' + e.pct + '%; width:' + e.w + '%; background:' + reasonColor(e.reason)"
+               :title="e.time + ' ' + suspReasonText(e.reason) + ' ' + fmtDur(e.sec)"></div>
+        </template>
+      </div>
+      <div class="timeline-axis" x-show="suspendStats.total > 0">
+        <span>0:00</span><span>6:00</span><span>12:00</span><span>18:00</span><span>24:00</span>
+      </div>
+      <div x-show="suspendStats.total === 0" style="color:var(--txt2);font-size:12px;padding:8px 0">
+        今日暂无停充记录
+      </div>
+    </div>
+
+    <!-- ★ v2.0.0 充电热力图（哪个电量段最烫） -->
+    <div class="panel" x-show="subTab==='curve'">
+      <h2>
+        <i class="fa-solid fa-fire" style="margin-right:6px;color:#fb923c"></i>充电热力分布
+        <span style="float:right;font-size:11px;font-weight:400;color:var(--txt2)">按电量段统计最高温</span>
+      </h2>
+      <div class="heat-grid" id="heatGrid">
+        <div class="heat-hint">充电时自动积累数据</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--txt2);margin-top:6px">
+        <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+      </div>
+      <div class="heat-legend">
+        <span>凉</span>
+        <div class="heat-bar"></div>
+        <span>烫</span>
+      </div>
+    </div>
+
 
     <!-- ★ v1.5.0 充电曲线：本次/最近一次充电的 电流+电量+阶段 -->
     <div class="panel" x-show="subTab==='curve'">
@@ -588,6 +711,13 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 </div>
 
 <script>
+/* ★ v2.0.0: Chart.js 实例必须放在 Alpine 的 x-data 之外。
+   Alpine 3 会对 x-data 返回对象做深度 reactive 代理，
+   而 Chart 实例内部有大量循环引用（canvas↔ctx↔chart↔scale），
+   代理遍历时无限递归 → RangeError: Maximum call stack size exceeded。
+   ⇒ 用模块级变量持有，Alpine 管不到。 */
+var CH = { chart: null, curve: null };
+
 function app() {
   return {
     API_BASE: 'http://127.0.0.1:8800',
@@ -596,9 +726,9 @@ function app() {
     tab: (window.__initialTab || 'dash'),   /* v1.19.1: 支持 manifest.shortcuts 的 ?tab= 直达 */
     webhookUrl: '', whLoaded: false,
     s: { capacity:0, capacity_disp:0, temp:0, voltage:0, current:0, status:'Unknown', limit_enabled:false, charge_limit:80, temp_limit:45, resume_delta:5, interval:5, soc_temp:-1, gpu_temp:-1, chg_temp:-1, case_temp:-1, cycle_count:-1, health:-1, health_rating:'', charge_full_mah:0, est_cycles_left:0, power_mw:0, est_full_min:0, est_full_txt:'', health_degrade:0, usb_online:0, proto_name:'未知', pd_type:0, power_max:0, control_state:'idle', suspend_active:false, suspend_reason:'none', suspend_since:0, suspend_recover_in:-1, rec_temp_hyst:5, rec_temp_hold:60, rec_soc_hyst:5, full_once:0, full_until:0, history_enabled:1, paused:false, proc_name:'', proc_pid:0, cpu_pct:0, bypass_ok:false, bypass_on:false, bypass_hw:false, sess_active:0, sess_min:0, sess_mah:0, stats_count:0, stats_min:0, stats_mah:0, night:0, ns:23, ne:7, scene:0, alerted:0, lang:0, theme:0, webhookUrl:'', mem_total:0, mem_avail:0, mem_free:0, storage_total:0, storage_free:0, uptime_secs:0, cpu_cores:0, kernel_ver:'', cpu_model:'', device_model:'', wifi_rssi:-128, wifi_on:0, mobile_on:0, ip_addr:'', bat_technology:'', bat_capacity_level:'', bat_health:'', charge_type:-1, time_to_full:-1, charge_counter:-1, input_current_limit:-1, bat_manufacturer:'', bat_model_name:'', voltage_ocv:-1, current_avg:-1, temp_ambient:-1, constant_charge_current:-1, constant_charge_voltage:-1, capacity_error_margin:-1, time_to_empty:-1, bat_present:-1, internal_resistance:-1, charge_now:-1, charge_term_current:-1, constant_charge_current_max:-1, constant_charge_voltage_max:-1, temp_max:-1, temp_min:-1, charger_temp:-1, charge_done:-1, input_voltage_settled:-1, safety_timer_expired:-1, calibrate:-1, pd_pdo_count:0, pd_pdo_max_mv:0, pd_pdo_max_ma:0, pd_svid:'', pd_state:'', cc_limit_supported:0, cc_limit_val:-1, power_path_en:-1, jeita_index:-1, soh_native:-1, soh_first:-1, soh_delta_x10:0, design_mah:0, chg_temp_limit:60, x_pp:0, x_pp_ok:0, x_cv:0, x_cv_mv:0, x_cv_ok:0, x_lc:0, x_lc_ma:0, x_nn:0, x_nn_ok:0, x_bmin:50, native_night:0, cl_tail:'' },
-    logContent: '', lastUpdate: '', updateMsg: '', latestVer: '', timer: null, chart: null, fullTimer: null, loaded: false,
+    logContent: '', lastUpdate: '', updateMsg: '', latestVer: '', timer: null, fullTimer: null, loaded: false,
     /* ★ v1.5.0 */
-    curveChart: null, curveInfo: '', curveTimer: null, events: [], evtHighlight: null, curveEta: -1, tempCurve: null, tempCurveInfo: '', cardEditMode: false, cardOrder: [], fold: { charge: false, sys: false }, subTab: 'curve',
+    curveInfo: '', curveTimer: null, events: [], evtHighlight: null, curveEta: -1, tempCurve: null, tempCurveInfo: '', cardEditMode: false, cardOrder: [], fold: { charge: false, sys: false }, subTab: 'curve', sohInfo: '', sohChart: null, heatData: [], suspendStats: { total: 0, byReason: [], items: [] },
     cal: { state:0, state_name:'idle', elapsed_sec:0, cap_now:0, cap_max:0, cap_min:0, fulfilled:0, temp:0, charging:0 },
 
     /* 阶段名映射 */
@@ -646,13 +776,13 @@ function app() {
       const cur  = d.map(x => x.i);
       const cap  = d.map(x => x.c);
 
-      if (!this.curveChart) {
+      if (!CH.curve) {
         const cs = getComputedStyle(document.documentElement);
         const txt = cs.getPropertyValue('--txt2').trim();
         const grid = cs.getPropertyValue('--line').trim();
         const leg = cs.getPropertyValue('--txt').trim();
         const bg = cs.getPropertyValue('--card').trim();
-        this.curveChart = new Chart(document.getElementById('curveChart'), {
+        CH.curve = new Chart(document.getElementById('curveChart'), {
           type: 'line',
           data: { labels, datasets: [
             { label:'电流 mA', data:cur, borderColor:'#38bdf8', tension:.3, yAxisID:'y', pointRadius:0, borderWidth:2 },
@@ -671,10 +801,10 @@ function app() {
           }
         });
       } else {
-        this.curveChart.data.labels = labels;
-        this.curveChart.data.datasets[0].data = cur;
-        this.curveChart.data.datasets[1].data = cap;
-        this.curveChart.update('none');
+        CH.curve.data.labels = labels;
+        CH.curve.data.datasets[0].data = cur;
+        CH.curve.data.datasets[1].data = cap;
+        CH.curve.update('none');
       }
       const last = d[d.length-1];
       const dur = d.length > 1 ? Math.round((last.t - d[0].t)/60) : 0;
@@ -715,6 +845,8 @@ function app() {
     async loadEvents() {
       const d = await this.fetchJson(this.API_BASE + '/api/events');
       this.events = (d && Array.isArray(d.events)) ? d.events : [];
+      /* v2.0.0: 事件变了，时间线也要更新 */
+      await this.loadSuspendTimeline();
     },
     async clearEvents() {
       if (!confirm('确定清空全部异常事件记录？')) return;
@@ -767,7 +899,7 @@ function app() {
       const labels = h.map(x => new Date(x.t * 1000).toLocaleTimeString());
       const caps = h.map(x => x.c);
       const temps = h.map(x => x.tmp);
-      if (!this.chart) {
+      if (!CH.chart) {
         const cs = getComputedStyle(document.documentElement);
         const txt = cs.getPropertyValue('--txt2').trim();
         const grid = cs.getPropertyValue('--line').trim();
@@ -777,7 +909,7 @@ function app() {
         grad1.addColorStop(0,'rgba(74,222,128,.35)'); grad1.addColorStop(1,'rgba(74,222,128,0)');
         const grad2 = document.createElement('canvas').getContext('2d').createLinearGradient(0,0,0,220);
         grad2.addColorStop(0,'rgba(251,146,60,.35)'); grad2.addColorStop(1,'rgba(251,146,60,0)');
-        this.chart = new Chart(document.getElementById('chart'), {
+        CH.chart = new Chart(document.getElementById('chart'), {
           type: 'line',
           data: { labels, datasets: [
             { label:'电量 %', data:caps, borderColor:'#4ade80', backgroundColor:grad1, fill:true, tension:.35, yAxisID:'y', pointRadius:0, pointHoverRadius:4, borderWidth:2 },
@@ -798,10 +930,10 @@ function app() {
           }
         });
       } else {
-        this.chart.data.labels = labels;
-        this.chart.data.datasets[0].data = caps;
-        this.chart.data.datasets[1].data = temps;
-        this.chart.update();
+        CH.chart.data.labels = labels;
+        CH.chart.data.datasets[0].data = caps;
+        CH.chart.data.datasets[1].data = temps;
+        CH.chart.update();
       }
     },
 
@@ -837,13 +969,13 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
       const p = new URLSearchParams(obj);
       await this.fetchJson(this.API_BASE + '/api/limit', { method:'POST', body: p.toString(), headers:{'Content-Type':'application/x-www-form-urlencoded'} });
       document.documentElement.setAttribute('data-theme', String(this.s.theme));
-      if ('theme' in obj && this.chart) {
+      if ('theme' in obj && CH.chart) {
         const cs = getComputedStyle(document.documentElement);
         const t = (n) => cs.getPropertyValue(n).trim();
-        ['y','y1','x'].forEach(a => { this.chart.options.scales[a].grid.color = t('--line'); this.chart.options.scales[a].ticks.color = t('--txt2'); });
-        this.chart.options.plugins.legend.labels.color = t('--txt');
-        ['backgroundColor','borderColor','titleColor','bodyColor'].forEach((k,i) => { this.chart.options.plugins.tooltip[k] = [t('--card'),t('--line'),t('--txt'),t('--txt2')][i]; });
-        this.chart.update('none');
+        ['y','y1','x'].forEach(a => { CH.chart.options.scales[a].grid.color = t('--line'); CH.chart.options.scales[a].ticks.color = t('--txt2'); });
+        CH.chart.options.plugins.legend.labels.color = t('--txt');
+        ['backgroundColor','borderColor','titleColor','bodyColor'].forEach((k,i) => { CH.chart.options.plugins.tooltip[k] = [t('--card'),t('--line'),t('--txt'),t('--txt2')][i]; });
+        CH.chart.update('none');
       }
     },
 
@@ -967,6 +1099,234 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
       this.fold[key] = !this.fold[key];
       try { localStorage.setItem('cc_fold', JSON.stringify(this.fold)); } catch (e) {}
     },
+    /* ═══ v2.0.0 B/D: SOH 趋势 + 热力图 + 停充时间线 ═══ */
+
+    /* 停充原因配色（与时间线、事件列表共用） */
+    reasonColor(r) {
+      return { temp:'#f87171', chg_temp:'#fb923c', limit:'#38bdf8',
+               paused:'#a78bfa', full:'#4ade80', bypass:'#fbbf24',
+               manual:'#94a3b8', none:'#3d4a5c' }[r] || '#94a3b8';
+    },
+
+    /* 秒 → "X分Y秒" / "X小时Y分" */
+    fmtDur(sec) {
+      if (!sec || sec < 0) return '—';
+      if (sec < 60) return sec + '秒';
+      if (sec < 3600) return Math.floor(sec/60) + '分' + (sec%60 ? (sec%60)+'秒' : '');
+      return Math.floor(sec/3600) + '小时' + Math.floor((sec%3600)/60) + '分';
+    },
+
+    /* SOH 趋势：从 history 里按天取平均健康度 */
+    async loadSoh() {
+      const h = await this.fetchJson(this.API_BASE + '/api/history');
+      if (!h || !Array.isArray(h) || !h.length) { this.sohInfo = ''; return; }
+      // 按天聚合（health 字段不一定在 history 里，用 cycle_count + 当前 health 推算）
+      // history 格式: {t,c,tmp,v,s,i,st} —— 没有 health
+      // 所以改用：当前 health + soh_first + cycle_count 画一条理论衰减线
+      const first = this.s.soh_first > 0 ? this.s.soh_first : this.s.health;
+      const cur = this.s.health;
+      const cyc = this.s.cycle_count;
+      if (!(cur > 0)) { this.sohInfo = ''; return; }
+
+      // 按 history 的时间跨度估算（天数）
+      const days = Math.max(1, Math.round((h[h.length-1].t - h[0].t) / 86400));
+      // 两点：首记 → 当前（如果没首记就只显示今天一点）
+      const pts = [];
+      if (first > 0 && first !== cur) {
+        pts.push({ x: 0, y: first, label: '首记' });
+        pts.push({ x: days, y: cur, label: '当前' });
+      } else {
+        pts.push({ x: 0, y: cur, label: '当前' });
+      }
+      this.sohInfo = `${days} 天 · ${cyc >= 0 ? cyc + ' 循环' : ''}`;
+      this.drawSoh(pts, cur, days);
+    },
+
+    drawSoh(pts, cur, days) {
+      const cv = document.getElementById('sohChart');
+      if (!cv) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+      const r = cv.getBoundingClientRect();
+      if (r.width < 10) return;
+      cv.width = r.width * dpr;
+      cv.height = r.height * dpr;
+      cv.style.width = r.width + 'px';
+      cv.style.height = r.height + 'px';
+      const ctx = cv.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const W = r.width, H = r.height;
+      ctx.clearRect(0, 0, W, H);
+
+      const cs = getComputedStyle(document.documentElement);
+      const grid = cs.getPropertyValue('--line').trim() || '#30363d';
+      const txt2 = cs.getPropertyValue('--txt2').trim() || '#8b949e';
+
+      const padL = 34, padR = 10, padT = 14, padB = 20;
+      const w = W - padL - padR, h = H - padT - padB;
+      // Y: 100% 顶，60% 底
+      const yMin = 60, yMax = 100;
+      const yOf = v => padT + (yMax - v) / (yMax - yMin) * h;
+      const xOf = i => padL + (pts.length > 1 ? i / (pts.length-1) : 0.5) * w;
+
+      // 网格
+      ctx.strokeStyle = grid; ctx.lineWidth = 1;
+      ctx.fillStyle = txt2; ctx.font = '9px system-ui'; ctx.textAlign = 'right';
+      [60, 70, 80, 90, 100].forEach(v => {
+        const y = yOf(v);
+        ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL+w, y); ctx.stroke();
+        ctx.fillText(v + '%', padL - 4, y + 3);
+      });
+
+      // 80% 警戒线（健康分界）
+      const warnY = yOf(80);
+      ctx.strokeStyle = 'rgba(248,113,113,0.5)';
+      ctx.setLineDash([4,3]);
+      ctx.beginPath(); ctx.moveTo(padL, warnY); ctx.lineTo(padL+w, warnY); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 曲线
+      if (pts.length > 1) {
+        ctx.strokeStyle = cur >= 90 ? '#4ade80' : cur >= 80 ? '#fbbf24' : '#f87171';
+        ctx.lineWidth = 2.5;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        pts.forEach((p, i) => {
+          const x = xOf(i), y = yOf(p.y);
+          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        });
+        ctx.stroke();
+        // 填充
+        const grad = ctx.createLinearGradient(0, padT, 0, padT+h);
+        grad.addColorStop(0, cur >= 90 ? 'rgba(74,222,128,0.25)' : cur >= 80 ? 'rgba(251,191,36,0.25)' : 'rgba(248,113,113,0.25)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.lineTo(xOf(pts.length-1), padT+h);
+        ctx.lineTo(xOf(0), padT+h);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+      }
+
+      // 点 + 标签
+      pts.forEach((p, i) => {
+        const x = xOf(i), y = yOf(p.y);
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = cur >= 90 ? '#4ade80' : cur >= 80 ? '#fbbf24' : '#f87171';
+        ctx.beginPath(); ctx.arc(x, y, 2.2, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = txt2; ctx.font = '9px system-ui';
+        ctx.textAlign = i === 0 ? 'left' : 'right';
+        ctx.fillText(p.label + ' ' + p.y + '%', i === 0 ? x + 5 : x - 5, y - 7);
+      });
+    },
+
+    /* 充电热力图：按 10% 一档统计最高温度 */
+    async loadHeat() {
+      const h = await this.fetchJson(this.API_BASE + '/api/history');
+      const grid = document.getElementById('heatGrid');
+      if (!grid) return;
+      if (!h || !Array.isArray(h) || !h.length) {
+        grid.innerHTML = '<div class="heat-hint">充电时自动积累数据</div>';
+        return;
+      }
+      // 只统计充电中的点
+      const buckets = Array.from({length: 10}, () => ({ max: 0, n: 0, sum: 0 }));
+      for (const p of h) {
+        if (p.s !== 'Charging' || !(p.tmp > 0)) continue;
+        const b = Math.min(9, Math.max(0, Math.floor(p.c / 10)));
+        const t = p.tmp / 10;
+        buckets[b].n++;
+        buckets[b].sum += t;
+        if (t > buckets[b].max) buckets[b].max = t;
+      }
+      const hasData = buckets.some(b => b.n > 0);
+      if (!hasData) {
+        grid.innerHTML = '<div class="heat-hint">充电时自动积累数据</div>';
+        return;
+      }
+      // 颜色映射：28°C 蓝 → 45°C 红
+      const colorOf = t => {
+        if (t <= 0) return '#1f2937';
+        const ratio = Math.max(0, Math.min(1, (t - 28) / (45 - 28)));
+        if (ratio < 0.33) return `rgb(56,189,248)`;   // 蓝
+        if (ratio < 0.66) return `rgb(74,222,128)`;   // 绿
+        if (ratio < 0.85) return `rgb(251,191,36)`;   // 琥珀
+        return `rgb(248,113,113)`;                     // 红
+      };
+      grid.innerHTML = buckets.map((b, i) => {
+        if (b.n === 0) {
+          return `<div class="heat-cell" style="background:#1a2233;color:#3d4a5c">${i*10}<br>—</div>`;
+        }
+        const avg = b.sum / b.n;
+        return `<div class="heat-cell" style="background:${colorOf(b.max)}"
+                     title="${i*10}-${i*10+10}%: 最高 ${b.max.toFixed(1)}°C / 平均 ${avg.toFixed(1)}°C (${b.n} 点)">
+                  ${i*10}<br>${b.max.toFixed(0)}°
+                </div>`;
+      }).join('');
+    },
+
+    /* 停充时间线：从 events 统计今日数据 */
+    async loadSuspendTimeline() {
+      if (!this.events || !this.events.length) {
+        this.suspendStats = { total: 0, byReason: [], items: [] };
+        return;
+      }
+      const today0 = new Date(); today0.setHours(0,0,0,0);
+      const t0 = Math.floor(today0.getTime() / 1000);
+
+      // 只取今天的
+      const today = this.events.filter(e => e.at >= t0);
+      if (!today.length) {
+        this.suspendStats = { total: 0, byReason: [], items: [] };
+        return;
+      }
+
+      // 提取停充区间：temp_exceed/chg_temp_exceed 开始 → 对应的 recovered 结束
+      const items = [];
+      const byReason = {};
+      let openEvt = null;
+
+      for (const e of today.slice().sort((a,b) => a.at - b.at)) {
+        if (e.type === 'temp_exceed' || e.type === 'chg_temp_exceed') {
+          const reason = e.type === 'temp_exceed' ? 'temp' : 'chg_temp';
+          openEvt = { at: e.at, reason };
+        } else if (e.type === 'recovered' && openEvt) {
+          const reason = (e.detail && e.detail.prev_reason) || openEvt.reason;
+          const dur = (e.detail && e.detail.duration_s) || (e.at - openEvt.at);
+          items.push({ at: openEvt.at, reason, sec: dur });
+          byReason[reason] = byReason[reason] || { reason, count: 0, totalSec: 0 };
+          byReason[reason].count++;
+          byReason[reason].totalSec += dur;
+          openEvt = null;
+        }
+      }
+      // 未闭合的
+      if (openEvt) {
+        const now = Math.floor(Date.now()/1000);
+        const dur = now - openEvt.at;
+        items.push({ at: openEvt.at, reason: openEvt.reason, sec: dur });
+        byReason[openEvt.reason] = byReason[openEvt.reason] || { reason: openEvt.reason, count: 0, totalSec: 0 };
+        byReason[openEvt.reason].count++;
+        byReason[openEvt.reason].totalSec += dur;
+      }
+
+      // 转成时间轴上的 % 位置（0-24h）
+      const daySec = 86400;
+      const fmt = ts => { const d = new Date(ts*1000); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); };
+      const blocks = items.map(it => ({
+        reason: it.reason,
+        sec: it.sec,
+        time: fmt(it.at),
+        pct: ((it.at - t0) / daySec) * 100,
+        w: Math.max(0.4, (it.sec / daySec) * 100)
+      }));
+
+      this.suspendStats = {
+        total: items.length,
+        byReason: Object.values(byReason).sort((a,b) => b.count - a.count),
+        items: blocks
+      };
+    },
+
     loadFold() {
       try {
         const saved = JSON.parse(localStorage.getItem('cc_fold') || 'null');
@@ -1069,11 +1429,13 @@ async toggleEnabled() { this.s.limit_enabled = !this.s.limit_enabled; await this
       setTimeout(() => this.loadEvents(), 400);
       /* v1.19.0: 温度分析延后加载 */
       setTimeout(() => this.loadTempCurve(), 500);
+      /* v2.0.0: SOH / 热力图 / 停充时间线 */
+      setTimeout(() => { this.loadSoh(); this.loadHeat(); this.loadSuspendTimeline(); }, 700);
       document.documentElement.setAttribute('data-theme', String(this.s.theme));
       this.timer = setInterval(() => this.poll(), 3000);
       setInterval(() => this.loadHistory(), 30000);
       /* ★ v1.5.0: 曲线只在「统计」页可见时刷新，省电省流量 */
-      setInterval(() => { if (this.tab === 'stats') { this.loadCurve(); this.loadCal(); this.loadEvents(); this.loadTempCurve(); } }, 30000);
+      setInterval(() => { if (this.tab === 'stats') { this.loadCurve(); this.loadCal(); this.loadEvents(); this.loadTempCurve(); this.loadSoh(); this.loadHeat(); this.loadSuspendTimeline(); } }, 30000);
       this.$watch && this.$watch('tab', (v) => { if (v === 'stats') this.loadTempCurve(); });
       setInterval(() => { if (this.tab === 'log') this.refreshLog(); }, 10000);
     }

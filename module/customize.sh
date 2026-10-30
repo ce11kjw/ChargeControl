@@ -133,94 +133,10 @@ fi
 
 # ═══ 安装伴随的 App（模块 zip 里带了 APK）═══
 # ═══════════════════════════════════════════════════════════
-# 安装伴随的 App
-#
-# APK 由 CI 打进 zip（module/ChargeControl.apk）。
-# 注意点（都是踩过的）：
-#   · pm 不一定在 PATH → 显式用 /system/bin/pm
-#   · $MODPATH 含有临时目录路径，pm 读不到某些 SELinux 上下文
-#     → 先把 APK 复制到 /data/local/tmp（pm 一定能读）
-#   · 首次安装可能因为 packages 服务没就绪而失败 → 重试 3 次
-#   · 失败时把 APK 留在 /sdcard/下载/ 让用户手动装
+# v2.0.0: App 已移除（改用 PWA）
+#   用户决策：HDR 夜光/悬浮窗不要，WebUI 改 PWA 后 App 无必要
+#   如需 App 请从旧版本 Release 下载
 # ═══════════════════════════════════════════════════════════
-ui_print "- 安装 App"
-
-PERSIST_APK=/data/adb/battery-manager/ChargeControl.apk
-FALLBACK_DIR=/sdcard/下载
-
-APK=""
-for cand in "$MODPATH/ChargeControl.apk" "$MODPATH/app/ChargeControl.apk"; do
-  [ -f "$cand" ] && { APK="$cand"; break; }
-done
-
-if [ -z "$APK" ]; then
-  ui_print "  [-] zip 内未找到 APK，跳过"
-else
-  ui_print "  APK: $(basename "$APK") ($(du -k "$APK" 2>/dev/null | cut -f1) KB)"
-
-  # 保存一份到持久目录 —— OTA 升级时会重新安装它
-  mkdir -p /data/adb/battery-manager 2>/dev/null
-  cp -f "$APK" "$PERSIST_APK" 2>/dev/null && chmod 644 "$PERSIST_APK" 2>/dev/null
-
-  # 复制到 /data/local/tmp（pm 一定能读，避免 SELinux 上下文问题）
-  TMP_APK=/data/local/tmp/ChargeControl-install.apk
-  cp -f "$APK" "$TMP_APK" 2>/dev/null
-  chmod 644 "$TMP_APK" 2>/dev/null
-
-  # 查已装版本
-  OLDVER=""
-  if [ -x /system/bin/pm ]; then
-    OLDVER=$(/system/bin/pm dump com.ce11kjw.chargecontrol 2>/dev/null \
-             | grep -m1 versionName | sed 's/.*versionName=//')
-  fi
-  [ -n "$OLDVER" ] && ui_print "  已安装: $OLDVER，尝试覆盖升级"
-
-  # 安装（重试 3 次，应对 packages 服务未就绪）
-  OK=0
-  OUT=""
-  i=1
-  while [ $i -le 3 ]; do
-    if [ -x /system/bin/pm ]; then
-      OUT=$(/system/bin/pm install -r -d -g "$TMP_APK" 2>&1)
-    else
-      OUT=$(pm install -r -d -g "$TMP_APK" 2>&1)
-    fi
-    case "$OUT" in
-      *Success*) OK=1; break ;;
-    esac
-    ui_print "  第 $i 次安装失败，2 秒后重试…"
-    sleep 2
-    i=$((i+1))
-  done
-
-  if [ $OK -eq 1 ]; then
-    ui_print "  [Y] App 安装成功"
-  else
-    case "$OUT" in
-      *INSTALL_FAILED_UPDATE_INCOMPATIBLE*|*signatures*do*not*match*)
-        ui_print "  [!] 签名不匹配（旧版 App 签名不同）"
-        ui_print "      请在系统设置里卸载旧版 ChargeControl 后重装模块"
-        ;;
-      *INSTALL_FAILED_VERSION_DOWNGRADE*)
-        ui_print "  [!] 已装版本比 zip 内的新，跳过"
-        OK=1
-        ;;
-      *INSTALL_FAILED_INSUFFICIENT_STORAGE*)
-        ui_print "  [!] 存储空间不足"
-        ;;
-      *)
-        ui_print "  [!] 自动安装失败"
-        echo "$OUT" | head -3 | while read -r l; do ui_print "      $l"; done
-        ;;
-    esac
-    # 无论什么原因失败，都把 APK 留给用户
-    mkdir -p "$FALLBACK_DIR" 2>/dev/null
-    cp -f "$APK" "$FALLBACK_DIR/ChargeControl.apk" 2>/dev/null \
-      && ui_print "      已放到: $FALLBACK_DIR/ChargeControl.apk（可手动点击安装）"
-  fi
-
-  rm -f "$TMP_APK" 2>/dev/null
-fi
 
 ui_print "- 安装完成"
 ui_print "  热更新在后台运行，约 10-20 秒生效，无需重启手机"

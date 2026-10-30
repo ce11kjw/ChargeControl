@@ -14,11 +14,6 @@ module/bin/battd
 *.v1*bak
 
 # ── monorepo: App 产物 ──
-app/.gradle/
-app/build/
-app/app/build/
-app/local.properties
-app/.idea/
 *.apk
 *.aab
 

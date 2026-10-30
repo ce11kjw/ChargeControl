@@ -407,3 +407,143 @@ App 通过 HTTP + JSON 与之通信 —— 这也是 KernelSU/APatch 模块 WebU
 | `/data/adb/battery-manager/session.jsonl` | 充电曲线采样（同上滚动） |
 | `/data/adb/battery-manager/calibrate.state` | 校准进度（原子写） |
 | `/data/adb/battery-manager/battd.log` | 运行日志 |
+
+---
+
+## v1.17.0 ~ v2.0.0 新增端点
+
+### GET /api/events
+异常事件列表（不含 snapshot，轻量）。
+
+```json
+{
+  "events": [
+    {
+      "id": "evt-1793145396",
+      "type": "recovered",
+      "at": 1793145396,
+      "detail": { "prev_reason": "limit", "duration_s": 3903 }
+    }
+  ],
+  "count": 1
+}
+```
+
+**事件类型**：
+| type | 说明 |
+|---|---|
+| `temp_exceed` | 电池过温（detail: temp, limit） |
+| `chg_temp_exceed` | 充电IC过温（detail: chg_temp, limit） |
+| `recovered` | 已恢复充电（detail: prev_reason, duration_s） |
+| `replug_reset` | 重新插电清空停充（detail: prev_reason, by） |
+
+**列表按时间倒序，最多 20 条。**
+
+### GET /api/event?id=evt-XXXX
+单条事件详情，**含曲线快照**。
+
+```json
+{
+  "id": "evt-1793145396",
+  "type": "temp_exceed",
+  "at": 1793145396,
+  "detail": { "temp": 46.0, "limit": 45 },
+  "snapshot": [
+    { "t": -120, "soc": 62, "temp": 42.1, "cur": 4200 },
+    { "t": -110, "soc": 62, "temp": 42.8, "cur": 4250 },
+    ...
+    { "t": 0, "soc": 63, "temp": 46.0, "cur": 4800 }
+  ]
+}
+```
+
+- `snapshot[].t` 是**相对触发时刻的秒数**（负数 = 触发前）
+- 环形缓冲 30 点，10s 一点，覆盖触发前 5 分钟
+- `id` 严格校验 `evt-<纯数字>`，防路径穿越
+
+### DELETE /api/events
+清空全部事件。
+
+```json
+{ "ok": true, "deleted": 3 }
+```
+
+### GET /api/charge_profile
+充电预估学习数据。
+
+```json
+{
+  "version": 1,
+  "updated": 1793114400,
+  "samples": 42,
+  "segments": {
+    "0-10":   { "n": 3, "sum_min": 18.6, "median_min": 6.2, "min": 5.1, "max": 8.0 },
+    "10-20":  { "n": 4, "sum_min": 30.0, "median_min": 7.5, "min": 6.1, "max": 9.0 },
+    ...
+    "90-100": { "n": 2, "sum_min": 38.0, "median_min": 19.0, "min": 16.0, "max": 22.0 }
+  },
+  "volt_curve": { "10": 3752, "20": 3807, ..., "100": 4444 }
+}
+```
+
+**无数据时返回 404**（需要至少一次完整充电会话）。
+
+### GET /api/eta?to=80
+预估剩余充电时间。
+
+```json
+{
+  "ok": true,
+  "to": 80,
+  "from": 65,
+  "eta_min": 23,
+  "eta_txt": "23分",
+  "scale": 1.12,
+  "confidence": "high",
+  "samples": 8
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `eta_min` | 预估分钟数 |
+| `eta_txt` | 格式化文本（`23分` / `1小时5分`） |
+| `scale` | 速率修正系数（当前实测 / 历史，夹在 0.5~2） |
+| `confidence` | `high`(样本≥5) / `medium`(≥3) / `low`(<3) / `none`(无数据) |
+| `samples` | 已学习的历史会话数 |
+
+**算法说明**：不用 CC/CV 判阶段（本机 MTK 智能充电电流非单调），
+直接从历史数据学「每跨 10% 实际耗时」，逐段累加 + 速率修正。
+
+---
+
+## v1.17.0 status 新增字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `suspend_active` | int | 是否正在停充（1/0） |
+| `suspend_reason` | string | `temp` / `chg_temp` / `limit` / `paused` / `full` / `bypass` / `none` |
+| `suspend_since` | long | 停充起始时间戳 |
+| `suspend_recover_in` | int | 预计恢复秒数（-1 = 不适用） |
+| `rec_temp_hyst` | int | 温度恢复迟滞（°C，默认 5） |
+| `rec_temp_hold` | int | 温度恢复保持秒数（默认 60） |
+| `rec_soc_hyst` | int | 电量恢复迟滞（%，默认 5） |
+
+**已移除**：`webhook` 字段（v1.17.0 砍掉 TG 推送）
+
+---
+
+## 静态文件服务
+
+battd 同时提供 WebUI 静态文件：
+
+| 路径 | MIME |
+|---|---|
+| `/` 或 `/index.html` | `text/html; charset=utf-8` |
+| `/manifest.json` | `application/manifest+json` |
+| `/sw.js` | `application/javascript` |
+| `/TempCurveView.js` | `application/javascript` |
+| `/icon-*.png` | `image/png` |
+| `/api/*` | `application/json` |
+
+**只绑 `127.0.0.1`，不对外开放。**
