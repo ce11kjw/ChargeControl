@@ -28,39 +28,309 @@
 /* ★ v1.11.0 配色对齐 App（ce11kjw/ChargeControl-App 的 Cyber 主题）
    背景 #080B14 / 卡片 #101624 / 主色青紫 #8B5CF6·#22D3EE
    与 App 的 Color.kt 保持同一套色值 */
-:root { --bg:#080B14; --card:#101624; --card2:#141D2E; --navbg:rgba(16,22,36,.88); --line:rgba(139,92,246,.18); --txt:#E8EDF5; --txt2:#8B98B0; --accent:#8B5CF6; --accent2:#22D3EE; --green:#10D9A0; --red:#F87171; --orange:#FBBF24; --amber:#FBBF24; --blue:#38BDF8; --gray:#3D4A5C; --purple:#8B5CF6; --purple-bright:#A78BFA; --purple-deep:#0E7490; --steel:#3D70B8; --r:20px; --glow:0 0 20px rgba(139,92,246,.25); }
+
+/* ═══════════════════════════════════════════════════════════════
+   v2.1.0 设计系统 —— 参考 Material 3 / Apple HIG / Linear
+   所有尺寸、颜色、阴影、动效都从这里取，不再随手写数字
+   ═══════════════════════════════════════════════════════════════ */
+:root {
+  /* ── 色彩（语义化命名，不按色相） ── */
+  --bg:        #0A0E17;   /* 页面底（比原 #080B14 略提亮，减少纯黑压抑） */
+  --bg-elev:   #0E1420;   /* 抬升层（导航栏底） */
+  --card:      #121A28;   /* 卡片 */
+  --card-hi:   #17212F;   /* 卡片交互态 */
+  --card2:     #18222F;   /* 次级卡片 */
+  --navbg:     rgba(14,20,32,.82);
+
+  /* 描边：用半透明白代替纯色，暗色模式下层次更细腻 */
+  --line:      rgba(255,255,255,.07);
+  --line-hi:   rgba(255,255,255,.12);
+  --line-accent: rgba(139,92,246,.35);
+
+  /* 文字：三级对比 */
+  --txt:       #EDF1F7;   /* 主文字 */
+  --txt2:      #9AA7BC;   /* 次文字 */
+  --txt3:      #64708A;   /* 辅助/占位 */
+
+  /* 品牌色 */
+  --accent:      #8B5CF6;
+  --accent-hi:   #A78BFA;
+  --accent-dim:  rgba(139,92,246,.15);
+  --accent2:     #22D3EE;
+
+  /* 语义色 */
+  --green:  #34D399;
+  --red:    #F87171;
+  --orange: #FB923C;
+  --amber:  #FBBF24;
+  --blue:   #38BDF8;
+  --purple: #8B5CF6;
+  --gray:   #3D4A5C;
+
+  /* ── 字号系统（7 档，模块化比例） ── */
+  --fs-xs:   10px;
+  --fs-sm:   11px;
+  --fs-base: 13px;
+  --fs-md:   15px;
+  --fs-lg:   18px;
+  --fs-xl:   26px;
+  --fs-2xl:  52px;
+
+  /* ── 图标尺寸（与字号解耦） ── */
+  --icon-sm: 14px;
+  --icon-md: 17px;
+  --icon-lg: 20px;
+
+  /* ── 字重 ── */
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semi:   600;
+  --fw-bold:   700;
+
+  /* 字距：大字号收紧，小字号放松 */
+  --ls-tight: -0.02em;
+  --ls-normal: 0;
+  --ls-wide:  0.02em;
+
+  /* ── 间距系统（8pt 栅格） ── */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* ── 圆角（2 档 + 胶囊） ── */
+  --r-sm:   12px;
+  --r-md:   18px;
+  --r-full: 999px;
+
+  /* ── 阴影（3 级层次） ── */
+  --sh-1: 0 1px 2px rgba(0,0,0,.3);
+  --sh-2: 0 4px 14px rgba(0,0,0,.35);
+  --sh-3: 0 12px 36px rgba(0,0,0,.5);
+  --sh-glow: 0 0 24px rgba(139,92,246,.22);
+
+  /* ── 动效曲线 ── */
+  --ease-out:    cubic-bezier(.16,1,.3,1);
+  --ease-in-out: cubic-bezier(.4,0,.2,1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+
+  /* 兼容旧变量名（避免大范围改动） */
+  --accent-legacy: #8B5CF6;
+  --r: var(--r-md);
+  --glow: var(--sh-glow);
+  --purple-bright: var(--accent-hi);
+  --purple-deep: #0E7490;
+  --steel: #3D70B8;
+}
+
+/* 浅色主题 */
+:root[data-theme="1"] {
+  --bg:        #F4F6FA;
+  --bg-elev:   #FFFFFF;
+  --card:      #FFFFFF;
+  --card-hi:   #F8FAFD;
+  --card2:     #EEF2F8;
+  --navbg:     rgba(255,255,255,.86);
+
+  --line:      rgba(0,0,0,.07);
+  --line-hi:   rgba(0,0,0,.12);
+  --line-accent: rgba(124,58,237,.3);
+
+  --txt:  #111827;
+  --txt2: #5A6779;
+  --txt3: #8B95A5;
+
+  --accent:     #7C3AED;
+  --accent-hi:  #8B5CF6;
+  --accent-dim: rgba(124,58,237,.1);
+
+  --green:  #059669;
+  --red:    #DC2626;
+  --orange: #EA580C;
+  --amber:  #D97706;
+  --blue:   #0284C7;
+  --gray:   #C7CFDD;
+
+  --sh-1: 0 1px 2px rgba(16,24,40,.06);
+  --sh-2: 0 4px 14px rgba(16,24,40,.08);
+  --sh-3: 0 12px 36px rgba(16,24,40,.12);
+  --sh-glow: 0 0 24px rgba(124,58,237,.12);
+}
+
 :root[data-theme="1"] { --bg:#F5F7FB; --card:#FFFFFF; --card2:#EDF1F8; --navbg:rgba(255,255,255,.9); --line:rgba(139,92,246,.15); --txt:#1A2233; --txt2:#6B7A94; --accent:#7C3AED; --accent2:#0891B2; --green:#0EA47A; --red:#DC2626; --orange:#D97706; --amber:#D97706; --blue:#0891B2; --gray:#C7CFDD; --purple:#7C3AED; --purple-bright:#8B5CF6; --purple-deep:#0E7490; --steel:#3D70B8; --glow:0 2px 12px rgba(124,58,237,.12); }
-body { background:var(--bg); color:var(--txt); min-height:100vh; padding-bottom:100px; -webkit-font-smoothing:antialiased; transition:background .35s, color .35s; }
-.container { max-width:560px; margin:0 auto; padding:14px 16px; }
-h1 { font-size:28px; font-weight:700; letter-spacing:-.6px; margin:6px 0 18px; display:flex; align-items:center; gap:10px; }
-h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(--txt2); border-radius:20px; padding:3px 9px; }
-.tabs { position:fixed; bottom:0; left:0; right:0; z-index:50; display:flex; background:var(--navbg); backdrop-filter:saturate(180%) blur(20px); -webkit-backdrop-filter:saturate(180%) blur(20px); border-top:1px solid var(--line); padding:7px 4px calc(7px + env(safe-area-inset-bottom)); }
-.tab { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; padding:4px 2px; font-size:10px; font-weight:500; line-height:1.2; cursor:pointer; color:var(--txt2); transition:color .2s; }
-.tab .ti { font-size:21px; line-height:1; }
+body {
+  background:var(--bg);
+  color:var(--txt);
+  min-height:100vh;
+  padding-bottom:110px;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;
+  font-feature-settings:"kern" 1, "liga" 1, "calt" 1;
+  transition:background var(--dur-slow) var(--ease-in-out),
+             color var(--dur-slow) var(--ease-in-out);
+}
+.container { max-width:560px; margin:0 auto; padding:var(--sp-4) var(--sp-4); }
+h1 {
+  font-size:var(--fs-xl);
+  font-weight:var(--fw-bold);
+  letter-spacing:var(--ls-tight);
+  margin:var(--sp-2) 0 var(--sp-5);
+  display:flex;
+  align-items:center;
+  gap:var(--sp-2);
+}
+h1 .badge {
+  font-size:var(--fs-xs);
+  font-weight:var(--fw-semi);
+  background:var(--accent-dim);
+  color:var(--accent-hi);
+  border-radius:var(--r-full);
+  padding:3px 10px;
+  letter-spacing:var(--ls-wide);
+}
+.tabs {
+  position:fixed; bottom:0; left:0; right:0; z-index:90;
+  display:flex;
+  background:var(--navbg);
+  backdrop-filter:blur(20px) saturate(180%);
+  -webkit-backdrop-filter:blur(20px) saturate(180%);
+  border-top:1px solid var(--line);
+  padding:var(--sp-1) var(--sp-2) calc(var(--sp-1) + env(safe-area-inset-bottom, 0px));
+  max-width:560px; margin:0 auto;
+}
+.tab {
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+  padding:var(--sp-2) 0;
+  color:var(--txt3);
+  font-size:var(--fs-xs);
+  font-weight:var(--fw-medium);
+  cursor:pointer;
+  border-radius:var(--r-sm);
+  transition:color var(--dur-base) var(--ease-out),
+             background var(--dur-base) var(--ease-out);
+  position:relative;
+  -webkit-tap-highlight-color:transparent;
+}
+.tab .ti { font-size:var(--icon-md); line-height:1; transition:transform var(--dur-base) var(--ease-out); }
+.tab:active .ti { transform:scale(.9); }
+.tab.active { color:var(--accent-hi); }
+.tab.active .ti { transform:translateY(-1px); }
+.tab.active::before {
+  content:''; position:absolute; top:0; left:50%; transform:translateX(-50%);
+  width:20px; height:2px; border-radius:0 0 2px 2px;
+  background:var(--accent);
+  animation:tabIn var(--dur-base) var(--ease-out);
+}
+@keyframes tabIn { from { width:0; opacity:0; } to { width:20px; opacity:1; } }
+
 .tab.active { background:none; color:var(--purple-bright); font-weight:600; text-shadow:0 0 12px rgba(167,139,250,.5); }
 .tab.active .ti { filter:drop-shadow(0 0 6px rgba(167,139,250,.6)); }
-.banner { min-height:22px; border-radius:14px; padding:13px 16px; margin-bottom:14px; font-size:14px; display:flex; align-items:center; gap:10px; justify-content:space-between; }
+.banner { min-height:22px; border-radius:14px; padding:13px 16px; margin-bottom:14px; font-size:var(--fs-base); display:flex; align-items:center; gap:10px; justify-content:space-between; }
 .banner.charging { background:rgba(74,222,128,.12); border:1px solid rgba(74,222,128,.3); }
 .banner.suspended { background:rgba(251,191,36,.12); border:1px solid rgba(251,191,36,.3); }
 .banner.temp { background:rgba(248,113,113,.12); border:1px solid rgba(248,113,113,.3); }
 .banner.manual { background:rgba(96,165,250,.12); border:1px solid rgba(96,165,250,.3); }
 .banner.disabled { background:rgba(100,116,139,.12); border:1px solid rgba(100,116,139,.3); }
 .banner.idle { background:rgba(100,116,139,.08); border:1px solid #334155; }
-.big-cap { background:var(--card); border-radius:var(--r); padding:22px; margin-bottom:14px; }
-.big-cap .val { font-size:46px; font-weight:700; letter-spacing:-1.6px; transition:color .35s cubic-bezier(.4,0,.2,1); background:linear-gradient(120deg, var(--purple-bright), var(--accent2)); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+.big-cap {
+  text-align:center;
+  padding:var(--sp-6) 0 var(--sp-5);
+  position:relative;
+}
+.big-cap .val {
+  font-size:var(--fs-2xl);
+  font-weight:var(--fw-bold);
+  letter-spacing:-0.04em;
+  line-height:1;
+  font-variant-numeric:tabular-nums;
+  transition:color var(--dur-base);
+}
+.big-cap .bar {
+  height:8px; border-radius:var(--r-full);
+  background:var(--card2);
+  margin:var(--sp-4) 0 var(--sp-2);
+  overflow:hidden;
+  position:relative;
+}
+.big-cap .fill {
+  height:100%; border-radius:var(--r-full);
+  background:linear-gradient(90deg, var(--accent), var(--accent2));
+  transition:width var(--dur-slow) var(--ease-out);
+  position:relative;
+}
+.big-cap .fill::after {
+  content:''; position:absolute; inset:0;
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,.3), transparent);
+  animation:shimmer 2.4s infinite;
+}
+@keyframes shimmer { 0% { transform:translateX(-100%); } 100% { transform:translateX(200%); } }
+.big-cap .info {
+  font-size:var(--fs-sm); color:var(--txt3);
+  display:flex; justify-content:center; gap:var(--sp-4);
+  margin-top:var(--sp-2);
+}
+.big-cap .val { font-size:var(--fs-2xl); font-weight:700; letter-spacing:-1.6px; transition:color .35s cubic-bezier(.4,0,.2,1); background:linear-gradient(120deg, var(--purple-bright), var(--accent2)); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
 @keyframes shimmer { 0%{opacity:.3} 50%{opacity:1} 100%{opacity:.3} }
 .big-cap .bar { height:8px; background:var(--card2); border-radius:99px; margin-top:14px; overflow:hidden; }
 .big-cap.loading .val { animation:shimmer 2s ease-in-out infinite; }
 .big-cap.loading .bar .fill { animation:shimmer 2s ease-in-out infinite; }
 .big-cap .fill { height:100%; border-radius:99px; transition:width .8s cubic-bezier(.4,0,.2,1); }
-.big-cap .info { display:flex; justify-content:space-between; margin-top:10px; font-size:12px; color:var(--txt2); }
-.temp-item { min-height:44px; }
+.big-cap .info { display:flex; justify-content:space-between; margin-top:10px; font-size:var(--fs-sm); color:var(--txt2); }
+.temp-item {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:9px 0;
+  border-bottom:1px solid var(--line);
+  font-size:var(--fs-base);
+}
+.temp-item:last-child { border-bottom:none; }
+.temp-item .n { color:var(--txt2); font-size:var(--fs-base); }
+.temp-item .v {
+  color:var(--txt); font-weight:var(--fw-medium);
+  font-variant-numeric:tabular-nums;
+}
 /* 卡片渐变（对齐 App 的 CardGradient: CyberCardStart → CyberCardEnd）*/
 .panel, .big-cap { background:linear-gradient(160deg, var(--card) 0%, color-mix(in srgb, var(--purple) 8%, var(--card)) 100%); border:1px solid var(--line); box-shadow:var(--glow); }
-.panel h2 { font-size:13px; color:var(--txt); font-weight:600; letter-spacing:.2px; margin:14px 0 8px; display:flex; align-items:center; }
+.panel h2 {
+  font-size:var(--fs-md);
+  font-weight:var(--fw-semi);
+  letter-spacing:var(--ls-normal);
+  margin:0 calc(var(--sp-4) * -1) var(--sp-2);
+  padding:var(--sp-3) var(--sp-4);
+  border-bottom:1px solid var(--line);
+  display:flex;
+  align-items:center;
+  color:var(--txt);
+}
 .panel h2::before { content:''; width:3px; height:14px; border-radius:2px; background:var(--accent); margin-right:8px; display:inline-block; }
-.cards { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:16px; }
-.card { background:linear-gradient(160deg, var(--card) 0%, color-mix(in srgb, var(--purple) 8%, var(--card)) 100%); border:1px solid var(--line); border-radius:var(--r); padding:16px; transition:transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s; }
+.cards {
+  display:grid;
+  grid-template-columns:repeat(2, 1fr);
+  gap:var(--sp-3);
+  margin-bottom:var(--sp-4);
+}
+.card {
+  background:linear-gradient(160deg, var(--card) 0%, var(--card-hi) 100%);
+  border:1px solid var(--line);
+  border-radius:var(--r-md);
+  padding:var(--sp-4);
+  box-shadow:var(--sh-1);
+  transition:transform var(--dur-base) var(--ease-out),
+             box-shadow var(--dur-base) var(--ease-out),
+             border-color var(--dur-base) var(--ease-in-out);
+}
+@media (hover:hover) {
+  .card:hover {
+    border-color:var(--line-accent);
+    box-shadow:var(--sh-2), 0 0 0 1px rgba(139,92,246,.12);
+  }
+}
+.card:active { transform:scale(.975); box-shadow:var(--sh-1); }
 .card:active { transform:scale(.97); box-shadow:var(--glow); }
 /* ★ v1.19.2 卡片拖拽排序 */
 .card { position:relative; }
@@ -80,7 +350,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 }
 .card-hint {
   position:absolute; top:6px; right:6px;
-  font-size:10px; color:var(--txt2);
+  font-size:var(--fs-xs); color:var(--txt2);
   opacity:.6; user-select:none; pointer-events:none;
 }
 .cards.editing .card-hint { opacity:0; }
@@ -88,18 +358,18 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
   position:absolute; top:4px; right:4px;
   width:22px; height:22px;
   display:none; align-items:center; justify-content:center;
-  color:var(--txt2); font-size:13px;
+  color:var(--txt2); font-size:var(--fs-base);
   border-radius:6px; background:rgba(139,92,246,.15);
   cursor:grab; touch-action:none;
 }
 .cards.editing .card-drag-handle { display:flex; }
 .reorder-bar {
   display:flex; align-items:center; justify-content:space-between;
-  margin:-4px 0 10px; font-size:12px; color:var(--txt2);
+  margin:-4px 0 10px; font-size:var(--fs-sm); color:var(--txt2);
 }
 .reorder-bar button {
   background:var(--card2); color:var(--txt); border:1px solid var(--line);
-  border-radius:8px; padding:5px 12px; font-size:12px; cursor:pointer;
+  border-radius:8px; padding:5px 12px; font-size:var(--fs-sm); cursor:pointer;
 }
 .reorder-bar button:active { transform:scale(.96); }
 /* ★ v1.19.2 二级 tab */
@@ -108,7 +378,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
   background:var(--card2); padding:4px; border-radius:12px;
 }
 .subtab {
-  flex:1; text-align:center; padding:9px 0; font-size:13px;
+  flex:1; text-align:center; padding:9px 0; font-size:var(--fs-base);
   color:var(--txt2); border-radius:9px; cursor:pointer;
   transition:background .2s, color .2s;
   display:flex; align-items:center; justify-content:center; gap:6px;
@@ -117,7 +387,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
   background:var(--accent); color:#fff; font-weight:600;
   box-shadow:0 2px 8px rgba(139,92,246,.35);
 }
-.subtab i { font-size:12px; }
+.subtab i { font-size:var(--fs-sm); }
 /* ★ v1.19.2 设置页滑块大字档位 */
 /* ★ v2.0.0 充电热力图 */
 .heat-grid {
@@ -126,18 +396,18 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 }
 .heat-cell {
   height:52px; border-radius:5px; display:flex; flex-direction:column;
-  align-items:center; justify-content:center; font-size:9px; font-weight:600;
+  align-items:center; justify-content:center; font-size:var(--fs-xs); font-weight:600;
   transition:transform .15s; cursor:default; color:#fff;
   text-shadow:0 1px 2px rgba(0,0,0,.5);
 }
 .heat-cell:hover { transform:scale(1.08); z-index:2; }
 .heat-hint {
   grid-column:1 / -1; text-align:center; color:var(--txt2);
-  font-size:11px; padding:16px 0;
+  font-size:var(--fs-sm); padding:16px 0;
 }
 .heat-legend {
   display:flex; align-items:center; gap:8px; justify-content:center;
-  margin-top:8px; font-size:10px; color:var(--txt2);
+  margin-top:8px; font-size:var(--fs-xs); color:var(--txt2);
 }
 .heat-bar {
   width:120px; height:6px; border-radius:3px;
@@ -147,7 +417,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 /* ★ v2.0.0 停充时间线 */
 .timeline-summary { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
 .tl-stat {
-  display:flex; align-items:center; gap:6px; font-size:12px;
+  display:flex; align-items:center; gap:6px; font-size:var(--fs-sm);
   background:var(--card2); padding:4px 10px; border-radius:8px;
 }
 .tl-reason { font-weight:600; }
@@ -163,26 +433,134 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 }
 .timeline-axis {
   display:flex; justify-content:space-between;
-  font-size:9px; color:var(--txt2);
+  font-size:var(--fs-xs); color:var(--txt2);
 }
 
 .big-val {
-  font-size:22px; font-weight:700; letter-spacing:-.5px;
+  font-size:var(--fs-xl); font-weight:700; letter-spacing:-.5px;
   color:var(--accent); margin-left:8px; font-variant-numeric:tabular-nums;
 }
 .badge-dot {
-  background:var(--red); color:#fff; font-size:10px;
+  background:var(--red); color:#fff; font-size:var(--fs-xs);
   border-radius:9px; padding:1px 6px; min-width:16px; font-weight:600;
 }
-.card .lbl { font-size:11px; color:var(--txt2); margin-bottom:4px; }
-.card .val { font-size:23px; font-weight:650; letter-spacing:-.4px; }
-.card .sub { font-size:11px; color:var(--gray); margin-top:3px; }
-.panel { background:var(--card); border-radius:var(--r); padding:4px 16px 8px; margin-bottom:14px; transition:transform .25s cubic-bezier(.4,0,.2,1); }
-.row { display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--line); min-height:48px; }
+.card .lbl { font-size:var(--fs-sm); font-weight:var(--fw-medium); color:var(--txt2); margin-bottom:var(--sp-1); letter-spacing:var(--ls-wide); }
+.card .val { font-size:var(--fs-xl); font-weight:var(--fw-bold); letter-spacing:var(--ls-tight); line-height:1.15; font-variant-numeric:tabular-nums; }
+.card .sub { font-size:var(--fs-xs); color:var(--txt3); margin-top:var(--sp-1); line-height:1.4; }
+/* 尊重系统「减少动效」设置 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration:0.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:0.01ms !important;
+  }
+}
+
+/* 骨架屏 */
+.skeleton {
+  background:linear-gradient(90deg, var(--card2) 25%, var(--card-hi) 50%, var(--card2) 75%);
+  background-size:200% 100%;
+  animation:skeleton 1.6s infinite;
+  border-radius:var(--r-sm);
+  color:transparent !important;
+}
+@keyframes skeleton { 0% { background-position:200% 0; } 100% { background-position:-200% 0; } }
+
+/* 空状态 */
+.empty-state {
+  text-align:center;
+  padding:var(--sp-8) var(--sp-4);
+  color:var(--txt3);
+  font-size:var(--fs-base);
+}
+.empty-state i { font-size:32px; opacity:.4; display:block; margin-bottom:var(--sp-3); }
+
+/* 键盘焦点可见（无障碍） */
+:focus-visible {
+  outline:2px solid var(--accent);
+  outline-offset:2px;
+  border-radius:var(--r-sm);
+}
+
+/* 自定义滚动条（桌面浏览器） */
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--line-hi); border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:var(--txt3); }
+
+.panel {
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:var(--r-md);
+  padding:0 var(--sp-4) var(--sp-3);
+  margin-bottom:var(--sp-3);
+  box-shadow:var(--sh-1);
+  transition:border-color var(--dur-base) var(--ease-in-out),
+             box-shadow var(--dur-base) var(--ease-in-out);
+}
+.panel:hover { border-color:var(--line-hi); }
+.panel h2 i {
+  color:var(--accent-hi);
+  font-size:var(--icon-sm);
+  opacity:.9;
+}
+/* 主面板：更大留白 + 微光 */
+.panel-primary {
+  background:linear-gradient(165deg, var(--card) 0%, var(--card-hi) 100%);
+  border-color:var(--line-accent);
+  box-shadow:var(--sh-2), var(--sh-glow);
+  padding:var(--sp-4) var(--sp-4) var(--sp-3);
+}
+/* 次要面板：降低存在感 */
+.panel-muted {
+  background:transparent;
+  border-color:transparent;
+  box-shadow:none;
+}
+.row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:var(--sp-3) 0;
+  border-bottom:1px solid var(--line);
+  min-height:44px;
+  transition:background var(--dur-fast);
+}
 .row:last-child { border-bottom:none; }
-.row .lbl { font-size:15px; }
-.row input[type=number] { width:64px; background:var(--card2); border:none; color:var(--txt); border-radius:10px; padding:9px 8px; text-align:center; font-size:15px; }
-.btn { background:var(--accent); color:#fff; border:none; border-radius:14px; padding:13px 20px; font-size:15px; font-weight:600; width:100%; cursor:pointer; margin:10px 0 12px; transition:transform .12s, opacity .2s; }
+.row .lbl { color:var(--txt2); font-size:var(--fs-base); }
+.row .v {
+  color:var(--txt); font-size:var(--fs-base);
+  font-weight:var(--fw-medium);
+  font-variant-numeric:tabular-nums;
+  text-align:right;
+  word-break:break-all;
+  max-width:60%;
+}
+.row:last-child { border-bottom:none; }
+.row .lbl { font-size:var(--fs-base); }
+.row input[type=number] { width:64px; background:var(--card2); border:none; color:var(--txt); border-radius:var(--r-sm); padding:var(--sp-2) var(--sp-2); text-align:center; font-size:var(--fs-base); }
+.btn {
+  background:var(--accent-dim);
+  color:var(--accent-hi);
+  border:1px solid var(--line-accent);
+  border-radius:var(--r-sm);
+  padding:9px var(--sp-4);
+  font-size:var(--fs-base);
+  font-weight:var(--fw-semi);
+  cursor:pointer;
+  transition:background var(--dur-fast) var(--ease-out),
+             transform var(--dur-fast) var(--ease-out),
+             box-shadow var(--dur-fast) var(--ease-out);
+  -webkit-tap-highlight-color:transparent;
+  user-select:none;
+}
+.btn:hover { background:rgba(139,92,246,.22); box-shadow:var(--sh-1); }
+.btn:active { transform:scale(.96); }
+.btn.gray {
+  background:var(--card2);
+  color:var(--txt2);
+  border-color:var(--line);
+}
+.btn.gray:hover { background:var(--card-hi); color:var(--txt); }
+.btn i, .btn .fa-solid, .btn .fa-regular { font-size:var(--icon-sm); }
 .btn.green { background:var(--green); color:#fff; }
 .btn.gray { background:var(--card2); color:var(--txt); }
 .btn:active { transform:scale(.975); opacity:.85; }
@@ -192,18 +570,43 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
 .toggle.on::after { transform:translateX(20px); }
 .temp-list { display:block; }
 .temp-item { display:flex; align-items:center; justify-content:space-between; background:var(--card2); border-radius:12px; padding:12px 14px; }
-.temp-item .n { font-size:13px; color:var(--txt2); }
-.temp-item .v { font-size:17px; font-weight:650; }
+.temp-item .n { font-size:var(--fs-base); color:var(--txt2); }
+.temp-item .v { font-size:var(--fs-base); font-weight:var(--fw-semi); }
 .temp-item .dot { width:10px; height:10px; border-radius:50%; margin-right:10px; }
-.proto-chip { display:inline-block; background:rgba(34,211,238,.12); border:1px solid rgba(34,211,238,.4); border-radius:20px; padding:2px 10px; font-size:11px; font-weight:600; }
+.proto-chip { display:inline-block; background:rgba(34,211,238,.12); border:1px solid rgba(34,211,238,.4); border-radius:20px; padding:2px 10px; font-size:var(--fs-sm); font-weight:600; }
 #chartWrap { position:relative; height:220px; }
 .collapse-head { display:flex; justify-content:space-between; align-items:center; cursor:pointer; padding:10px 0; }
-.collapse-head .arrow { transition:.3s; font-size:12px; }
+.collapse-head .arrow { transition:.3s; font-size:var(--fs-sm); }
 .collapse-head.open .arrow { transform:rotate(180deg); }
-.log-box { background:var(--card2); border:none; border-radius:12px; padding:12px; height:280px; overflow-y:auto; font-family:monospace; font-size:11px; line-height:1.6; color:var(--txt2); white-space:pre-wrap; }
+.log-box { background:var(--card2); border:none; border-radius:12px; padding:12px; height:280px; overflow-y:auto; font-family:monospace; font-size:var(--fs-sm); line-height:1.6; color:var(--txt2); white-space:pre-wrap; }
 .health-box { display:flex; align-items:center; gap:12px; background:var(--card); border-radius:var(--r); padding:16px; margin-bottom:12px; }
-.health-box .big { font-size:36px; font-weight:800; }
-.health-box   .slider { -webkit-appearance:none;appearance:none;height:5px;border-radius:99px;background:var(--card2);outline:none;vertical-align:middle; }
+.health-box .big { font-size:var(--fs-2xl); font-weight:800; }
+.health-box   .slider {
+  -webkit-appearance:none; appearance:none;
+  width:100%; height:6px;
+  background:linear-gradient(90deg, var(--accent) 0%, var(--accent) var(--fill,50%), var(--card2) var(--fill,50%));
+  border-radius:var(--r-full);
+  outline:none;
+  cursor:pointer;
+  transition:background var(--dur-fast);
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance:none; appearance:none;
+  width:22px; height:22px; border-radius:50%;
+  background:#fff;
+  border:3px solid var(--accent);
+  box-shadow:var(--sh-1), 0 0 0 0 rgba(139,92,246,.3);
+  cursor:grab;
+  transition:transform var(--dur-fast) var(--ease-out),
+             box-shadow var(--dur-fast) var(--ease-out);
+}
+.slider::-webkit-slider-thumb:hover { transform:scale(1.12); box-shadow:var(--sh-1), 0 0 0 6px rgba(139,92,246,.15); }
+.slider:active::-webkit-slider-thumb { cursor:grabbing; transform:scale(1.05); box-shadow:var(--sh-1), 0 0 0 8px rgba(139,92,246,.2); }
+.slider::-moz-range-thumb {
+  width:22px; height:22px; border-radius:50%;
+  background:#fff; border:3px solid var(--accent);
+  box-shadow:var(--sh-1); cursor:grab;
+}
   .slider::-webkit-slider-thumb { -webkit-appearance:none;appearance:none;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer; }
   .slider::-moz-range-thumb { width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer; }
 </style>
@@ -253,14 +656,14 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       <div class="card" data-card="proc" @pointerdown="dragStart($event,'proc')">
         <div class="card-drag-handle">⠿</div>
         <div class="lbl">守护进程</div>
-        <div class="val" style="font-size:20px" x-text="s.proc_name || '—'"></div>
+        <div class="val" style="font-size:var(--fs-lg)" x-text="s.proc_name || '—'"></div>
         <div class="sub" x-text="'PID ' + (s.proc_pid || '—') + '  CPU ' + (s.cpu_pct >= 0 ? (cpuCpuPct() + '%') : '—')"></div>
       </div>
       <div class="card" data-card="health" @pointerdown="dragStart($event,'health')">
         <div class="card-drag-handle">⠿</div>
-        <div style="display:flex;gap:16px;font-size:13px;color:var(--txt2);margin-top:4px;flex-wrap:wrap">
+        <div style="display:flex;gap:var(--sp-4);font-size:var(--fs-base);color:var(--txt2);margin-top:var(--sp-1);flex-wrap:wrap">
           <span>循环 <strong style="color:var(--txt)" x-text="s.cycle_count >= 0 ? s.cycle_count : '—'"></strong> 次 · 衰减 <strong style="color:var(--txt)" x-text="s.health >= 0 ? (100 - s.health).toFixed(1) + '%' : '—'"></strong></span>
-          <span>健康度 <strong style="color:var(--txt)" x-text="s.health > 0 ? s.health + '%' : '—'"></strong> <span x-text="s.health_rating"></span> <span x-show="s.soh_first > 0" style="font-size:11px;opacity:.7" x-text="'· 首记 ' + s.soh_first + '%' + (s.soh_delta_x10 !== 0 ? (' (' + (s.soh_delta_x10 > 0 ? '+' : '') + (s.soh_delta_x10/10).toFixed(1) + '%)') : '')"></span></span>
+          <span>健康度 <strong style="color:var(--txt)" x-text="s.health > 0 ? s.health + '%' : '—'"></strong> <span x-text="s.health_rating"></span> <span x-show="s.soh_first > 0" style="font-size:var(--fs-sm);opacity:.7" x-text="'· 首记 ' + s.soh_first + '%' + (s.soh_delta_x10 !== 0 ? (' (' + (s.soh_delta_x10 > 0 ? '+' : '') + (s.soh_delta_x10/10).toFixed(1) + '%)') : '')"></span></span>
         </div>
       </div>
     </div>
@@ -284,9 +687,9 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
         <div class="temp-item"><span class="n">衰减率</span><span class="v" x-text="s.health_degrade > 0 ? (s.health_degrade/10).toFixed(1) + '%/千次' : '—'"></span></div>
         <div class="temp-item"><span class="n">温度/电压</span><span class="v" x-text="(s.temp > 0 ? s.temp + '°C' : '—') + ' / ' + (s.voltage ? (s.voltage/1000).toFixed(3) + 'V' : '—')"></span></div>
         <div class="temp-item"><span class="n">电流/功率</span><span class="v" x-text="(s.current ? curDisplay() : '—') + ' / ' + powerDisplay()"></span></div>
-        <div class="temp-item" x-show="s.bat_technology || s.bat_manufacturer || s.bat_model_name"><span class="n">电池</span><span class="v" style="font-size:13px" x-text="[s.bat_technology, s.bat_manufacturer, s.bat_model_name].filter(Boolean).join(' ') || '—'"></span></div>
+        <div class="temp-item" x-show="s.bat_technology || s.bat_manufacturer || s.bat_model_name"><span class="n">电池</span><span class="v" style="font-size:var(--fs-base)" x-text="[s.bat_technology, s.bat_manufacturer, s.bat_model_name].filter(Boolean).join(' ') || '—'"></span></div>
         <div class="temp-item" x-show="s.bat_health || s.bat_capacity_level"><span class="n">状态/容量</span><span class="v" x-text="[s.bat_health, s.bat_capacity_level].filter(Boolean).join(' ') || '—'"></span></div>
-        <div class="temp-item" x-show="s.bat_present >= 0 || s.temp_ambient > 0 || s.internal_resistance > 0"><span class="n">在位/环境/内阻</span><span class="v" style="font-size:13px" x-text="[(s.bat_present>=0?(s.bat_present?'在位':'缺失'):''), (s.temp_ambient>0?(s.temp_ambient/10).toFixed(1)+'°C':''), (s.internal_resistance>0?(s.internal_resistance/1000).toFixed(0)+'mΩ':'')].filter(Boolean).join(' ') || '—'"></span></div>
+        <div class="temp-item" x-show="s.bat_present >= 0 || s.temp_ambient > 0 || s.internal_resistance > 0"><span class="n">在位/环境/内阻</span><span class="v" style="font-size:var(--fs-base)" x-text="[(s.bat_present>=0?(s.bat_present?'在位':'缺失'):''), (s.temp_ambient>0?(s.temp_ambient/10).toFixed(1)+'°C':''), (s.internal_resistance>0?(s.internal_resistance/1000).toFixed(0)+'mΩ':'')].filter(Boolean).join(' ') || '—'"></span></div>
         <div class="temp-item" x-show="s.temp_min > 0 || s.temp_max > 0 || s.calibrate >= 0"><span class="n">限温/校准</span><span class="v" x-text="[(s.temp_min>0?(s.temp_min/10).toFixed(1)+'°C':''), (s.temp_max>0?(s.temp_max/10).toFixed(1)+'°C':''), (s.calibrate>=0?(s.calibrate?'需校准':'正常'):'')].filter(Boolean).join(' / ') || '—'"></span></div>
       </div>
     </div>
@@ -295,13 +698,13 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel" x-show="subTab==='curve'">
       <h2>
         <i class="fa-solid fa-heart-pulse" style="margin-right:6px;color:#f87171"></i>电池健康趋势
-        <span style="float:right;font-size:11px;font-weight:400;color:var(--txt2)"
+        <span style="float:right;font-size:var(--fs-sm);font-weight:400;color:var(--txt2)"
               x-text="sohInfo"></span>
       </h2>
       <div style="position:relative;height:140px">
         <canvas id="sohChart"></canvas>
       </div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--txt2);justify-content:center">
+      <div style="display:flex;gap:var(--sp-4);flex-wrap:wrap;margin-top:var(--sp-2);font-size:var(--fs-sm);color:var(--txt2);justify-content:center">
         <span>首记 <strong style="color:var(--txt)" x-text="(s.soh_first > 0 ? s.soh_first + '%' : '—')"></strong></span>
         <span>当前 <strong :style="'color:' + (s.health >= 90 ? 'var(--green)' : s.health >= 80 ? 'var(--amber)' : 'var(--red)')"
               x-text="(s.health > 0 ? s.health + '%' : '—')"></strong></span>
@@ -322,7 +725,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel">
       <h2 @click="toggleFold('charge')" style="cursor:pointer;user-select:none;display:flex;align-items:center">
         <i class="fa-solid fa-bolt" style="margin-right:6px"></i>充电详情
-        <span style="margin-left:auto;font-size:11px;font-weight:400;color:var(--txt2)"
+        <span style="margin-left:auto;font-size:var(--fs-sm);font-weight:400;color:var(--txt2)"
               x-text="fold.charge ? '收起 ▴' : '展开 ▾'"></span>
       </h2>
       <div class="temp-list" x-show="fold.charge">
@@ -333,7 +736,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel">
       <h2 @click="toggleFold('sys')" style="cursor:pointer;user-select:none;display:flex;align-items:center">
         <i class="fa-solid fa-microchip" style="margin-right:6px"></i>系统信息
-        <span style="margin-left:auto;font-size:11px;font-weight:400;color:var(--txt2)"
+        <span style="margin-left:auto;font-size:var(--fs-sm);font-weight:400;color:var(--txt2)"
               x-text="fold.sys ? '收起 ▴' : '展开 ▾'"></span>
       </h2>
       <div class="temp-list" x-show="fold.sys">
@@ -342,17 +745,17 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
         <div class="temp-item"><span class="n">CPU核心</span><span class="v" x-text="s.cpu_cores > 0 ? s.cpu_cores + '核' : '—'"></span></div>
         <div class="temp-item"><span class="n">运行时间</span><span class="v" x-text="s.uptime_secs > 0 ? Math.floor(s.uptime_secs/86400) + '天' + Math.floor((s.uptime_secs%86400)/3600) + '时' : '—'"></span></div>
         <div class="temp-item"><span class="n">空闲内存</span><span class="v" x-text="s.mem_free > 0 ? (s.mem_free/1024).toFixed(1) + 'GB' : '—'"></span></div>
-        <div class="temp-item"><span class="n">内核版本</span><span class="v" style="font-size:13px;font-weight:500" x-text="s.kernel_ver || '—'"></span></div>
-        <div class="temp-item"><span class="n">CPU型号</span><span class="v" style="font-size:13px;font-weight:500" x-text="s.cpu_model || '—'"></span></div>
-        <div class="temp-item"><span class="n">设备型号</span><span class="v" style="font-size:13px;font-weight:500" x-text="s.device_model || '—'"></span></div>
+        <div class="temp-item"><span class="n">内核版本</span><span class="v" style="font-size:var(--fs-base);font-weight:500" x-text="s.kernel_ver || '—'"></span></div>
+        <div class="temp-item"><span class="n">CPU型号</span><span class="v" style="font-size:var(--fs-base);font-weight:500" x-text="s.cpu_model || '—'"></span></div>
+        <div class="temp-item"><span class="n">设备型号</span><span class="v" style="font-size:var(--fs-base);font-weight:500" x-text="s.device_model || '—'"></span></div>
         <div class="temp-item"><span class="n">WiFi信号</span><span class="v" :style="s.wifi_on ? 'color:var(--green)' : ''" x-text="s.wifi_on ? (s.wifi_rssi + 'dBm') : '关闭'"></span></div>
         <div class="temp-item"><span class="n">移动网络</span><span class="v" :style="s.mobile_on ? 'color:var(--green)' : ''" x-text="s.mobile_on ? '已连接' : '未连接'"></span></div>
-        <div class="temp-item"><span class="n">网关接口</span><span class="v" style="font-size:13px;font-weight:500" x-text="s.ip_addr || '—'"></span></div>
+        <div class="temp-item"><span class="n">网关接口</span><span class="v" style="font-size:var(--fs-base);font-weight:500" x-text="s.ip_addr || '—'"></span></div>
 
-    <div class="panel" style="margin-top:16px">
+    <div class="panel" style="margin-top:var(--sp-4)">
       <h2><i class="fa-solid fa-chart-line" style="margin-right:6px"></i>趋势</h2>
       <div id="chartWrap"><canvas id="chart"></canvas></div>
-      <div class="info" style="justify-content:center;padding-top:8px;font-size:12px" x-text="lastUpdate"></div>
+      <div class="info" style="justify-content:center;padding-top:var(--sp-2);font-size:var(--fs-sm)" x-text="lastUpdate"></div>
     </div>
   </div>
   </div>
@@ -366,10 +769,10 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
         <div class="toggle" :class="s.limit_enabled ? 'on' : ''" @click="toggleEnabled()"></div>
       </div>
       <div class="row">
-        <span class="lbl">旁路充电 <span style="font-size:11px;color:var(--txt2)" x-text="s.bypass_hw ? '硬件直供' : '软件模式·维持55-60%'"></span></span>
+        <span class="lbl">旁路充电 <span style="font-size:var(--fs-sm);color:var(--txt2)" x-text="s.bypass_hw ? '硬件直供' : '软件模式·维持55-60%'"></span></span>
         <div class="toggle" :class="s.bypass_on ? 'on' : ''" @click="toggleBypass()"></div>
       </div>
-      <div style="font-size:13px;color:var(--txt2);padding:4px 0 6px"><i class="fa-solid fa-sliders" style="margin-right:4px"></i>高级设置</div>
+      <div style="font-size:var(--fs-base);color:var(--txt2);padding:var(--sp-1) 0 var(--sp-2)"><i class="fa-solid fa-sliders" style="margin-right:4px"></i>高级设置</div>
       <div>
         <div class="row"><span class="lbl">充电上限 <b class="big-val" x-text="s.charge_limit + '%'"></b></span>
           <input type="range" class="slider" min="60" max="100" step="5" x-model.number="s.charge_limit" @change="save()"></div>
@@ -412,7 +815,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel">
       <h2 x-html="t('scene')"></h2>
       <div class="row"><span class="lbl" x-text="s.scene==1?t('scene_gaming'):s.scene==2?t('scene_sleep'):s.scene==3?t('scene_trip'):t('scene_custom')"></span></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-2);margin-top:var(--sp-2)">
         <button class="btn" @click="applyScene(1)"><i class="fa-solid fa-gamepad" style="margin-right:4px"></i>游戏</button>
         <button class="btn" @click="applyScene(2)"><i class="fa-regular fa-moon" style="margin-right:4px"></i>睡眠</button>
         <button class="btn" @click="applyScene(3)"><i class="fa-solid fa-plane" style="margin-right:4px"></i>出差</button>
@@ -422,13 +825,13 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel">
       <h2 x-html="t('webhook')"></h2>
       <div class="row">
-        <input type="text" style="width:100%;background:var(--card2);border:none;color:var(--txt);border-radius:12px;padding:11px;font-size:13px" placeholder="https://..." x-model="webhookUrl" @change="setExtras({webhook: webhookUrl})">
+        <input type="text" style="width:100%;background:var(--card2);border:none;color:var(--txt);border-radius:var(--r-sm);padding:11px;font-size:var(--fs-base)" placeholder="https://..." x-model="webhookUrl" @change="setExtras({webhook: webhookUrl})">
       </div>
-      <div class="row" style="font-size:11px;color:var(--txt2)" x-html="t('webhook_hint')"></div>
+      <div class="row" style="font-size:var(--fs-sm);color:var(--txt2)" x-html="t('webhook_hint')"></div>
     </div>
     <div class="panel">
       <h2><i class="fa-solid fa-flask" style="margin-right:6px"></i>高级控制（实验性）</h2>
-      <p style="font-size:12px;color:var(--txt2);margin:0 0 8px">以下功能直接操作 MTK 内核节点，默认全部关闭。开启前请确认理解风险。</p>
+      <p style="font-size:var(--fs-sm);color:var(--txt2);margin:0 0 var(--sp-2)">以下功能直接操作 MTK 内核节点，默认全部关闭。开启前请确认理解风险。</p>
 
       <div class="temp-item"><span class="n">真旁路（系统直供）</span>
         <span class="v"><label style="display:inline-flex;align-items:center;gap:6px">
@@ -448,7 +851,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       <div class="temp-item"><span class="n">目标恒压 (mV)</span>
         <span class="v"><input type="number" min="3900" max="4500" step="10" :value="s.x_cv_mv || 4200" :disabled="!s.x_cv_ok"
           @change="setX('x_set_cv_mv', $event.target.value)" style="width:80px"> mV
-          <span style="font-size:11px;color:var(--txt2)">（默认4430, 4200更护电池）</span></span></div>
+          <span style="font-size:var(--fs-sm);color:var(--txt2)">（默认4430, 4200更护电池）</span></span></div>
 
       <div class="temp-item"><span class="n">充电电流限流</span>
         <span class="v"><label style="display:inline-flex;align-items:center;gap:6px">
@@ -466,7 +869,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
         </label></span></div>
 
       <div class="temp-item"><span class="n">系统充电日志</span>
-        <span class="v" style="font-size:11px;word-break:break-all" x-text="s.cl_tail || '—'"></span></div>
+        <span class="v" style="font-size:var(--fs-sm);word-break:break-all" x-text="s.cl_tail || '—'"></span></div>
 
       <h2><i class="fa-solid fa-clock-rotate-left" style="margin-right:6px"></i>历史记录</h2>
       <div class="row">
@@ -478,13 +881,13 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel">
       <h2 x-text="t('lang') + ' / ' + t('theme')"></h2>
       <div class="row"><span class="lbl">语言</span>
-        <select style="background:var(--card2);border:none;color:var(--txt);border-radius:10px;padding:7px 10px;font-size:14px" @change="setExtras({lang: $event.target.value})">
+        <select style="background:var(--card2);border:none;color:var(--txt);border-radius:var(--r-sm);padding:7px 10px;font-size:var(--fs-base)" @change="setExtras({lang: $event.target.value})">
           <option value="0" :selected="s.lang==0">简体中文</option>
           <option value="1" :selected="s.lang==1">English</option>
         </select>
       </div>
       <div class="row"><span class="lbl">主题</span>
-        <select style="background:var(--card2);border:none;color:var(--txt);border-radius:10px;padding:7px 10px;font-size:14px" @change="setExtras({theme: $event.target.value})">
+        <select style="background:var(--card2);border:none;color:var(--txt);border-radius:var(--r-sm);padding:7px 10px;font-size:var(--fs-base)" @change="setExtras({theme: $event.target.value})">
           <option value="0" :selected="s.theme==0">深色</option>
           <option value="1" :selected="s.theme==1">浅色</option>
         </select>
@@ -509,23 +912,23 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       <h2><i class="fa-solid fa-chart-simple" style="margin-right:6px"></i>充电统计</h2>
       <div class="row">
         <span class="lbl">本次充电</span>
-        <span style="font-size:13px;color:var(--txt2)" x-text="sessText()"></span>
+        <span style="font-size:var(--fs-base);color:var(--txt2)" x-text="sessText()"></span>
       </div>
       <div class="row">
         <span class="lbl">本次充入</span>
-        <span style="font-size:13px;color:var(--txt)" x-text="s.sess_mah + ' mAh'"></span>
+        <span style="font-size:var(--fs-base);color:var(--txt)" x-text="s.sess_mah + ' mAh'"></span>
       </div>
       <div class="row">
         <span class="lbl">累计充电次数</span>
-        <span style="font-size:13px;color:var(--txt)" x-text="s.stats_count + ' 次'"></span>
+        <span style="font-size:var(--fs-base);color:var(--txt)" x-text="s.stats_count + ' 次'"></span>
       </div>
       <div class="row">
         <span class="lbl">累计充电时长</span>
-        <span style="font-size:13px;color:var(--txt)" x-text="fmtMin(s.stats_min)"></span>
+        <span style="font-size:var(--fs-base);color:var(--txt)" x-text="fmtMin(s.stats_min)"></span>
       </div>
       <div class="row">
         <span class="lbl">累计充入电量</span>
-        <span style="font-size:13px;color:var(--txt)" x-text="s.stats_mah ? (s.stats_mah/1000).toFixed(2) + ' Ah' : '0'"></span>
+        <span style="font-size:var(--fs-base);color:var(--txt)" x-text="s.stats_mah ? (s.stats_mah/1000).toFixed(2) + ' Ah' : '0'"></span>
       </div>
     </div>
 
@@ -535,7 +938,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
         <i class="fa-solid fa-pause-circle" style="margin-right:6px"
            :style="'color:' + (['temp','chg_temp'].includes(s.suspend_reason) ? '#f87171' : '#38bdf8')"></i>
         已停止充电
-        <span style="float:right;font-size:12px;font-weight:400;color:var(--txt2)"
+        <span style="float:right;font-size:var(--fs-sm);font-weight:400;color:var(--txt2)"
               x-text="suspReasonText(s.suspend_reason)"></span>
       </h2>
       <div class="row" style="border:none;padding-top:0">
@@ -553,7 +956,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       </div>
       <div class="row" x-show="s.suspend_reason==='limit'">
         <span class="lbl">提示</span>
-        <span class="v" style="color:var(--txt2);font-size:12px">拔掉充电器再插上可临时继续充 10 分钟</span>
+        <span class="v" style="color:var(--txt2);font-size:var(--fs-sm)">拔掉充电器再插上可临时继续充 10 分钟</span>
       </div>
     </div>
 
@@ -561,13 +964,13 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel" x-show="subTab==='curve'">
       <h2>
         <i class="fa-solid fa-temperature-high" style="margin-right:6px;color:#fb923c"></i>温度分析
-        <span style="float:right;font-size:11px;color:var(--txt2);font-weight:400"
+        <span style="float:right;font-size:var(--fs-sm);color:var(--txt2);font-weight:400"
               x-text="tempCurveInfo"></span>
       </h2>
       <div style="position:relative;height:260px">
         <canvas id="tempCurve"></canvas>
       </div>
-      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--txt2);justify-content:center">
+      <div style="display:flex;gap:var(--sp-3);flex-wrap:wrap;margin-top:var(--sp-3);font-size:var(--fs-sm);color:var(--txt2);justify-content:center">
         <span><span style="display:inline-block;width:10px;height:2px;background:#fb923c;margin-right:4px;vertical-align:middle"></span>电池温度</span>
         <span><span style="display:inline-block;width:10px;height:2px;background:#38bdf8;margin-right:4px;vertical-align:middle;border-bottom:1px dashed #38bdf8"></span>充电IC温度</span>
         <span><span style="display:inline-block;width:8px;height:8px;background:#fbbf24;border-radius:50%;margin-right:4px;vertical-align:middle"></span>异常事件</span>
@@ -578,7 +981,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel" x-show="subTab==='events'">
       <h2>
         <i class="fa-solid fa-timeline" style="margin-right:6px;color:#38bdf8"></i>今日停充时间线
-        <span style="float:right;font-size:11px;font-weight:400;color:var(--txt2)"
+        <span style="float:right;font-size:var(--fs-sm);font-weight:400;color:var(--txt2)"
               x-text="suspendStats.total ? ('共 ' + suspendStats.total + ' 次') : ''"></span>
       </h2>
       <div class="timeline-summary" x-show="suspendStats.total > 0">
@@ -599,7 +1002,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       <div class="timeline-axis" x-show="suspendStats.total > 0">
         <span>0:00</span><span>6:00</span><span>12:00</span><span>18:00</span><span>24:00</span>
       </div>
-      <div x-show="suspendStats.total === 0" style="color:var(--txt2);font-size:12px;padding:8px 0">
+      <div x-show="suspendStats.total === 0" style="color:var(--txt2);font-size:var(--fs-sm);padding:var(--sp-2) 0">
         今日暂无停充记录
       </div>
     </div>
@@ -608,12 +1011,12 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel" x-show="subTab==='curve'">
       <h2>
         <i class="fa-solid fa-fire" style="margin-right:6px;color:#fb923c"></i>充电热力分布
-        <span style="float:right;font-size:11px;font-weight:400;color:var(--txt2)">按电量段统计最高温</span>
+        <span style="float:right;font-size:var(--fs-sm);font-weight:400;color:var(--txt2)">按电量段统计最高温</span>
       </h2>
       <div class="heat-grid" id="heatGrid">
         <div class="heat-hint">充电时自动积累数据</div>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--txt2);margin-top:6px">
+      <div style="display:flex;justify-content:space-between;font-size:var(--fs-xs);color:var(--txt2);margin-top:var(--sp-2)">
         <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
       </div>
       <div class="heat-legend">
@@ -628,7 +1031,7 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel" x-show="subTab==='curve'">
       <h2><i class="fa-solid fa-bolt" style="margin-right:6px"></i>充电曲线</h2>
       <div style="position:relative;height:200px"><canvas id="curveChart"></canvas></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--txt2)">
+      <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-2);font-size:var(--fs-sm);color:var(--txt2)">
         <span>x-text="curveInfo || '暂无充电采样数据（充电时每 30 秒记录一条）'"</span>
       </div>
     </div>
@@ -637,10 +1040,10 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel" x-show="subTab==='events'">
       <h2>
         <i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;color:#fbbf24"></i>异常事件
-        <button class="btn" style="float:right;padding:2px 10px;font-size:12px" @click="clearEvents()">清空</button>
+        <button class="btn" style="float:right;padding:2px 10px;font-size:var(--fs-sm)" @click="clearEvents()">清空</button>
       </h2>
       <template x-if="events.length === 0">
-        <div style="color:var(--txt2);font-size:12px;padding:8px 0">
+        <div style="color:var(--txt2);font-size:var(--fs-sm);padding:var(--sp-2) 0">
           暂无异常事件（温度超限 / 充IC过温时会自动记录曲线快照）
         </div>
       </template>
@@ -649,10 +1052,10 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
           <span class="lbl" style="min-width:0;flex:1">
             <span x-text="eventTypeText(ev.type)"
                   :style="'color:' + (ev.type==='recovered' ? '#4ade80' : (ev.type==='replug_reset' ? '#38bdf8' : '#f87171'))"></span>
-            <span style="color:var(--txt2);font-size:11px;margin-left:6px" x-text="fmtTime(ev.at)"></span>
-            <div style="font-size:11px;color:var(--txt2);margin-top:2px" x-text="eventDetailText(ev)"></div>
+            <span style="color:var(--txt2);font-size:var(--fs-sm);margin-left:6px" x-text="fmtTime(ev.at)"></span>
+            <div style="font-size:var(--fs-sm);color:var(--txt2);margin-top:2px" x-text="eventDetailText(ev)"></div>
           </span>
-          <span class="v" style="color:#38bdf8;font-size:12px">查看曲线 ›</span>
+          <span class="v" style="color:#38bdf8;font-size:var(--fs-sm)">查看曲线 ›</span>
         </div>
       </template>
     </div>
@@ -662,18 +1065,18 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
       <h2><i class="fa-solid fa-scale-balanced" style="margin-right:6px"></i>电池校准</h2>
       <div class="row">
         <span class="lbl">状态</span>
-        <span style="font-size:13px;color:var(--txt)" x-text="calText()"></span>
+        <span style="font-size:var(--fs-base);color:var(--txt)" x-text="calText()"></span>
       </div>
       <div class="row" x-show="cal.state">
         <span class="lbl">电量范围</span>
-        <span style="font-size:13px;color:var(--txt2)" x-text="cal.cap_min + '% ~ ' + cal.cap_max + '%'"></span>
+        <span style="font-size:var(--fs-base);color:var(--txt2)" x-text="cal.cap_min + '% ~ ' + cal.cap_max + '%'"></span>
       </div>
-      <div style="font-size:12px;color:var(--txt2);line-height:1.7;padding:6px 0">
+      <div style="font-size:var(--fs-sm);color:var(--txt2);line-height:1.7;padding:6px 0">
         校准 = 完整走一次「充满 → 静置 → 放到 10% → 再充满」，让电量计重新对齐。<br>
         长期只充到 80% 会让电量计漂移，表现为「显示还有 30% 却突然关机」。<br>
         <b>注意</b>：放电阶段请断充电器正常使用，模块不会主动放电；电量低于 5% 会自动中止。
       </div>
-      <div style="display:flex;gap:8px;margin-top:6px">
+      <div style="display:flex;gap:var(--sp-2);margin-top:var(--sp-2)">
         <button class="btn" @click="calAction('start')" x-show="!cal.state">开始校准</button>
         <button class="btn gray" @click="calAction('abort')" x-show="cal.state">中止校准</button>
       </div>
@@ -700,12 +1103,12 @@ h1 .badge { font-size:11px; font-weight:600; background:var(--card2); color:var(
     <div class="panel">
       <h2><i class="fa-solid fa-file-lines" style="margin-right:6px"></i>运行日志</h2>
       <div class="log-box" x-text="logContent || '暂无日志'"></div>
-      <button class="btn gray" @click="refreshLog()" style="margin-top:8px"><i class="fa-solid fa-rotate" style="margin-right:4px"></i>刷新日志</button>
-      <button class="btn gray" @click="exportLog()" style="margin-top:8px">⬇️ 导出全部（配置+日志+历史）</button>
-      <button class="btn gray" @click="checkUpdate()" style="margin-top:8px"><i class="fa-solid fa-rotate" style="margin-right:4px"></i>检查更新</button>
-      <p style="font-size:12px;color:var(--txt2);margin:6px 0 0">提示：新版本请到 <b>APatch / KernelSU 管理器</b> 中更新（已配置官方更新渠道）</p>
-      <button x-show="latestVer" class="btn" @click="applyUpdate()" style="margin-top:8px"><i class="fa-solid fa-download" style="margin-right:4px"></i>下载并安装 {{ latestVer }}</button>
-      <div class="info" style="font-size:12px;color:var(--txt2);margin-top:8px" x-text="updateMsg"></div>
+      <button class="btn gray" @click="refreshLog()" style="margin-top:var(--sp-2)"><i class="fa-solid fa-rotate" style="margin-right:4px"></i>刷新日志</button>
+      <button class="btn gray" @click="exportLog()" style="margin-top:var(--sp-2)">⬇️ 导出全部（配置+日志+历史）</button>
+      <button class="btn gray" @click="checkUpdate()" style="margin-top:var(--sp-2)"><i class="fa-solid fa-rotate" style="margin-right:4px"></i>检查更新</button>
+      <p style="font-size:var(--fs-sm);color:var(--txt2);margin:6px 0 0">提示：新版本请到 <b>APatch / KernelSU 管理器</b> 中更新（已配置官方更新渠道）</p>
+      <button x-show="latestVer" class="btn" @click="applyUpdate()" style="margin-top:var(--sp-2)"><i class="fa-solid fa-download" style="margin-right:4px"></i>下载并安装 {{ latestVer }}</button>
+      <div class="info" style="font-size:var(--fs-sm);color:var(--txt2);margin-top:var(--sp-2)" x-text="updateMsg"></div>
     </div>
   </div>
 </div>
