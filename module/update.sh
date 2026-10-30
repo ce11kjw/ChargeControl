@@ -30,6 +30,64 @@ LOG=$DATA_DIR/hot-update.log
 mkdir -p "$DATA_DIR" 2>/dev/null
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG" 2>/dev/null; }
 
+# ══════════════════════════════════════════════════════════
+# v2.1.1 快速进程查找
+#
+# 原来用 `for _p in /proc/[0-9]*; do tr '\0' ' ' < cmdline` 遍历，
+# 在 Android 上单次扫描 300+ 进程要 300-500ms，套上循环和 sleep
+# 后整个热更新拖到 100 秒。
+#
+# 改用 pgrep（C 实现，毫秒级）。找不到时返回空。
+# ══════════════════════════════════════════════════════════
+find_pids() {
+  # $1 = 精确进程名（battd / supervisor.sh ...）
+  # 用 pgrep -x（精确匹配进程名，C 实现，毫秒级）
+  #   - 不用 pgrep -f：会匹配到调用者自己（cmdline 含该串）
+  #   - 不用 /proc 遍历：Android 上 300+ 进程要 300-500ms
+  _kw="$1"
+  _self=$$
+  _out=""
+  # 先试 pgrep -x（精确名）
+  for _pid in $(pgrep -x "$_kw" 2>/dev/null); do
+    [ "$_pid" = "$_self" ] && continue
+    _out="$_out $_pid"
+  done
+  # 名字含 . 的（supervisor.sh）pgrep -x 拿不到，用 ps 兜底
+  case "$_kw" in
+    *.*)
+      for _pid in $(ps -A -o PID,CMD 2>/dev/null | grep -F "$_kw" | grep -v grep | awk '{print $1}'); do
+        [ "$_pid" = "$_self" ] && continue
+        _out="$_out $_pid"
+      done
+      ;;
+  esac
+  echo "$_out" | tr ' ' '\n' | grep -v '^$' | sort -u
+}
+
+# 快速判断某进程是否还活着（校验 cmdline 防 PID 复用）
+pid_alive_matching() {
+  # $1 = pid, $2 = 关键词
+  [ -n "$1" ] && [ -d "/proc/$1" ] || return 1
+  # /proc/PID/cmdline 存在且含关键词
+  case "$(tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null)" in
+    *"$2"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 等某类进程全部退出（用 pgrep，最多 N 秒）
+wait_pids_gone() {
+  # $1 = 正则模式, $2 = 超时秒数
+  _pat="$1"; _to="${2:-15}"; _n=0
+  while [ $_n -lt "$_to" ]; do
+    if [ -z "$(find_pids "$_pat")" ]; then return 0; fi
+    sleep 0.5
+    _n=$((_n+1))
+  done
+  return 1
+}
+
+
 # ── 0. 参数校验 ──
 if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then
   log "FATAL: 无效的源目录 '$SRC'"
@@ -54,26 +112,13 @@ sleep 3
 # 1b) 检查常见安装器进程是否还在（最多再等 30 秒）
 #     pm install / ksud module install / apd install / magisk --install-module
 _w=0
-while [ $_w -lt 30 ]; do
-  _found=""
-  for _p in /proc/[0-9]*; do
-    _pid=${_p#/proc/}
-    [ "$_pid" = "1" ] && continue
-    [ "$_pid" = "$$" ] && continue
-    [ -r "$_p/cmdline" ] || continue
-    _cmd=$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)
-    case "$_cmd" in
-      *"--install-module"*|*"module install"*|*"apd install"*|*"pm install"*)
-        _found="$_pid:$_cmd"
-        break
-        ;;
-    esac
-  done
+while [ $_w -lt 10 ]; do
+  _found="$(ps -A -o CMD 2>/dev/null | grep -E -- "--install-module|module install|apd install|pm install" | grep -v grep | head -1)"
   [ -z "$_found" ] && break
-  sleep 1
+  sleep 0.5
   _w=$((_w+1))
 done
-[ $_w -gt 0 ] && log "  额外等了 ${_w}s 等安装器退出"
+[ $_w -gt 0 ] && log "  额外等了 $((_w/2))s 等安装器退出"
 
 # 1c) 文件稳定性检查：连续 2 次采样，大小/时间戳不变
 _prev=""
@@ -95,66 +140,43 @@ log "  文件已稳定（采样 ${_s} 次）"
 
 # ── 2. 停 supervisor（否则替换期间它会拉起旧 battd）──
 log "停止 supervisor"
-for _p in /proc/[0-9]*; do
-  _pid=${_p#/proc/}
-  [ -r "$_p/cmdline" ] || continue
-  _cmd=$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)
-  case "$_cmd" in
-    *battery-manager/supervisor.sh*)
-      kill -TERM "$_pid" 2>/dev/null
-      log "  supervisor pid=$_pid → TERM"
-      ;;
-  esac
-done
-sleep 1
+# supervisor.sh 是脚本，pgrep -x 拿不到；用 pidfile（它自己写的）
+_sup_pid="$(cat "$DATA_DIR/supervisor.pid" 2>/dev/null)"
+if [ -n "$_sup_pid" ] && [ -d "/proc/$_sup_pid" ]; then
+  kill -TERM "$_sup_pid" 2>/dev/null
+  log "  supervisor pid=$_sup_pid → TERM"
+else
+  # 兜底：ps 找（比 /proc 遍历快）
+  _sup_pid="$(ps -A -o PID,CMD 2>/dev/null | grep -F "supervisor.sh" | grep -v grep | awk '{print $1}' | head -1)"
+  if [ -n "$_sup_pid" ]; then
+    kill -TERM "$_sup_pid" 2>/dev/null
+    log "  supervisor pid=$_sup_pid → TERM (by ps)"
+  else
+    log "  supervisor 未在运行"
+  fi
+fi
+sleep 0.5
 
 # ── 3. 停 battd ──
 log "停止 battd"
-_old_pids=""
-for _p in /proc/[0-9]*; do
-  _pid=${_p#/proc/}
-  [ -r "$_p/cmdline" ] || continue
-  _cmd=$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)
-  case "$_cmd" in
-    *battery-manager/battd*|*chargecontrol/bin/battd*)
-      _old_pids="$_old_pids $_pid"
-      kill -TERM "$_pid" 2>/dev/null
-      ;;
-  esac
-done
-log "  battd 旧进程:${_old_pids:- 无}"
-
-_t=60
-while [ $_t -gt 0 ]; do
-  _alive=0
-  for _p in /proc/[0-9]*; do
-    _pid=${_p#/proc/}
-    [ -r "$_p/cmdline" ] || continue
-    _cmd=$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)
-    case "$_cmd" in
-      *battery-manager/battd*) _alive=1; break ;;
-    esac
+_old_pids="$(find_pids "battd")"
+if [ -n "$_old_pids" ]; then
+  for _pid in $_old_pids; do
+    kill -TERM "$_pid" 2>/dev/null
   done
-  [ $_alive -eq 0 ] && break
-  sleep 1
-  _t=$((_t-1))
-done
-# v2.0.1: 只在确实还有残留时才 KILL（避免日志刷两条「停止 battd」）
-_still=""
-for _p in /proc/[0-9]*; do
-  _pid=${_p#/proc/}
-  [ -r "$_p/cmdline" ] || continue
-  _cmd=$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)
-  case "$_cmd" in
-    *battery-manager/battd*) _still="$_still $_pid" ;;
-  esac
-done
-if [ -n "$_still" ]; then
+  log "  battd 旧进程: $_old_pids"
+else
+  log "  battd 旧进程: 无"
+fi
+
+# 等退出（最多 15 秒，比原来 60s 快 4 倍）
+if ! wait_pids_gone "battd" 15; then
+  _still="$(find_pids "battd")"
   for _pid in $_still; do
     kill -KILL "$_pid" 2>/dev/null
     log "  强制 KILL 残留 pid=$_pid"
   done
-  sleep 1
+  sleep 0.5
 fi
 
 # ── 4. 替换模块目录（旧目录先备份）──
@@ -224,7 +246,7 @@ cd "$DATA_DIR" || exit 1
 if [ -x "$DATA_DIR/supervisor.sh" ]; then
   setsid sh "$DATA_DIR/supervisor.sh" start >> "$DATA_DIR/supervisor.log" 2>&1 &
   log "  supervisor 已拉起"
-  sleep 3
+  sleep 2
 fi
 
 if ! pgrep -f "$DATA_DIR/battd" >/dev/null 2>&1; then
@@ -234,15 +256,7 @@ fi
 sleep 3
 
 # ── 7. 验证 ──
-_new_pid=""
-for _p in /proc/[0-9]*; do
-  _pid=${_p#/proc/}
-  [ -r "$_p/cmdline" ] || continue
-  _cmd=$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)
-  case "$_cmd" in
-    *battery-manager/battd*) _new_pid=$_pid; break ;;
-  esac
-done
+_new_pid="$(find_pids "battd" | head -1)"
 
 if [ -n "$_new_pid" ]; then
   log "SUCCESS: 新 battd pid=$_new_pid, version=$NEW_VER"
