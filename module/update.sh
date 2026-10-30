@@ -181,10 +181,18 @@ fi
 
 # ── 4. 替换模块目录（旧目录先备份）──
 log "备份旧模块目录"
+# v2.1.2: 用 mv 替代 cp -a —— 同一文件系统下 mv 是原子重命名（毫秒级），
+#          cp -a 要逐个文件复制（979KB 但小文件多，实测 12 秒）
 rm -rf "$MOD_DIR.pre-hot-update" 2>/dev/null
+_OLD_MOD="$MOD_DIR.old-run"
+rm -rf "$_OLD_MOD" 2>/dev/null
 if [ -d "$MOD_DIR" ]; then
-  cp -a "$MOD_DIR" "$MOD_DIR.pre-hot-update" 2>/dev/null \
-    && log "  → $MOD_DIR.pre-hot-update"
+  if mv "$MOD_DIR" "$_OLD_MOD" 2>/dev/null; then
+    log "  旧目录已移走（mv，毫秒级）"
+  else
+    # 跨文件系统才 fallback 到 cp
+    cp -a "$MOD_DIR" "$_OLD_MOD" 2>/dev/null && log "  旧目录已复制（fallback）"
+  fi
 fi
 
 log "替换模块目录"
@@ -198,10 +206,9 @@ if ! cp -a "$SRC" "$MOD_DIR.new" 2>>"$LOG"; then
   rm -rf "$MOD_DIR.new" 2>/dev/null
   exit 1
 fi
-rm -rf "$MOD_DIR" 2>/dev/null
 if ! mv "$MOD_DIR.new" "$MOD_DIR" 2>>"$LOG"; then
   log "FATAL: 重命名失败，回滚"
-  [ -d "$MOD_DIR.pre-hot-update" ] && mv "$MOD_DIR.pre-hot-update" "$MOD_DIR"
+  [ -d "$_OLD_MOD" ] && mv "$_OLD_MOD" "$MOD_DIR"
   exit 1
 fi
 log "  新目录就位"
@@ -246,26 +253,32 @@ cd "$DATA_DIR" || exit 1
 if [ -x "$DATA_DIR/supervisor.sh" ]; then
   setsid sh "$DATA_DIR/supervisor.sh" start >> "$DATA_DIR/supervisor.log" 2>&1 &
   log "  supervisor 已拉起"
-  sleep 2
 fi
 
-if ! pgrep -f "$DATA_DIR/battd" >/dev/null 2>&1; then
-  log "  直接启动 battd"
-  setsid "$DATA_DIR/battd" >> "$DATA_DIR/battd.stdout" 2>&1 &
-fi
-sleep 3
+# v2.1.2: 轮询等 battd 起来（起来就返回，不等固定时长）
+_n=0
+while [ $_n -lt 20 ]; do
+  if [ -n "$(find_pids battd)" ]; then break; fi
+  # 1 秒后还没起来，直接启动（不等 supervisor）
+  if [ $_n -eq 1 ] && [ -z "$(find_pids battd)" ]; then
+    log "  supervisor 未拉起，直接启动 battd"
+    setsid "$DATA_DIR/battd" >> "$DATA_DIR/battd.stdout" 2>&1 &
+  fi
+  sleep 0.5
+  _n=$((_n+1))
+done
 
 # ── 7. 验证 ──
 _new_pid="$(find_pids "battd" | head -1)"
 
 if [ -n "$_new_pid" ]; then
   log "SUCCESS: 新 battd pid=$_new_pid, version=$NEW_VER"
-  rm -rf "$MOD_DIR.pre-hot-update" 2>/dev/null   # 成功就清备份
+  rm -rf "$_OLD_MOD" "$MOD_DIR.pre-hot-update" 2>/dev/null   # 成功就清备份
   log "=== 热更新完成 ==="
 else
   log "FAIL: 新进程未启动，回滚"
-  if [ -d "$MOD_DIR.pre-hot-update" ]; then
-    rm -rf "$MOD_DIR" && mv "$MOD_DIR.pre-hot-update" "$MOD_DIR"
+  if [ -d "$_OLD_MOD" ]; then
+    rm -rf "$MOD_DIR" && mv "$_OLD_MOD" "$MOD_DIR"
     cp -f "$MOD_DIR/bin/battd" "$DATA_DIR/battd" 2>/dev/null
     nohup "$DATA_DIR/battd" >> "$DATA_DIR/battd.stdout" 2>&1 < /dev/null &
     log "  已回滚"
