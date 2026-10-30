@@ -139,10 +139,23 @@ while [ $_t -gt 0 ]; do
   sleep 1
   _t=$((_t-1))
 done
-for _pid in $_old_pids; do
-  [ -d "/proc/$_pid" ] && { kill -KILL "$_pid" 2>/dev/null; log "  KILL $_pid"; }
+# v2.0.1: 只在确实还有残留时才 KILL（避免日志刷两条「停止 battd」）
+_still=""
+for _p in /proc/[0-9]*; do
+  _pid=${_p#/proc/}
+  [ -r "$_p/cmdline" ] || continue
+  _cmd=$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)
+  case "$_cmd" in
+    *battery-manager/battd*) _still="$_still $_pid" ;;
+  esac
 done
-sleep 1
+if [ -n "$_still" ]; then
+  for _pid in $_still; do
+    kill -KILL "$_pid" 2>/dev/null
+    log "  强制 KILL 残留 pid=$_pid"
+  done
+  sleep 1
+fi
 
 # ── 4. 替换模块目录（旧目录先备份）──
 log "备份旧模块目录"
@@ -153,7 +166,10 @@ if [ -d "$MOD_DIR" ]; then
 fi
 
 log "替换模块目录"
-rm -f "$SRC/update.sh" 2>/dev/null     # 不要把 update.sh 自己带进去
+# ⚠️ v2.0.1 修复：这里原来有一行 `rm -f "$SRC/update.sh"`，
+# 本意是「不要把 update.sh 带进目标」，但删的是**解压目录**里的文件，
+# 导致 cp -a 后模块目录缺少 update.sh ⇒ 下次热更新失效。
+# update.sh 是热更新的执行者，应该被复制进模块目录。
 rm -rf "$MOD_DIR.new" 2>/dev/null
 if ! cp -a "$SRC" "$MOD_DIR.new" 2>>"$LOG"; then
   log "FATAL: 复制失败，旧目录保持不动"
@@ -189,6 +205,16 @@ if [ -f "$MOD_DIR/supervisor.sh" ]; then
 fi
 chmod 755 "$MOD_DIR"/bin/battd 2>/dev/null
 chmod 755 "$MOD_DIR"/*.sh 2>/dev/null
+
+# v2.0.1: 清理旧版本残留的 APK（v1.19.5 起不再打包 App）
+#   老用户升级后 /data/adb/battery-manager/ChargeControl.apk 会一直占 14MB
+if [ -f "$DATA_DIR/ChargeControl.apk" ]; then
+  _apk_size=$(stat -c%s "$DATA_DIR/ChargeControl.apk" 2>/dev/null || echo 0)
+  rm -f "$DATA_DIR/ChargeControl.apk" 2>/dev/null
+  log "  清理旧 APK 残留（${_apk_size} 字节）"
+fi
+# 模块目录里也不该有
+rm -f "$MOD_DIR/ChargeControl.apk" 2>/dev/null
 
 # ── 6. 启动新进程 ──
 log "启动新 battd"
