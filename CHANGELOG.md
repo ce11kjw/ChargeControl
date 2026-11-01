@@ -1,5 +1,59 @@
 # Changelog
 
+## v2.2.1 (2026-11-01)
+
+### 🔍 补做代码审核，修掉 v2.2.0 的 2 个 P0 + 5 个问题
+
+v2.2.0 发版时跳过了审核（违反「写完 → 审核 → 才能发 Release」的规则），
+补审后发现问题严重，此版修复。
+
+#### 🔴 P0-1：Chart 在已删除的 DOM 上初始化
+
+`loadHistory()` 里 `new Chart(document.getElementById('chart'), …)`，
+但 `#chart` 的 DOM 在上一轮被删了（遗留的未提交改动）⇒ `getElementById` 返回 `null`
+⇒ 每 30s 抛一次未捕获异常，趋势图彻底失效。
+
+- 恢复趋势面板 DOM（回到 v2.1.3 的已知良好状态）
+- **同时**加 null 守卫：`const chartEl = document.getElementById('chart'); if (!chartEl) return;`
+  ⇒ 以后即使有人删 DOM 也不会崩
+
+#### 🔴 P0-2：预计耗尽永远算不出来（符号判据反了）
+
+`bat_curr` 已归一为「充电为正」，即：
+- 充电：`current_now = -2000000` ⇒ `bat_curr = +2000`
+- 放电：`current_now = +1138000` ⇒ `bat_curr = -1138`
+
+而代码写的是 `bat_curr > 0` 判放电 ⇒ **条件永远为假**，`time_to_empty` 从不算出来。
+改为 `bat_curr < 0` 且取绝对值计算。实测放电 2271mAh / 1138mA ⇒ 7184 秒（≈120 分）✅
+
+#### 🟠 其余修复
+
+| # | 问题 | 修复 |
+|---|---|---|
+| 3 | `time_to_empty` / `voltage_ocv` 状态切换不清零，充电时残留"预计耗尽" | 每轮先置 -1，再按条件重算 |
+| 4 | calibrate UI 阈值 3900，实测波动到过 3811 ⇒ 误报"偏低" | 放宽到 3800 |
+| 5 | 4 处节点重复读取（`constant_charge_current_max` / `internal_resistance` / `charge_now` / `capacity_error_margin`） | 删掉被回退逻辑取代的旧行；`read_int` 双调用改单次 |
+
+#### ⚠️ 流程问题（已记录）
+
+v2.2.0 把**上个对话遗留的未提交改动**一起打包发布，包括：
+删掉仪表盘趋势面板、充电上限 slider 步长 5→1、温度单位 `tmp/10 → tmp`。
+
+后两项经核实是**正确的**（真机 `history.json` 的 `tmp=36` 确实是摄氏度），
+但**趋势面板删除是未完成的改动**，且直接导致 P0-1。已全部经审核后定稿。
+
+#### 🧪 测试加固（这是 P0-2 漏网的原因）
+
+- **新增 `ui-test.mjs`**：15 项 —— 结构配对、无残留文案、Chart 守卫顺序，
+  并用 mock DOM 实际执行 `loadHistory()` 验证「有 canvas 创建一次 / 无 canvas 不抛异常也不创建」
+- **新增 `suspend-regress.sh`**：放电/充电双场景，覆盖 `time_to_empty` 推算与清零
+  （v2.2.0 的测试完全没涉及 `time_to_empty`，所以 P0-2 没被发现）
+- 修正旧测试假数据：`charger_temp` 写成 `4300000`（应为 `430`，单位 0.1°C）
+
+CI 三道关：UI 静态+逻辑 → 冒烟（246 字段/12 项回退/无泄漏）→ 放电充电回归。
+
+---
+
 ## v2.2.0 (2026-11-01)
 
 ### 🔋 修复「手机上读不到的数据」—— 17 个字段接上真实数据源

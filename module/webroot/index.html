@@ -690,7 +690,7 @@ h1 .badge {
         <div class="temp-item" x-show="s.bat_technology || s.bat_manufacturer || s.bat_model_name"><span class="n">电池</span><span class="v" style="font-size:var(--fs-base)" x-text="[s.bat_technology, s.bat_manufacturer, s.bat_model_name].filter(Boolean).join(' ') || '—'"></span></div>
         <div class="temp-item" x-show="s.bat_health || s.bat_capacity_level"><span class="n">状态/容量</span><span class="v" x-text="[s.bat_health, s.bat_capacity_level].filter(Boolean).join(' ') || '—'"></span></div>
         <div class="temp-item" x-show="s.bat_present >= 0 || s.temp_ambient > 0 || s.internal_resistance > 0"><span class="n">在位/机身温/内阻</span><span class="v" style="font-size:var(--fs-base)" x-text="[(s.bat_present>=0?(s.bat_present?'在位':'缺失'):''), (s.temp_ambient>0?(s.temp_ambient/10).toFixed(1)+'°C':''), (s.internal_resistance>0?(s.internal_resistance/1000).toFixed(0)+'mΩ':'')].filter(Boolean).join(' ') || '—'"></span></div>
-        <div class="temp-item" x-show="s.temp_min > 0 || s.temp_max > 0 || s.calibrate >= 0"><span class="n">限温/校准</span><span class="v" :style="s.calibrate >= 0 && s.calibrate < 3900 ? 'color:var(--orange)' : ''" x-text="[(s.temp_min>0?(s.temp_min/10).toFixed(1)+'°C':''), (s.temp_max>0?(s.temp_max/10).toFixed(1)+'°C':''), (s.calibrate>=0?'码'+s.calibrate:'')].filter(Boolean).join(' / ') || '—'"></span></div>
+        <div class="temp-item" x-show="s.temp_min > 0 || s.temp_max > 0 || s.calibrate >= 0"><span class="n">限温/校准</span><span class="v" :style="s.calibrate >= 0 && s.calibrate < 3800 ? 'color:var(--orange)' : ''" x-text="[(s.temp_min>0?(s.temp_min/10).toFixed(1)+'°C':''), (s.temp_max>0?(s.temp_max/10).toFixed(1)+'°C':''), (s.calibrate>=0?'码'+s.calibrate:'')].filter(Boolean).join(' / ') || '—'"></span></div>
       </div>
     </div>
 
@@ -752,7 +752,11 @@ h1 .badge {
         <div class="temp-item"><span class="n">移动网络</span><span class="v" :style="s.mobile_on ? 'color:var(--green)' : ''" x-text="s.mobile_on ? '已连接' : '未连接'"></span></div>
         <div class="temp-item"><span class="n">网关接口</span><span class="v" style="font-size:var(--fs-base);font-weight:500" x-text="s.ip_addr || '—'"></span></div>
 
-    
+    <div class="panel" style="margin-top:var(--sp-4)">
+      <h2><i class="fa-solid fa-chart-line" style="margin-right:6px"></i>趋势</h2>
+      <div id="chartWrap"><canvas id="chart"></canvas></div>
+      <div class="info" style="justify-content:center;padding-top:var(--sp-2);font-size:var(--fs-sm)" x-text="lastUpdate"></div>
+    </div>
   </div>
   </div>
 </div>
@@ -1090,7 +1094,7 @@ h1 .badge {
     <div class="panel">
       <h2><i class="fa-solid fa-battery-half" style="margin-right:6px"></i>电池电学</h2>
       <div class="temp-list">
-        <div class="temp-item"><span class="n">开路电压</span><span class="v" x-text="s.voltage_ocv > 0 ? (s.voltage_ocv/1000).toFixed(3) + 'V' + (s.voltage_ocv === s.voltage ? ' (估算)' : '') : '静置后可见'"></span></div><div class="temp-item"><span class="n">平均电流</span><span class="v" x-text="s.current_avg ? (s.current_avg/1000 > 0 ? '+' : '-') + Math.abs(s.current_avg/1000).toFixed(0) + 'mA' : '—'"></span></div><div class="temp-item"><span class="n">内阻</span><span class="v" x-text="s.internal_resistance > 0 ? (s.internal_resistance/1000).toFixed(0) + 'mΩ' : '—'"></span></div><div class="temp-item"><span class="n">电量偏差</span><span class="v" :style="s.capacity_error_margin >= 5 ? 'color:var(--orange)' : ''" x-text="s.capacity_error_margin >= 0 ? '±' + s.capacity_error_margin + '%' : '—'"></span></div><div class="temp-item"><span class="n">预计耗尽</span><span class="v" x-text="s.time_to_empty > 0 ? Math.ceil(s.time_to_empty/60) + '分' : '—'"></span></div><div class="temp-item"><span class="n">当前电量</span><span class="v" x-text="s.charge_now > 0 ? (s.charge_now/1000).toFixed(0) + 'mAh' : '—'"></span></div><div class="temp-item"><span class="n">充电器温度</span><span class="v" x-text="s.charger_temp > 0 ? (s.charger_temp/10).toFixed(1) + '°C' : '—'"></span></div><div class="temp-item"><span class="n">输入电压(稳定)</span><span class="v" x-text="s.input_voltage_settled > 0 ? (s.input_voltage_settled/1000).toFixed(3) + 'V' : '—'"></span></div><div class="temp-item"><span class="n">校准码</span><span class="v" :style="s.calibrate >= 0 && s.calibrate < 3900 ? 'color:var(--orange)' : ''" x-text="s.calibrate >= 0 ? s.calibrate + ' / 4096' + (s.calibrate < 3900 ? ' (偏低)' : '') : '—'"></span></div>
+        <div class="temp-item"><span class="n">开路电压</span><span class="v" x-text="s.voltage_ocv > 0 ? (s.voltage_ocv/1000).toFixed(3) + 'V' + (s.voltage_ocv === s.voltage ? ' (估算)' : '') : '静置后可见'"></span></div><div class="temp-item"><span class="n">平均电流</span><span class="v" x-text="s.current_avg ? (s.current_avg/1000 > 0 ? '+' : '-') + Math.abs(s.current_avg/1000).toFixed(0) + 'mA' : '—'"></span></div><div class="temp-item"><span class="n">内阻</span><span class="v" x-text="s.internal_resistance > 0 ? (s.internal_resistance/1000).toFixed(0) + 'mΩ' : '—'"></span></div><div class="temp-item"><span class="n">电量偏差</span><span class="v" :style="s.capacity_error_margin >= 5 ? 'color:var(--orange)' : ''" x-text="s.capacity_error_margin >= 0 ? '±' + s.capacity_error_margin + '%' : '—'"></span></div><div class="temp-item"><span class="n">预计耗尽</span><span class="v" x-text="s.time_to_empty > 0 ? Math.ceil(s.time_to_empty/60) + '分' : '—'"></span></div><div class="temp-item"><span class="n">当前电量</span><span class="v" x-text="s.charge_now > 0 ? (s.charge_now/1000).toFixed(0) + 'mAh' : '—'"></span></div><div class="temp-item"><span class="n">充电器温度</span><span class="v" x-text="s.charger_temp > 0 ? (s.charger_temp/10).toFixed(1) + '°C' : '—'"></span></div><div class="temp-item"><span class="n">输入电压(稳定)</span><span class="v" x-text="s.input_voltage_settled > 0 ? (s.input_voltage_settled/1000).toFixed(3) + 'V' : '—'"></span></div><div class="temp-item"><span class="n">校准码</span><span class="v" :style="s.calibrate >= 0 && s.calibrate < 3800 ? 'color:var(--orange)' : ''" x-text="s.calibrate >= 0 ? s.calibrate + ' / 4096' + (s.calibrate < 3800 ? ' (偏低)' : '') : '—'"></span></div>
       </div>
     </div>
   </div>
@@ -1298,6 +1302,11 @@ function app() {
       const labels = h.map(x => new Date(x.t * 1000).toLocaleTimeString());
       const caps = h.map(x => x.c);
       const temps = h.map(x => x.tmp);
+      /* FIX: 必须先确认 canvas 存在再 new Chart()。
+         此前 #chart 的 DOM 被删而这里没守卫 ⇒ new Chart(null) 抛
+         「Failed to create chart: can't acquire context」，每 30s 一次未捕获异常。 */
+      const chartEl = document.getElementById('chart');
+      if (!chartEl) return;
       if (!CH.chart) {
         const cs = getComputedStyle(document.documentElement);
         const txt = cs.getPropertyValue('--txt2').trim();
@@ -1308,7 +1317,7 @@ function app() {
         grad1.addColorStop(0,'rgba(74,222,128,.35)'); grad1.addColorStop(1,'rgba(74,222,128,0)');
         const grad2 = document.createElement('canvas').getContext('2d').createLinearGradient(0,0,0,220);
         grad2.addColorStop(0,'rgba(251,146,60,.35)'); grad2.addColorStop(1,'rgba(251,146,60,0)');
-        CH.chart = new Chart(document.getElementById('chart'), {
+        CH.chart = new Chart(chartEl, {
           type: 'line',
           data: { labels, datasets: [
             { label:'电量 %', data:caps, borderColor:'#4ade80', backgroundColor:grad1, fill:true, tension:.35, yAxisID:'y', pointRadius:0, pointHoverRadius:4, borderWidth:2 },

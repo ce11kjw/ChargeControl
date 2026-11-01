@@ -58,8 +58,14 @@ jobs:
 
           echo "✅ 静态分析通过"
 
+      - name: UI static + logic test (v2.2.1)
+        run: node .github/scripts/ui-test.mjs
+
       - name: Smoke test
         run: bash .github/scripts/smoke-test.sh
+
+      - name: Discharge/charge state regression (v2.2.1)
+        run: bash .github/scripts/suspend-regress.sh
 
       - name: Package test bundle
         run: |

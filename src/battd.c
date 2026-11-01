@@ -451,8 +451,11 @@ static void slow_update_battery(void) {
     if (v >= 0) {
         voltage_ocv = v;
     } else {
+        /* FIX #3: 每轮先清空，避免离开静置状态后仍显示上一次的"估算"值。
+           iabs >= 0 是恒真条件（冗余），去掉。 */
+        voltage_ocv = -1;
         int iabs = bat_curr < 0 ? -bat_curr : bat_curr;
-        if (bat_volt > 3000 && iabs >= 0 && iabs < 50
+        if (bat_volt > 3000 && bat_curr != -1 && iabs < 50
             && bat_status[0] && strcmp(bat_status, "Charging") != 0) {
             voltage_ocv = bat_volt;      /* mV，与电压同单位 */
         }
@@ -465,8 +468,9 @@ static void slow_update_battery(void) {
          bms/rm ÷ bms/fcc                 → 剩余容量 / 满充容量
        取「UI 百分比」与「rm/fcc 真实比」的最大差（百分点）作为误差范围。
        这是真实可观测的偏差，不是编造值。 */
-    if (read_int(SYSFS "/capacity_error_margin") >= 0) {
-        capacity_error_margin = read_int(SYSFS "/capacity_error_margin");
+    int cem = read_int(SYSFS "/capacity_error_margin");
+    if (cem >= 0) {
+        capacity_error_margin = cem;
     } else {
         int ui_pct  = read_int(SYSFS "/capacity");
         int rm      = read_int(BMS "/rm");
@@ -492,26 +496,29 @@ static void slow_update_battery(void) {
     }
     snprintf(path, sizeof(path), "%s/constant_charge_current", SYSFS); if ((v = read_int(path)) >= 0) constant_charge_current = v;
     snprintf(path, sizeof(path), "%s/constant_charge_voltage", SYSFS); if ((v = read_int(path)) >= 0) constant_charge_voltage = v;
-    snprintf(path, sizeof(path), "%s/capacity_error_margin", SYSFS); if ((v = read_int(path)) >= 0) capacity_error_margin = v;
     /* v2.2.0: 预计耗尽(秒)。本机无 time_to_empty_now 节点 ⇒ 用剩余容量/放电电流推算。
-       只在「确实在放电(电流为负方向)」时算，充电中保持 -1（避免出现"充电还剩 X 分钟耗尽"）。
-       bms/rm 单位 mAh，bat_curr 单位 mA ⇒ 分钟 = rm*60/|I|。 */
+       ⚠️ 符号约定（见 update_battery 的注释）：bat_curr 已归一为「充电为正」
+          ⇒ 充电时 bat_curr > 0，放电时 bat_curr < 0。
+          所以放电判据必须是 `bat_curr < 0`，并取绝对值参与计算。
+          （首版写成 `bat_curr > 0`，导致放电时条件恒假、此字段永远算不出来 —— 审核时发现。）
+       bms/rm 单位 mAh，|bat_curr| 单位 mA ⇒ 秒 = rm * 3600 / |I|。 */
     snprintf(path, sizeof(path), "%s/time_to_empty_now", SYSFS); v = read_int(path);
     if (v >= 0) {
         time_to_empty = v;
-    } else if (bat_status[0] && strcmp(bat_status, "Discharging") == 0 && bat_curr > 0) {
-        int rm = read_int(BMS "/rm");
-        if (rm > 0) time_to_empty = (int)((long long)rm * 3600 / bat_curr);
+    } else {
+        /* FIX #3: 状态切换必须清零，否则充电时会残留上一个放电周期的"预计耗尽" */
+        time_to_empty = -1;
+        if (bat_status[0] && strcmp(bat_status, "Discharging") == 0 && bat_curr < 0) {
+            int rm = read_int(BMS "/rm");
+            if (rm > 0) time_to_empty = (int)((long long)rm * 3600 / (-(long long)bat_curr));
+        }
     }
     snprintf(path, sizeof(path), "%s/present", SYSFS); if ((v = read_int(path)) >= 0) bat_present = v;
-    snprintf(path, sizeof(path), "%s/internal_resistance", SYSFS); if ((v = read_int(path)) >= 0) internal_resistance = v;
-    snprintf(path, sizeof(path), "%s/charge_now", SYSFS); if ((v = read_int(path)) >= 0) charge_now = v;
     /* v2.2.0: 终止电流。battery/ 下没有这个节点，真身在 MTK 充电器设备：
        MTK_CHG/charge_term_current = 100 (mA) —— 实测存在且可写。 */
     snprintf(path, sizeof(path), "%s/charge_term_current", SYSFS); v = read_int(path);
     if (v < 0) v = read_int(MTK_CHG "/charge_term_current");
     if (v >= 0) charge_term_current = v;
-    snprintf(path, sizeof(path), "%s/constant_charge_current_max", SYSFS); if ((v = read_int(path)) >= 0) constant_charge_current_max = v;
     /* v2.2.0: 最大充电电压。battery/ 下没有，实测可用来源两处：
        bms/voltage_max = 4543 (mV，电芯允许上限)
        MTK_CHG/input_voltage_limit = 4500 (mV，充电器输入上限)
