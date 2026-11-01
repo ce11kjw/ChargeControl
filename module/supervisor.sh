@@ -34,6 +34,28 @@ battd_running() {
   proc_is "$(cat "$PIDF" 2>/dev/null)" "battd"
 }
 
+# ── 采样器守护 ──
+# 用「数据新鲜度」判断而不是查进程名：pgrep -f 会匹配到调用方自己的命令行
+# （今天已踩两次），而 power.json 超过 400s 没更新就一定有问题。
+SAMPLER=$DIR/power-sampler.sh
+SAMPF=$DIR/sampler.pid
+sampler_alive() {
+  _p=$(cat "$SAMPF" 2>/dev/null)
+  [ -n "$_p" ] && [ -d "/proc/$_p" ] || return 1
+  [ -f "$DIR/webroot/power.json" ] || return 1
+  _now=$(date +%s)
+  _mt=$(stat -c %Y "$DIR/webroot/power.json" 2>/dev/null)
+  [ -n "$_mt" ] || return 1
+  [ $((_now - _mt)) -lt 400 ]
+}
+
+start_sampler() {
+  [ -x "$SAMPLER" ] || { log "sampler missing: $SAMPLER"; return 1; }
+  # wrapper 自己写 pid，setsid 的 $! 不可靠
+  setsid sh -c "echo \$\$ > '$SAMPF'; while true; do '$SAMPLER'; sleep 300; done" >/dev/null 2>&1 &
+  log "started sampler"
+}
+
 supervisor_running() {
   proc_is "$(cat "$SUPF" 2>/dev/null)" "$SELF"
 }
@@ -61,6 +83,7 @@ case "$1" in
     log "supervisor start pid=$$"
     while true; do
       battd_running || start_battd
+      sampler_alive || start_sampler
       sleep 15
     done
     ;;
@@ -69,8 +92,11 @@ case "$1" in
     rm -f "$SUPF"
     if battd_running; then kill "$(cat $PIDF)" 2>/dev/null; fi
     rm -f "$PIDF"
+    _sp=$(cat "$SAMPF" 2>/dev/null)
+    [ -n "$_sp" ] && kill "$_sp" 2>/dev/null
+    rm -f "$SAMPF"
     log "supervisor stop"
-    ;;
+        ;;
   restart)
     "$0" stop; sleep 1; setsid "$0" start >/dev/null 2>&1 &
     ;;
