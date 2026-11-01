@@ -57,7 +57,7 @@ static int limit_enabled = 1;
    只在没有停充理由时生效，避免与停充/PMIC 自身降流叠加。 */
 static int tp_enabled = 0;        /* 0=关 1=开 */
 static int tp_last_ratio = 100;   /* 上次应用的比例，100=不限 */
-static int tp_base_ua = -1;       /* 原始 input_current_limit（µA），用于恢复 */
+static int tp_base_ma = -1;       /* 原始电池侧恒流值（mA，来自 mt6375 chg），用于恢复 */
 #define TP_T1 45                  /* 45°C 起降到 60% */
 #define TP_T2 47                  /* 47°C 起降到 30% */
 static int temp_suspended = 0;      /* @deprecated v1.17.0: 由 susp_reason 取代 */
@@ -1716,10 +1716,30 @@ static void update_battery(void) {
     /* v2.2.0: 输入限流。MTK 的 usb/ 下没有这个节点，实测本机存在的是
        mtk-master-charger / 11280000.i2c:mt6375@34:chg / mtk-slave-charger 三处。
        顺序按「最贴近实际生效」排：master-charger 是主充电路径。 */
-    if (tp_base_ua <= 0) tp_base_ua = read_int(MTK_MASTER "/input_current_limit");
+    if (tp_base_ma <= 0) {
+        int _cur = read_int(MTK_CHG "/constant_charge_current");
+        tp_base_ma = (_cur > 0) ? _cur : 3000;
+    }
+    /* ★ 启动自检：进程可能在限流状态被杀，重启后 tp_last_ratio=100 会让
+       「恢复」分支进不去 ⇒ 节点残留在限流值上，充电一直很慢。
+       开关关闭时强制对一次账。 */
+    {
+        static int tp_boot_checked = 0;
+        if (!tp_boot_checked) {
+            tp_boot_checked = 1;
+            if (!tp_enabled) {
+                int _cur = read_int(MTK_CHG "/constant_charge_current");
+                if (_cur > 0 && _cur != tp_base_ma) {
+                    char _b[24]; snprintf(_b, sizeof(_b), "%d", tp_base_ma);
+                    if (write_str(MTK_CHG "/constant_charge_current", _b) == 0)
+                        log_event("启动自检：输入限流已恢复到原始值");
+                }
+            }
+        }
+    }
     bat_input_current_limit = read_int(SYSFS_USB "/input_current_limit");
     if (bat_input_current_limit < 0)
-        bat_input_current_limit = read_int(MTK_MASTER "/input_current_limit");
+        bat_input_current_limit = read_int(MTK_CHG "/constant_charge_current");
     if (bat_input_current_limit < 0)
         bat_input_current_limit = read_int("/sys/class/power_supply/11280000.i2c:mt6375@34:chg/input_current_limit");
     usb_curr_cache = read_int(SYSFS_USB "/current_now");
@@ -2200,29 +2220,29 @@ void apply_control(void) {
     /* ---- ★ v2.4.0: 温度降档（可选，默认关）----
        只在 want==0（没有停充理由）时生效，避免与停充叠加。
        写 MTK_MASTER/input_current_limit —— 实测 usb/input_current_limit 不存在。 */
-    if (tp_base_ua <= 0)
-        tp_base_ua = read_int(MTK_MASTER "/input_current_limit");
-    if (tp_enabled && want == 0 && bat_temp > 0 && tp_base_ua > 0) {
+    if (tp_base_ma <= 0)
+        tp_base_ma = read_int(MTK_CHG "/constant_charge_current");
+    if (tp_enabled && want == 0 && bat_temp > 0 && tp_base_ma > 0) {
         int ratio = (bat_temp >= TP_T2) ? 30 : (bat_temp >= TP_T1) ? 60 : 100;
         if (ratio != tp_last_ratio) {
-            int target = tp_base_ua * ratio / 100;
-            if (target < 500000) target = 500000;   /* 500mA 地板：低于此可能充不进电 */
-            if (ratio >= 100) target = tp_base_ua;
+            int target = tp_base_ma * ratio / 100;
+            if (target < 500) target = 500;         /* 500mA 地板：低于此可能充不进电 */
+            if (ratio >= 100) target = tp_base_ma;
             char b[24];
             snprintf(b, sizeof(b), "%d", target);
-            if (write_str(MTK_MASTER "/input_current_limit", b) == 0) {
+            if (write_str(MTK_CHG "/constant_charge_current", b) == 0) {
                 char dj[96];
                 snprintf(dj, sizeof(dj), "{\"ratio\":%d,\"temp\":%d,\"ma\":%d}",
-                         ratio, bat_temp, target / 1000);
+                         ratio, bat_temp, target);
                 evt_dump(ratio >= 100 ? "tp_restore" : "tp_limit", dj);
                 log_event(ratio >= 100 ? "温度回落，解除输入限流" : "温度升高，限制输入电流");
                 tp_last_ratio = ratio;
             }
         }
-    } else if ((!tp_enabled || want != 0) && tp_last_ratio != 100 && tp_base_ua > 0) {
+    } else if ((!tp_enabled || want != 0) && tp_last_ratio != 100 && tp_base_ma > 0) {
         char b[24];
-        snprintf(b, sizeof(b), "%d", tp_base_ua);
-        if (write_str(MTK_MASTER "/input_current_limit", b) == 0) {
+        snprintf(b, sizeof(b), "%d", tp_base_ma);
+        if (write_str(MTK_CHG "/constant_charge_current", b) == 0) {
             tp_last_ratio = 100;
             log_event("解除温度限流（已关闭开关或进入停充）");
         }
@@ -2249,6 +2269,7 @@ static void load_config(void) {
         else if (!strcmp(k, "interval")) { x = atoi(v); interval = (x >= 1 && x <= 60) ? x : 5; }
         else if (!strcmp(k, "enabled")) limit_enabled = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "tp")) tp_enabled = atoi(v) ? 1 : 0;
+        else if (!strcmp(k, "tpbase")) { x = atoi(v); if (x >= 100 && x <= 10000) tp_base_ma = x; }
         else if (!strcmp(k, "history_enabled")) history_enabled = atoi(v) ? 1 : 0;
         /* ★ v1.4.0: 高级控制开关纳入主配置。
            原先只存 extras.json，一旦该文件损坏/丢失，开关会静默丢失；
@@ -2276,6 +2297,7 @@ static void save_config(void) {
     fprintf(f, "interval=%d\n", interval);
     fprintf(f, "enabled=%d\n", limit_enabled);
     fprintf(f, "tp=%d\n", tp_enabled);
+    if (tp_base_ma > 0) fprintf(f, "tpbase=%d\n", tp_base_ma);
     fprintf(f, "history_enabled=%d\n", history_enabled);
     fprintf(f, "rec_temp_hyst=%d\n", rec_temp_hyst);
     fprintf(f, "rec_temp_hold=%d\n", rec_temp_hold);
