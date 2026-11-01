@@ -2343,16 +2343,25 @@ static void handle_charging_state(void) {
         /* v1.19.0: 会话结束 → 结算入库 */
         cp_finalize();
     }
-    /* v1.3.1: 优先用硬件 charge_counter 差值(精确)，回退到容量估算 */
+    /* ★ v2.3.0: 改为「容量差为主」，charge_counter 兜底。
+       原实现优先用 charge_counter 差值，但实测该 PMIC 在充电期间
+       counter 增长远小于实际充入（历史会话出现 17→99% 只记 532mAh，
+       而按容量算应为 ~4314mAh）⇒ 主路径会系统性低估。
+       容量差与 UI 显示一致，1% ≈ 52mAh，短会话误差可接受。 */
     if (sess_active) {
-        int cnow = read_int(SYSFS "/charge_counter");
-        if (sess_start_counter >= 0 && cnow >= 0 && cnow >= sess_start_counter) {
-            sess_mah = (int)((cnow - sess_start_counter) / 1000);
-        } else if (sess_start_cap >= 0 && bat_capacity > sess_start_cap) {
+        int by_cap = -1;
+        if (sess_start_cap >= 0 && bat_capacity > sess_start_cap) {
             int cf = read_int(SYSFS "/charge_full");
             int chg_full = cf > 0 ? cf / 1000 : (design_mah > 0 ? design_mah : 4000);
-            sess_mah = ((bat_capacity - sess_start_cap) * chg_full) / 100;
+            by_cap = ((bat_capacity - sess_start_cap) * chg_full) / 100;
         }
+        int by_cnt = -1;
+        int cnow = read_int(SYSFS "/charge_counter");
+        if (sess_start_counter >= 0 && cnow >= 0 && cnow >= sess_start_counter)
+            by_cnt = (int)((cnow - sess_start_counter) / 1000);
+
+        if (by_cap > 0) sess_mah = by_cap;          /* 主：容量差 */
+        else if (by_cnt > 0) sess_mah = by_cnt;     /* 兜底：硬件计数 */
         if (sess_mah < 0) sess_mah = 0;
     }
 }
@@ -3354,11 +3363,16 @@ static void handle_status(int fd) {
        （原名与全局 health_rating[16] 同名，导致 L1411 写入的全局值
         从未被输出，status 实际用的是这里另一套阈值） */
     const char *health_rating_out = health_rating_of(health);
+    /* ★ v2.3.0: 不再用「(100-health)/cycle_count」拟合衰减率外推剩余循环。
+       本机实测：58 次循环、health 只掉 1%（BMS 整数取整噪声），
+       据此会推出 2262 次这种无依据的数，被前端换算成「还能约 8 年」。
+       改为按锂电池通用标称寿命（800 次循环 → 80% 健康度）扣减已用循环。
+       真正的按使用速率推算由前端基于 cycling.jsonl 做（需 ≥3 天数据）。 */
     int est_cycles_left = 0;
-    if (cycle_count > 0 && health > 0) {
-        float loss_per_cycle = (100.0f - health) / cycle_count;
-        if (loss_per_cycle > 0.001f)
-            est_cycles_left = (int)((health - 60.0f) / loss_per_cycle);
+    if (cycle_count >= 0) {
+        const int nominal_cycles = 800;
+        est_cycles_left = nominal_cycles - cycle_count;
+        if (est_cycles_left < 0) est_cycles_left = 0;
     }
     /* v1.17.0: 停充状态与恢复倒计时 */
     long _now_s = (long)time(NULL);
