@@ -383,6 +383,12 @@ pre.export{white-space:pre-wrap;word-break:break-all;font-size:11px;line-height:
         <pre class="export" id="expBox" hidden></pre>
       </div>
 
+      <div class="sect">
+        <p class="lbl">系统诊断</p>
+        <p class="desc">这台机上哪些控制节点是真的可写——避免开关看着能用其实无效。</p>
+        <div class="panel" id="diagPanel"><div class="fd">读取中…</div></div>
+      </div>
+
       <div class="readonly" id="saveHint">「上限」「电池上限」拖动即时写入；其余只读（<b>rec_* 三个参数不在 API 里</b>，要改需编辑配置文件）。</div>
     </section>
   </main>
@@ -490,7 +496,7 @@ function renderPower(p){
   const bl=p.backlight||{};
   const blp=bl.max?Math.round(bl.cur/bl.max*100):0;
   $('#pwrNote').textContent='累计 '+Math.round(p.drain_mah||0)+' mAh（跨多次充电）· 电池 '+Math.round(p.capacity_mah||0)+' mAh';
-  $('#pwrFoot').textContent='条形 = 占本次统计窗口的比例（右列 mAh）· 背光 '+blp+'%';
+  $('#pwrFoot').textContent='Android 估算（非实测）· 条形 = 占统计窗口比例 · 背光 '+blp+'%';
 }
 
 let prof=null, stat=null, base=null;
@@ -553,7 +559,7 @@ function diagnose(){
   const cur=Math.abs(st.current||0);
   if(cur<50) return null;
   if(cur < g.max*0.5){
-    return '<b>充电偏慢</b>：'+st.temp+' °C / '+st.capacity+'% 这一档，历史最高到过 <b>'+g.max+' mA</b>，现在只有 <b>'+cur+' mA</b>（'+Math.round(cur/g.max*100)+'%）—— 可能是线材、充电器或温控在压制。';
+    return '<b>充电偏慢</b>：'+st.temp+' °C / '+st.capacity+'% 这一档，历史最高到过 <b>'+g.max+' mA</b>（n='+g.n+'），现在只有 <b>'+cur+' mA</b>（'+Math.round(cur/g.max*100)+'%）—— 可能是线材、充电器或温控在压制。';
   }
   return null;
 }
@@ -725,6 +731,8 @@ function render(s){
   const scEl=$('#sl_cap'); if(scEl && document.activeElement!==scEl) scEl.value=s.charge_limit;
   const stEl=$('#sl_tmp'); if(stEl && document.activeElement!==stEl) stEl.value=s.temp_limit;
 
+  renderDiag(s);
+
   const sv=function(id,val){var n=$(id); if(n) n.innerHTML=val;};
   sv('#s1',s.charge_limit+'<small>%</small>');
   sv('#s2',s.rec_soc_hyst+'<small>%</small>');
@@ -866,14 +874,50 @@ function renderLife(list){
 }
 
 function renderSessions(list){
-  $('#sessNote').textContent=list.length+' 次';
-  $('#sessBody').innerHTML=list.slice(0,8).map(s=>{
-    const d=new Date(s.t*1000);
+  /* M1-C 数据溯源：sess_mah 在 v2.4.0 前是旧算法（系统性偏低），
+     用「容量差 × 满充容量」反推应有值，偏差 >50% 的标灰并注明。 */
+  const capRef = (st && st.charge_full_mah > 0) ? st.charge_full_mah : 5261;
+  let badCount = 0;
+  const rows = list.slice(0,8).map(function(s){
+    const d = new Date(s.t*1000);
+    const expect = Math.round((s.capmax - s.cap0) / 100 * capRef);
+    const bad = s.mah > 0 && expect > 200 && Math.abs(s.mah - expect) > expect * 0.5;
+    if (bad) badCount++;
+    const mahCell = bad
+      ? '<td class="r" style="opacity:.45" title="记录异常：充入 '+s.mah+' mAh，按容量应为约 '+expect+' mAh（旧版统计 bug）">'
+        + s.mah + '<span class="s2">mAh ⚠</span></td>'
+      : '<td class="r">'+s.mah+'<span class="s2">mAh</span></td>';
     return '<tr><td>'+hhmm(s.t)+'<span class="s2">'+(d.getMonth()+1)+'/'+d.getDate()+'</span></td>'
-      +'<td class="r">'+s.mah+'<span class="s2">mAh</span></td>'
-      +'<td class="r">'+s.cap0+'→'+s.capmax+'<span class="s2">%</span></td>'
-      +'<td class="r">'+dur(s.dur)+'</td></tr>';
-  }).join('')||'<tr><td colspan="4"><div class="empty">还没有充电会话</div></td></tr>';
+      + mahCell
+      + '<td class="r">'+s.cap0+'→'+s.capmax+'<span class="s2">%</span></td>'
+      + '<td class="r">'+dur(s.dur)+'</td></tr>';
+  }).join('');
+  $('#sessNote').textContent = list.length+' 次'+(badCount ? ' · '+badCount+' 条 mAh 异常' : '');
+  $('#sessBody').innerHTML = rows || '<tr><td colspan="4"><div class="empty">还没有充电会话</div></td></tr>';
+}
+
+function renderDiag(s){
+  const el=$('#diagPanel'); if(!el) return;
+  const NAME={suspend:'停充',ccur:'充电电流',limit:'输入限流',ppath:'旁路',cv:'恒压点',night:'原生夜间'};
+  const rows=Object.keys(NAME).map(function(k){
+    const v=(s.nodes && s.nodes[k]!==undefined) ? s.nodes[k] : -1;
+    let badge, color;
+    if(v===1){ badge='可写'; color='var(--accent)'; }
+    else if(v===0){ badge='被驱动忽略'; color='var(--negative)'; }
+    else { badge='未探测'; color='var(--faint)'; }
+    return '<div class="field"><div><div class="fl">'+NAME[k]+'</div><div class="fd">'+k+'</div></div>'
+      +'<div class="fv" style="color:'+color+'">'+badge+'</div></div>';
+  });
+  const keys=Object.keys(s);
+  const emptyKeys=keys.filter(function(k){ return s[k]===''; });
+  const negKeys=keys.filter(function(k){ return s[k]===-1; });
+  rows.push('<div class="flowline">字段 '+keys.length+' 个：'
+    +emptyKeys.length+' 个本机读不到、'+negKeys.length+' 个当前不适用或读取失败</div>');
+  if(emptyKeys.length){
+    rows.push('<div class="fd" style="margin-top:8px;line-height:17px;word-break:break-all">'
+      +'读不到：'+emptyKeys.join('、')+'</div>');
+  }
+  el.innerHTML=rows.join('');
 }
 
 function renderCal(c){
