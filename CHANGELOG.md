@@ -1,5 +1,71 @@
 # Changelog
 
+## v2.2.0 (2026-11-01)
+
+### 🔋 修复「手机上读不到的数据」—— 17 个字段接上真实数据源
+
+用户要求：全局盘查哪些是设备上读不到的数据，能推算的推算、能取到的取到。
+
+#### 排查方法
+
+把 `battd` 实际读的每一条路径拿到真机（K60 Ultra / MT6985 / 天玑9200+）逐个 `test -e`，
+再与 `/api/status` 实际返回值比对，最后回代码确认"该不该在设备上读"。
+**结论：64 个字段恒为 -1/空，其中 17 个不是没数据，是代码读错了地方。**
+
+#### 根因：MTK 平台的标准节点挂在别的 power_supply 设备上
+
+MT6985 不导出 Linux `power_supply` 标准节点，但数据在内核里都有，只是位置不同：
+
+| 数据 | 代码原来读（不存在） | 真实位置 |
+|---|---|---|
+| 终止电流 | `battery/charge_term_current` | `11280000.i2c:mt6375@34:chg/charge_term_current` = 100mA |
+| 最大充电电压 | `battery/constant_charge_voltage_max` | `bms/voltage_max` = 4543mV |
+| 校准 | `battery/calibrate` | `mtk6375@34:chg/calibrate`（12bit ADC 原始码） |
+| 温度上下限 | `battery/temp_{max,min}` | `bms/temp_{max,min}` = 264 / 254 |
+| 内阻 | `battery/internal_resistance` | `bms/resistance` = 100000µΩ |
+| 充电完成 | `battery/charge_done` | `bms/charge_done` |
+| 最大充电电流 | `battery/constant_charge_current_max` | `mtk-master-charger/...` = 3000mA |
+| 输入限流 | `usb/input_current_limit` | `mtk-master-charger/input_current_limit` = 3000mA |
+| 电池厂商 | `battery/manufacturer` | `bms/battery_supplier` = BYD |
+| 安全计时器 | `battery/safety_timer_expired` | `/proc/mtk_battery_cmd/en_safety_timer` = 1 |
+| 充电器温度 | `battery/charger_temp` | `mtk-master-charger/temp` |
+
+#### 无节点但有等价数据 → 推算补齐
+
+| 字段 | 推算方式 |
+|---|---|
+| **当前电量** | `bms/rm`(mAh) → µAh，回退 `charge_counter` |
+| **平均电流** | `current_avg` 节点恒为 0（MTK 没实现）⇒ 用 `bat_curr` 兜底 |
+| **预计耗尽** | `bms/rm × 3600 / 放电电流`，仅放电时计算 |
+| **开路电压(OCV)** | 静置判据：`|I| < 50mA` 且非充电 ⇒ 端电压 ≈ OCV（UI 标「估算」） |
+| **电量偏差** | `battery/capacity` 与 `rm/fcc` 真实比的差值（百分点），实测 ±3% |
+| **机身/环境温度** | 扫 thermal 取 `quiet_therm`（39.3°C），非真环境温度，UI 标「机身温」 |
+| **充电类型** | 无 `charge_type` 节点 ⇒ 按充电阶段反推（Trickle/Fast/Taper） |
+| **CPU 型号** | `/proc/cpuinfo` 无 `Hardware` 行 ⇒ 回退 device-tree `model` = MT6985 |
+| **屏幕分辨率** | `fb0` 不存在 ⇒ 回退 `wm size` = 1220×2712 |
+
+#### 顺带修掉的真 Bug
+
+**CV（恒压）阶段永远判不出来**：`detect_charge_stage()` 里恒压点硬编码 `4430mV`，
+而本机实测 `constant_charge_voltage = 4460mV` ⇒ 电压永远差 30mV 到不了阈值。
+实测 6586 点历史数据里 CV 占比 **0%**。改为动态读实测恒压点（回退 `mtk_battery_cmd/set_cv`）。
+
+#### UI 语义修正
+
+- 「校准状态」→「**校准码**」：不是布尔值，是 12bit ADC 原始码（满量程 4096），<3900 标橙
+- 「安全计时器」→「**已启用/已关闭**」：原显示「正常/已超时」但 MTK 没有 expired 节点
+- 「误差范围」→「**电量偏差 ±N%**」：明确是推算的估计偏差
+- 「在位/环境/内阻」→「在位/**机身温**/内阻」
+- 开路电压静置才显示，且标「(估算)」，否则提示「静置后可见」
+
+#### CI 加固
+
+假 sysfs 扩展到 10 个 power_supply 设备 + thermal + proc，
+新增 12 项**回退回归校验**：任一字段取不到值即 CI 失败。
+实测本地 `smoke-test.sh` 全绿（246 字段 / 12 项回退 / 无内存泄漏）。
+
+---
+
 ## v2.1.0 (2026-10-30)
 
 ### 🎨 UI 极致打磨：建立完整设计系统

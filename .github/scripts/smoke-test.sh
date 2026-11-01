@@ -7,7 +7,13 @@ FS=/tmp/ccfs
 rm -rf "$FS"
 mkdir -p "$FS"/sys/class/power_supply/battery \
          "$FS"/sys/class/power_supply/usb \
-         "$FS"/data/adb/battery-manager
+         "$FS"/sys/class/power_supply/bms \
+         "$FS"/sys/class/power_supply/mtk-master-charger \
+         "$FS/sys/class/power_supply/11280000.i2c:mt6375@34:chg" \
+         "$FS"/sys/class/thermal \
+         "$FS"/data/adb/battery-manager \
+         "$FS"/proc/mtk_battery_cmd \
+         "$FS"/proc/device-tree
 
 echo "── 造假电池节点（值取自真机 K60 Ultra）──"
 echo 78      > "$FS"/sys/class/power_supply/battery/capacity
@@ -18,6 +24,30 @@ echo 380     > "$FS"/sys/class/power_supply/battery/temp
 echo 26      > "$FS"/sys/class/power_supply/battery/cycle_count
 echo 5413000 > "$FS"/sys/class/power_supply/battery/charge_full
 echo 5380000 > "$FS"/sys/class/power_supply/battery/charge_full_design
+# v2.2.0: 等价源节点（MTK 上这些标准节点不存在，真身在别的 power_supply 设备）
+echo 2271 > "$FS"/sys/class/power_supply/bms/rm
+echo 5261 > "$FS"/sys/class/power_supply/bms/fcc
+echo 99   > "$FS"/sys/class/power_supply/bms/soh
+echo 264  > "$FS"/sys/class/power_supply/bms/temp_max
+echo 254  > "$FS"/sys/class/power_supply/bms/temp_min
+echo 100000 > "$FS"/sys/class/power_supply/bms/resistance
+echo 0    > "$FS"/sys/class/power_supply/bms/charge_done
+echo 4543 > "$FS"/sys/class/power_supply/bms/voltage_max
+echo BYD  > "$FS"/sys/class/power_supply/bms/battery_supplier
+echo 3000000 > "$FS"/sys/class/power_supply/mtk-master-charger/input_current_limit
+echo 3000000 > "$FS"/sys/class/power_supply/mtk-master-charger/constant_charge_current_max
+echo 4300000 > "$FS"/sys/class/power_supply/mtk-master-charger/temp
+echo 100  > "$FS/sys/class/power_supply/11280000.i2c:mt6375@34:chg/charge_term_current"
+echo 4090 > "$FS/sys/class/power_supply/11280000.i2c:mt6375@34:chg/calibrate"
+echo 4500 > "$FS/sys/class/power_supply/11280000.i2c:mt6375@34:chg/input_voltage_limit"
+echo 1    > "$FS"/proc/mtk_battery_cmd/en_safety_timer
+echo 4460 > "$FS"/proc/mtk_battery_cmd/set_cv
+echo MT6985 > "$FS"/proc/device-tree/model
+mkdir -p "$FS"/sys/class/thermal/thermal_zone0 "$FS"/sys/class/thermal/thermal_zone42
+echo soc_max     > "$FS"/sys/class/thermal/thermal_zone0/type
+echo 55000       > "$FS"/sys/class/thermal/thermal_zone0/temp
+echo quiet_therm > "$FS"/sys/class/thermal/thermal_zone42/type
+echo 39300       > "$FS"/sys/class/thermal/thermal_zone42/temp
 
 # 源码位置：仓库里是 src/battd.c，test-bundle 里是平铺的 battd.c
 SRC=""
@@ -32,6 +62,10 @@ sed -e "s|#define SYSFS       \"/sys/class/power_supply/battery\"|#define SYSFS 
     -e "s|#define SYSFS_USB   \"/sys/class/power_supply/usb\"|#define SYSFS_USB   \"$FS/sys/class/power_supply/usb\"|" \
     -e "s|/data/adb/battery-manager|$FS/data/adb/battery-manager|g" \
     -e "s|/sys/class/power_supply/mtk-master-charger|$FS/sys/class/power_supply/mtk-master-charger|g" \
+    -e "s|/sys/class/power_supply/bms|$FS/sys/class/power_supply/bms|g" \
+    -e "s|/sys/class/power_supply/11280000.i2c:mt6375@34:chg|$FS/sys/class/power_supply/11280000.i2c:mt6375@34:chg|g" \
+    -e "s|/sys/class/thermal|$FS/sys/class/thermal|g" \
+    -e "s|/proc/device-tree|$FS/proc/device-tree|g" \
     -e "s|/proc/mtk_battery_cmd|$FS/proc/mtk_battery_cmd|g" \
     "$SRC" > /tmp/battd-test.c
 gcc -O2 -o /tmp/battd-test /tmp/battd-test.c
@@ -46,6 +80,36 @@ curl -sS -m 5 http://127.0.0.1:8800/api/status -o /tmp/status.json
 
 echo "── 字段完整性 ──"
 python3 "$(dirname "$0")/verify_status.py"
+
+echo "── v2.2.0 MTK 等价源回退（本机缺失节点）──"
+python3 - <<'PYV'
+import json
+d=json.load(open('/tmp/status.json'))
+# 这些 field 在 MTK 上标准节点缺失，必须能从等价源取到值（不能是 -1/空）
+must = {
+  'charge_term_current':        'MTK_CHG/charge_term_current',
+  'constant_charge_voltage_max':'bms/voltage_max',
+  'calibrate':                  'MTK_CHG/calibrate',
+  'safety_timer_expired':       'mtk_battery_cmd/en_safety_timer',
+  'capacity_error_margin':      'capacity vs rm/fcc 推算',
+  'internal_resistance':        'bms/resistance',
+  'temp_max':                   'bms/temp_max',
+  'temp_min':                   'bms/temp_min',
+  'charge_done':                'bms/charge_done',
+  'charge_now':                 'bms/rm 或 charge_counter',
+  'input_current_limit':        'mtk-master-charger/input_current_limit',
+  'constant_charge_current_max':'mtk-master-charger/constant_charge_current_max',
+}
+bad=[]
+for k,src in must.items():
+    v=d.get(k)
+    if v is None or v < 0: bad.append(f"{k}(应为{src})= {v}")
+if bad:
+    print("  ⚠️  以下字段未取到（若假 sysfs 已造对应节点则为回归）:")
+    for b in bad: print("     ", b)
+else:
+    print(f"  ✅ {len(must)} 个回退字段全部取到值")
+PYV
 
 echo "── 写配置 + 越界值拒绝 ──"
 curl -sS -m 5 -X POST http://127.0.0.1:8800/api/limit --data 'charge_limit=65' -o /dev/null

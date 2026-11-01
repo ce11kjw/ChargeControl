@@ -68,14 +68,14 @@ class TempCurveView {
       const soc = p.c;
       if (!bySoc.has(soc)) {
         bySoc.set(soc, {
-          t: p.t, soc, tmp: p.tmp / 10, chg_tmp: (p.chg_tmp || p.tmp) / 10,
+          t: p.t, soc, tmp: p.tmp, chg_tmp: (p.chg_tmp || p.tmp),   /* history 存的就是摄氏度 */
           status: p.s, evt: null
         });
       } else {
         const old = bySoc.get(soc);
-        if (p.tmp > old.tmp * 10) {
-          old.tmp = p.tmp / 10;
-          old.chg_tmp = (p.chg_tmp || p.tmp) / 10;
+        if (p.tmp > old.tmp) {
+          old.tmp = p.tmp;
+          old.chg_tmp = (p.chg_tmp || p.tmp);
           old.t = p.t;
         }
       }

@@ -18,6 +18,14 @@
 #define PORT        8800
 #define SYSFS       "/sys/class/power_supply/battery"
 #define SYSFS_USB   "/sys/class/power_supply/usb"
+/* v2.2.0: MTK 平台大量标准 power_supply 节点挂在别的设备上，统一在这里管理，
+   避免各函数里散落硬编码路径（踩过坑：usb/input_current_limit 本机不存在） */
+#define BMS         "/sys/class/power_supply/bms"
+#define MTK_MASTER  "/sys/class/power_supply/mtk-master-charger"
+/* MTK 充电器本体（i2c 节点）—— 这里藏着 battery/ 下没有的一批节点：
+   charge_term_current(终止电流) / calibrate(校准原始码) /
+   input_voltage_limit(输入电压上限) / manufacturer(充电器厂商) */
+#define MTK_CHG     "/sys/class/power_supply/11280000.i2c:mt6375@34:chg"
 #define THERMAL     "/sys/class/thermal"
 #define CONFIG      "/data/adb/battery-manager/batt.conf"
 #define HISTORY     "/data/adb/battery-manager/history.json"
@@ -300,6 +308,7 @@ static int pd_pdo_max_mv = 0;          /* PD 最高电压(mV) */
 static int pd_pdo_max_ma = 0;          /* PD 最大电流(mA) */
 static char pd_svid[16] = "";          /* 适配器厂商标识 */
 static char pd_state[24] = "";         /* PD 状态机状态 */
+static int cv_point_mv = -1;           /* v2.2.0: 实测恒压点(读 battery/constant_charge_voltage)，CV 判定基准，避免硬编码 4430 */
 static int cc_limit_supported = 0;     /* charge_control_limit 是否可用 */
 static int cc_limit_val = -1;          /* MTK 原生电量上限原值 */
 static int power_path_en = -1;         /* en_power_path 旁路电源路径 */
@@ -348,6 +357,8 @@ static void url_decode(char *s) {
     }
     *w = '\0';
 }
+
+static int prop_get(const char *key, char *out, int outsz);   /* v2.2.0 前向声明（定义在文件后段） */
 
 static int read_int(const char *path) {
     char buf[64]; int fd = open(path, O_RDONLY);
@@ -427,26 +438,212 @@ static void slow_update_battery(void) {
     snprintf(path, sizeof(path), "%s/charge_counter", SYSFS); if ((v = read_int(path)) >= 0) bat_charge_counter = v;
     snprintf(path, sizeof(path), "%s/manufacturer", SYSFS); read_str(path, bat_manufacturer, sizeof(bat_manufacturer));
     snprintf(path, sizeof(path), "%s/model_name", SYSFS); read_str(path, bat_model_name, sizeof(bat_model_name));
-    snprintf(path, sizeof(path), "%s/voltage_ocv", SYSFS); if ((v = read_int(path)) >= 0) voltage_ocv = v;
-    snprintf(path, sizeof(path), "%s/current_avg", SYSFS); if ((v = read_int(path)) >= 0) current_avg = v;
+    /* ═══ v2.2.0 开路电压 / 误差范围：本机无节点，改为推算 ═══════════════════
+       MT6985 的 power_supply 里没有 voltage_ocv 与 capacity_error_margin
+       （已遍历全部 10 个设备确认），但两者都能从已有数据合理推算。 */
+
+    /* ── 开路电压 voltage_ocv ──
+       原理：OCV 是没有电流时的电芯静置电压。有电流时 polarization 会把端电压
+       拉偏几十~上百 mV。判据：|电流| 很小 且 不在充放电 ⇒ 此时 voltage_now 即近似 OCV。
+       阈值取 |I| < 50mA（接近静置），否则保持 -1（前端显示 —）。
+       ⚠️ 这是近似值，不是真实 OCV 采样，UI 上应标注"估算"。 */
+    v = read_int(SYSFS "/voltage_ocv");
+    if (v >= 0) {
+        voltage_ocv = v;
+    } else {
+        int iabs = bat_curr < 0 ? -bat_curr : bat_curr;
+        if (bat_volt > 3000 && iabs >= 0 && iabs < 50
+            && bat_status[0] && strcmp(bat_status, "Charging") != 0) {
+            voltage_ocv = bat_volt;      /* mV，与电压同单位 */
+        }
+    }
+
+    /* ── 误差范围 capacity_error_margin ──
+       MTK 电量计给出三路独立的荷电状态，互相的偏差就是"电量估计误差"：
+         battery/capacity / bms/capacity  → UI 显示用的百分比
+         bms/rsoc                         → 库仑计剩余容量比
+         bms/rm ÷ bms/fcc                 → 剩余容量 / 满充容量
+       取「UI 百分比」与「rm/fcc 真实比」的最大差（百分点）作为误差范围。
+       这是真实可观测的偏差，不是编造值。 */
+    if (read_int(SYSFS "/capacity_error_margin") >= 0) {
+        capacity_error_margin = read_int(SYSFS "/capacity_error_margin");
+    } else {
+        int ui_pct  = read_int(SYSFS "/capacity");
+        int rm      = read_int(BMS "/rm");
+        int fcc     = read_int(BMS "/fcc");
+        if (ui_pct >= 0 && rm > 0 && fcc > 0) {
+            int real_pct = (int)((long long)rm * 100 / fcc);
+            int d = ui_pct - real_pct;
+            if (d < 0) d = -d;
+            capacity_error_margin = d;      /* 百分点 */
+        }
+    }
+    /* v2.2.0: 平均电流。本机 current_avg 节点存在但恒为 0（MTK 没实现），
+       显示出来就是误导。0 一律视为无效，改用 bat_curr（采样窗口内的即时值）。 */
+    /* read_int() 对「文件不存在」返回 -1，对「存在但值为 0」返回 0 —— 必须分开判：
+       -1 = 节点没有；0 = 节点有但 MTK 没实现。两者都视为无效，回退 bat_curr。 */
+    snprintf(path, sizeof(path), "%s/current_avg", SYSFS); v = read_int(path);
+    if (v > 0 || v < -1) {          /* 有效真实值（非 0、非"节点缺失"） */
+        current_avg = v;
+    } else if (bat_curr != -1) {
+        current_avg = bat_curr;     /* 节点无效/缺失 ⇒ 用即时电流 */
+    } else {
+        current_avg = -1;           /* 慢更新早于首次采样，保持无效 */
+    }
     snprintf(path, sizeof(path), "%s/constant_charge_current", SYSFS); if ((v = read_int(path)) >= 0) constant_charge_current = v;
     snprintf(path, sizeof(path), "%s/constant_charge_voltage", SYSFS); if ((v = read_int(path)) >= 0) constant_charge_voltage = v;
     snprintf(path, sizeof(path), "%s/capacity_error_margin", SYSFS); if ((v = read_int(path)) >= 0) capacity_error_margin = v;
-    snprintf(path, sizeof(path), "%s/time_to_empty_now", SYSFS); if ((v = read_int(path)) >= 0) time_to_empty = v;
+    /* v2.2.0: 预计耗尽(秒)。本机无 time_to_empty_now 节点 ⇒ 用剩余容量/放电电流推算。
+       只在「确实在放电(电流为负方向)」时算，充电中保持 -1（避免出现"充电还剩 X 分钟耗尽"）。
+       bms/rm 单位 mAh，bat_curr 单位 mA ⇒ 分钟 = rm*60/|I|。 */
+    snprintf(path, sizeof(path), "%s/time_to_empty_now", SYSFS); v = read_int(path);
+    if (v >= 0) {
+        time_to_empty = v;
+    } else if (bat_status[0] && strcmp(bat_status, "Discharging") == 0 && bat_curr > 0) {
+        int rm = read_int(BMS "/rm");
+        if (rm > 0) time_to_empty = (int)((long long)rm * 3600 / bat_curr);
+    }
     snprintf(path, sizeof(path), "%s/present", SYSFS); if ((v = read_int(path)) >= 0) bat_present = v;
     snprintf(path, sizeof(path), "%s/internal_resistance", SYSFS); if ((v = read_int(path)) >= 0) internal_resistance = v;
     snprintf(path, sizeof(path), "%s/charge_now", SYSFS); if ((v = read_int(path)) >= 0) charge_now = v;
-    snprintf(path, sizeof(path), "%s/charge_term_current", SYSFS); if ((v = read_int(path)) >= 0) charge_term_current = v;
+    /* v2.2.0: 终止电流。battery/ 下没有这个节点，真身在 MTK 充电器设备：
+       MTK_CHG/charge_term_current = 100 (mA) —— 实测存在且可写。 */
+    snprintf(path, sizeof(path), "%s/charge_term_current", SYSFS); v = read_int(path);
+    if (v < 0) v = read_int(MTK_CHG "/charge_term_current");
+    if (v >= 0) charge_term_current = v;
     snprintf(path, sizeof(path), "%s/constant_charge_current_max", SYSFS); if ((v = read_int(path)) >= 0) constant_charge_current_max = v;
-    snprintf(path, sizeof(path), "%s/constant_charge_voltage_max", SYSFS); if ((v = read_int(path)) >= 0) constant_charge_voltage_max = v;
-    snprintf(path, sizeof(path), "%s/temp_max", SYSFS); if ((v = read_int(path)) >= 0) temp_max = v;
-    snprintf(path, sizeof(path), "%s/temp_min", SYSFS); if ((v = read_int(path)) >= 0) temp_min = v;
-    snprintf(path, sizeof(path), "%s/charger_temp", SYSFS); if ((v = read_int(path)) >= 0) charger_temp = v;
-    snprintf(path, sizeof(path), "%s/charge_done", SYSFS); if ((v = read_int(path)) >= 0) charge_done = v;
-    snprintf(path, sizeof(path), "%s/input_voltage_settled", SYSFS); if ((v = read_int(path)) >= 0) input_voltage_settled = v;
-    snprintf(path, sizeof(path), "%s/safety_timer_expired", SYSFS); if ((v = read_int(path)) >= 0) safety_timer_expired = v;
-    snprintf(path, sizeof(path), "%s/calibrate", SYSFS); if ((v = read_int(path)) >= 0) calibrate = v;
-    snprintf(path, sizeof(path), "%s/temp_ambient", SYSFS); if ((v = read_int(path)) >= 0) temp_ambient = v;
+    /* v2.2.0: 最大充电电压。battery/ 下没有，实测可用来源两处：
+       bms/voltage_max = 4543 (mV，电芯允许上限)
+       MTK_CHG/input_voltage_limit = 4500 (mV，充电器输入上限)
+       取「电芯上限」优先（对电池保护更有意义）。 */
+    snprintf(path, sizeof(path), "%s/constant_charge_voltage_max", SYSFS); v = read_int(path);
+    if (v < 0) v = read_int(BMS "/voltage_max");
+    if (v < 0) v = read_int(MTK_CHG "/input_voltage_limit");
+    if (v > 0) constant_charge_voltage_max = v;
+    /* ═══ v2.2.0: 读不到节点的字段补等价源 ═══════════════════════════════
+       背景：MTK(mt6375/MT6985) 不导出部分标准 power_supply 节点，实测本机
+         battery/{temp_max,temp_min,charger_temp,charge_done,internal_resistance,
+                  manufacturer,constant_charge_current_max} 全不存在。
+       这些数据在内核里是有的，只是挂在别的 power_supply 设备上。
+       ⇒ 每条都改成「标准路径优先，等价节点兜底」，读不到仍保持 -1（由前端隐藏）。 */
+
+    /* 温度上下限：battery/temp_{max,min} → bms/temp_{max,min} */
+    snprintf(path, sizeof(path), "%s/temp_max", SYSFS); v = read_int(path);
+    if (v < 0) v = read_int(BMS "/temp_max");
+    if (v >= 0) temp_max = v;
+
+    snprintf(path, sizeof(path), "%s/temp_min", SYSFS); v = read_int(path);
+    if (v < 0) v = read_int(BMS "/temp_min");
+    if (v >= 0) temp_min = v;
+
+    /* 充电器(IC)温度：battery/charger_temp → mtk-master-charger/temp
+       （与 chg_temp 同源，但保留字段以免前端/App 兼容性断裂） */
+    snprintf(path, sizeof(path), "%s/charger_temp", SYSFS); v = read_int(path);
+    if (v < 0) v = read_int(MTK_MASTER "/temp");
+    if (v >= 0) charger_temp = v;
+
+    /* 充电完成：battery/charge_done → bms/charge_done */
+    snprintf(path, sizeof(path), "%s/charge_done", SYSFS); v = read_int(path);
+    if (v < 0) v = read_int(BMS "/charge_done");
+    if (v >= 0) charge_done = v;
+
+    /* 内阻：battery/internal_resistance → bms/resistance（单位 µΩ，前端按 /1000 显示 mΩ） */
+    snprintf(path, sizeof(path), "%s/internal_resistance", SYSFS); v = read_int(path);
+    if (v < 0) v = read_int(BMS "/resistance");
+    if (v >= 0) internal_resistance = v;
+
+    /* 电池厂商：battery/manufacturer → bms/battery_supplier（部分机型该值恒 0，视为无效） */
+    snprintf(path, sizeof(path), "%s/manufacturer", SYSFS); read_str(path, bat_manufacturer, sizeof(bat_manufacturer));
+    if (bat_manufacturer[0] == 0) {
+        char sup[64] = "";
+        read_str(BMS "/battery_supplier", sup, sizeof(sup));
+        /* 纯数字/空 ⇒ 厂商没填，别把 "0" 当厂名 */
+        if (sup[0] && !(sup[0] >= '0' && sup[0] <= '9'))
+            snprintf(bat_manufacturer, sizeof(bat_manufacturer), "%s", sup);
+    }
+
+    /* 最大充电电流：battery/ → mtk-master-charger/（本机 2400~3000mA） */
+    snprintf(path, sizeof(path), "%s/constant_charge_current_max", SYSFS); v = read_int(path);
+    if (v < 0) v = read_int(MTK_MASTER "/constant_charge_current_max");
+    if (v >= 0) constant_charge_current_max = v;
+
+    /* 恒压点（CV 判定基准，见 detect_charge_stage）
+       battery/constant_charge_voltage 本机存在且 = 4460；读不到退回 set_cv */
+    v = read_int(SYSFS "/constant_charge_voltage");
+    if (v < 1000) v = read_int("/proc/mtk_battery_cmd/set_cv");
+    if (v >= 3000 && v <= 5000) cv_point_mv = v;
+    if (v >= 0) constant_charge_voltage = v;
+
+    /* 当前电量(mAh)：battery/charge_now → bms/rm → charge_counter/1000
+       （本机 charge_now 不存在，但 bms/rm 与 charge_counter 都有真实值） */
+    snprintf(path, sizeof(path), "%s/charge_now", SYSFS); v = read_int(path);
+    if (v < 0) { int rm = read_int(BMS "/rm"); if (rm > 0) v = rm * 1000; }   /* rm 是 mAh ⇒ µAh */
+    if (v < 0) v = read_int(SYSFS "/charge_counter");
+    if (v >= 0) charge_now = v;
+
+    /* 充电器输入电压(稳定)：battery/ → usb/voltage_now（本机 usb 侧偶有值） */
+    snprintf(path, sizeof(path), "%s/input_voltage_settled", SYSFS); v = read_int(path);
+    if (v < 0) v = read_int(SYSFS_USB "/voltage_now");
+    if (v >= 0) input_voltage_settled = v;
+
+    /* v2.2.0: 充电类型（POWER_SUPPLY_CHARGE_TYPE_*）
+       1=Trickle / 2=Fast / 4=Adaptive / 50=TAPER_EXT(CV)
+       实测 MT6985 没有 battery/charge_type 节点（代码注释里早就写了），
+       原来只读节点 ⇒ 恒为 -1，UI「充电类型」永远是 —。
+       这里改为：节点优先，读不到则按充电阶段+电流反推（数据来自 detect_charge_stage）。 */
+    {
+        int ct = read_int(SYSFS "/charge_type");
+        if (ct < 0) {
+            /* 借用已算好的 chg_stage：1=预充 2=CC(Fast) 3=CV(Taper) 4=充满 */
+            switch (chg_stage) {
+                case 1:  ct = 1;  break;   /* TRICKLE */
+                case 2:  ct = 2;  break;   /* FAST */
+                case 3:  ct = 50; break;   /* TAPER_EXT = CV 阶段 */
+                default: ct = -1; break;   /* 未充电/充满 ⇒ 不猜 */
+            }
+        }
+        if (ct >= 0) bat_charge_type = ct;
+    }
+
+    /* v2.2.0: 安全计时器。MTK **没有** safety_timer_expired 节点
+       （kernel 文档里的标准节点不存在），但真有开关：
+         /proc/mtk_battery_cmd/en_safety_timer  = 1 表示启用
+       ⇒ 语义改为「计时器是否启用」：0=已关闭(有风险) 1=正常启用。
+       前端按此显示「已启用 / 已关闭」，不再显示无意义的"正常/已超时"。 */
+    {
+        int en = read_int("/proc/mtk_battery_cmd/en_safety_timer");
+        int exp = read_int(SYSFS "/safety_timer_expired");   /* 部分平台有，优先 */
+        if (exp >= 0) safety_timer_expired = exp;
+        else if (en >= 0) safety_timer_expired = en ? 0 : 1; /* 0=正常(已启用) 1=已关闭(异常) */
+    }
+    /* v2.2.0: 校准。battery/calibrate 不存在，真身在 MTK_CHG/calibrate。
+       语义澄清（实测）：这不是「是否需要校准」的布尔值，而是 **12 位 ADC 校准原始码**
+       （满量程 4096，实测在 3800~4096 间小幅波动，属正常的电流采样偏置）。
+       ⇒ 输出原始码，前端按「校准码 NNNN (基准 4096)」显示，不再误标成"需校准"。 */
+    snprintf(path, sizeof(path), "%s/calibrate", SYSFS); v = read_int(path);
+    if (v < 0) v = read_int(MTK_CHG "/calibrate");
+    if (v >= 0) calibrate = v;
+
+    /* 环境温度：battery/temp_ambient（本机无）→ quiet_therm 机身温度近似
+       ⚠️ 不是真实环境温度，是机身内部基准，UI 标注「机身/环境」；读不到保持 -1 */
+    snprintf(path, sizeof(path), "%s/temp_ambient", SYSFS); v = read_int(path);
+    if (v >= 0) {
+        temp_ambient = v;
+    } else {
+        /* 本机无该节点 ⇒ 扫 thermal 找安静区温度近似。
+           ⚠️ 这里直接扫、不复用 update_temps() 的结果：两者调用时机不确定，
+              复用会出现「慢更新先跑、拿到 -1」的时序 bug（实测踩过）。
+           30s 才扫一次，96 次 open 的开销可忽略。 */
+        for (int i = 0; i < 96 && temp_ambient < 0; i++) {
+            char tp[128], tn[64];
+            snprintf(tp, sizeof(tp), "%s/thermal_zone%d/type", THERMAL, i);
+            if (read_str(tp, tn, sizeof(tn)) <= 0) continue;
+            if (!strstr(tn, "quiet_therm") && !strstr(tn, "X7_therm")) continue;
+            snprintf(tp, sizeof(tp), "%s/thermal_zone%d/temp", THERMAL, i);
+            int tv = read_int(tp);
+            if (tv > 0 && tv < 150000) temp_ambient = tv / 100;   /* 0.1°C */
+        }
+    }
     /* 系统信息（复用 30s 缓存）*/
     {
         FILE *mf = fopen("/proc/meminfo", "r");
@@ -489,6 +686,26 @@ static void slow_update_battery(void) {
                 }
             }
             fclose(cif);
+        }
+        /* v2.2.0: 补 device-tree 回退。
+           实测 MT6985(天玑9200+) 的 /proc/cpuinfo 里既没有 "Hardware" 也没有
+           "model name" 行（只有 processor/BogoMIPS/Features），
+           ⇒ cpu_model 一直是空串，UI「CPU型号」恒显示 —。
+           device-tree 里的 model / compatible 是可信来源。 */
+        if (cpu_model[0] == 0) {
+            char m[128] = "";
+            read_str("/proc/device-tree/model", m, sizeof(m));
+            if (m[0] == 0) read_str("/sys/firmware/devicetree/base/model", m, sizeof(m));
+            /* 去掉 FDT 字符串尾部的 NUL */
+            size_t ml = strlen(m);
+            while (ml > 0 && (m[ml-1] == '\0' || m[ml-1] == '\n')) m[--ml] = 0;
+            if (ml > 0) snprintf(cpu_model, sizeof(cpu_model), "%s", m);
+        }
+        if (cpu_model[0] == 0) {
+            char m[128] = "";
+            if (prop_get("ro.hardware.chipname", m, sizeof(m)) <= 0 || m[0] == 0)
+                prop_get("ro.board.platform", m, sizeof(m));
+            if (m[0]) snprintf(cpu_model, sizeof(cpu_model), "%s", m);
         }
         /* 每核频率兜底：部分平台没有 cpufreq，读 scaling_cur_freq 失败时试 cpuinfo_cur_freq */
         if (cpu_freq_khz[0] == 0) {
@@ -1203,11 +1420,30 @@ static void update_screen_and_thermal(void) {
             pclose(f);
         }
     }
-    if (dev_screen_w < 0) {
-        /* 最后退路：读 /sys/class/graphics/fb0/modes */
+    if (dev_screen_w < 0 || dev_screen_h < 0) {
+        /* 退路 2：/sys/class/graphics/fb0/modes */
         if (read_str("/sys/class/graphics/fb0/modes", buf, sizeof(buf)) > 0) {
             char *p = strchr(buf, ':');
             if (p) { int w = 0, h = 0; if (sscanf(p + 1, "%dx%d", &w, &h) == 2) { dev_screen_w = w; dev_screen_h = h; } }
+        }
+    }
+    if (dev_screen_w < 0 || dev_screen_h < 0) {
+        /* v2.2.0: 退路 3 —— wm size。
+           实测 MT6985 上 /sys/class/graphics/ 是空的（fb0 不存在），
+           /system/bin/dumpsys display 也不一定能匹配到 real/deviceWidth，
+           但 `wm size` 稳定输出 "Physical size: 1220x2712"。
+           原来只拿到 w、拿不到 h（dev_screen_h=-1），这里改成从同一行解析宽高。 */
+        FILE *f = popen("/system/bin/wm size 2>/dev/null", "r");
+        if (f) {
+            char l[256];
+            while (fgets(l, sizeof(l), f)) {
+                int w = 0, h = 0;
+                char *p = strstr(l, "size:");
+                if (p && sscanf(p + 5, " %dx%d", &w, &h) == 2 && w > 0 && h > 0) {
+                    dev_screen_w = w; dev_screen_h = h; break;
+                }
+            }
+            pclose(f);
         }
     }
 
@@ -1447,7 +1683,14 @@ static void update_battery(void) {
     if (v >= 0) capacity_disp = v; else capacity_disp = bat_capacity * 100;
     /* USB */
     usb_online = read_int(SYSFS_USB "/online");
+    /* v2.2.0: 输入限流。MTK 的 usb/ 下没有这个节点，实测本机存在的是
+       mtk-master-charger / 11280000.i2c:mt6375@34:chg / mtk-slave-charger 三处。
+       顺序按「最贴近实际生效」排：master-charger 是主充电路径。 */
     bat_input_current_limit = read_int(SYSFS_USB "/input_current_limit");
+    if (bat_input_current_limit < 0)
+        bat_input_current_limit = read_int(MTK_MASTER "/input_current_limit");
+    if (bat_input_current_limit < 0)
+        bat_input_current_limit = read_int("/sys/class/power_supply/11280000.i2c:mt6375@34:chg/input_current_limit");
     usb_curr_cache = read_int(SYSFS_USB "/current_now");
     usb_volt_cache = read_int(SYSFS_USB "/voltage_now");
 
@@ -2426,7 +2669,11 @@ static int detect_charge_stage(void) {
     }
     last_valid_curr = bat_curr;
 
-    int cv_mv = x_orig_cv > 0 ? x_orig_cv : 4430;
+    /* v2.2.0: 恒压点必须用实测值。原来硬编码 4430，而本机(MT6985)实测
+       battery/constant_charge_voltage = 4460 ⇒ 电压永远差 30mV 到不了阈值，
+       CV 阶段一次都判不出来（实测 6586 点历史数据里 CV 占比 0%）。
+       优先级：用户改过的原始值 > 实测恒压点 > 4430 兜底 */
+    int cv_mv = (x_orig_cv > 0) ? x_orig_cv : (cv_point_mv > 0 ? cv_point_mv : 4430);
     int near_cv = (bat_volt >= cv_mv - CV_NEAR_MV);
     int far_cv  = (bat_volt <  cv_mv - CV_FAR_MV);
 
