@@ -61,6 +61,8 @@ fi
 
 # 每次开机都同步最新脚本
 cp -f "$MODDIR/supervisor.sh" "$DIR/supervisor.sh" 2>/dev/null
+cp -f "$MODDIR/bin/power-sampler.sh" "$DIR/power-sampler.sh" 2>/dev/null
+chmod 755 "$DIR/supervisor.sh" "$DIR/power-sampler.sh" 2>/dev/null
 chmod 755 "$DIR/supervisor.sh" 2>/dev/null
 
 # ★ 清理上次残留的 PID 文件（PID 会被复用，留着会导致误判）
@@ -81,6 +83,11 @@ if [ -x "$DIR/supervisor.sh" ]; then
   fi
 else
   setsid "$DIR/battd" >> "$DIR/battd.stdout" 2>&1 &
+fi
+
+# 数据采样循环（300s）：硬件耗电 / 学习曲线搬运 / 电流基线 / 寿命快照
+if [ -x "$DIR/power-sampler.sh" ]; then
+  setsid sh -c "while true; do $DIR/power-sampler.sh; sleep 300; done" >> "$DIR/power-sampler.log" 2>&1 &
 fi
 
 exit 0
