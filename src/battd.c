@@ -3356,8 +3356,11 @@ static void handle_status(int fd) {
         else if (h > 0) snprintf(est_full_txt, sizeof(est_full_txt), "%d小时", h);
         else snprintf(est_full_txt, sizeof(est_full_txt), "%d分", m);
     } else strcpy(est_full_txt, "—");
-    health_degrade = 0.0f;
-    if (cycle_count > 0 && health > 0 && health < 100)
+    /* ★ v2.3.0: 加样本门槛。cycle_count 太小时，(100-health)/cycle_count
+       就是拿 BMS 的整数取整噪声（本机 58 次掉 1%）当衰减率，会算出 17%/千次
+       这种离谱值。少于 100 次循环直接标 -1（无效），不输出假率。 */
+    health_degrade = -1.0f;
+    if (cycle_count >= 100 && health > 0 && health < 100)
         health_degrade = (100.0f - health) / cycle_count * 1000.0f; /* 每千次循环衰减% */
     /* ★ v1.13.0: 删除此处遮蔽的局部 const char* 变量
        （原名与全局 health_rating[16] 同名，导致 L1411 写入的全局值
