@@ -14,8 +14,14 @@ v2.2.0 发版时跳过了审核（违反「写完 → 审核 → 才能发 Relea
 ⇒ 每 30s 抛一次未捕获异常，趋势图彻底失效。
 
 - 恢复趋势面板 DOM（回到 v2.1.3 的已知良好状态）
-- **同时**加 null 守卫：`const chartEl = document.getElementById('chart'); if (!chartEl) return;`
-  ⇒ 以后即使有人删 DOM 也不会崩
+- **同时**加双重守卫：
+  ```js
+  const chartEl = document.getElementById('chart');
+  if (!chartEl || typeof Chart === 'undefined') return;
+  ```
+  ⇒ 以后即使删 DOM 也不会崩；Chart.js 走 CDN（jsdelivr），
+    离线/被墙时 `Chart` 未定义同样会抛 ReferenceError，此守卫一并挡掉
+    （电池监控有离线查看的合理场景）
 
 #### 🔴 P0-2：预计耗尽永远算不出来（符号判据反了）
 

@@ -16,7 +16,8 @@ chk('改为 new Chart(chartEl)',            /new Chart\(chartEl,/.test(html));
 const guardIdx = html.indexOf("const chartEl = document.getElementById('chart')");
 const chartIdx = html.indexOf('new Chart(chartEl');
 chk('守卫在 new Chart 之前', guardIdx>0 && guardIdx < chartIdx);
-chk('守卫有 return', /if \(!chartEl\) return;/.test(html));
+chk('守卫有 return', /if \(!chartEl[^)]*\) return;/.test(html));
+chk('守卫覆盖 Chart 未加载(CDN离线)', /typeof Chart === 'undefined'/.test(html));
 
 console.log('\n-- 口径检查 --');
 chk('无残留「需校准」',      !html.includes('需校准'));

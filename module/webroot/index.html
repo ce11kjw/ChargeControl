@@ -1306,7 +1306,10 @@ function app() {
          此前 #chart 的 DOM 被删而这里没守卫 ⇒ new Chart(null) 抛
          「Failed to create chart: can't acquire context」，每 30s 一次未捕获异常。 */
       const chartEl = document.getElementById('chart');
-      if (!chartEl) return;
+      /* Chart.js 走 CDN（jsdelivr）。离线/被墙时 Chart 会是 undefined，
+         此时 new Chart(...) 抛 ReferenceError —— 同样会每 30s 刷一次异常。
+         电池监控有离线查看的合理场景，所以一并守卫掉。 */
+      if (!chartEl || typeof Chart === 'undefined') return;
       if (!CH.chart) {
         const cs = getComputedStyle(document.documentElement);
         const txt = cs.getPropertyValue('--txt2').trim();
