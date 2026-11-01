@@ -26,7 +26,6 @@
    charge_term_current(终止电流) / calibrate(校准原始码) /
    input_voltage_limit(输入电压上限) / manufacturer(充电器厂商) */
 #define MTK_CHG     "/sys/class/power_supply/11280000.i2c:mt6375@34:chg"
-#define MTK_MCHG    "/sys/class/power_supply/mtk-master-charger"   /* 输入限流真实可写节点（usb/ 下那个不存在） */
 #define THERMAL     "/sys/class/thermal"
 #define CONFIG      "/data/adb/battery-manager/batt.conf"
 #define HISTORY     "/data/adb/battery-manager/history.json"
@@ -1717,6 +1716,7 @@ static void update_battery(void) {
     /* v2.2.0: 输入限流。MTK 的 usb/ 下没有这个节点，实测本机存在的是
        mtk-master-charger / 11280000.i2c:mt6375@34:chg / mtk-slave-charger 三处。
        顺序按「最贴近实际生效」排：master-charger 是主充电路径。 */
+    if (tp_base_ua <= 0) tp_base_ua = read_int(MTK_MASTER "/input_current_limit");
     bat_input_current_limit = read_int(SYSFS_USB "/input_current_limit");
     if (bat_input_current_limit < 0)
         bat_input_current_limit = read_int(MTK_MASTER "/input_current_limit");
@@ -1910,7 +1910,12 @@ static void apply_cv_and_current(void) {
         if (access(CC, W_OK) == 0)
             write_str(CC, "0 0");
 
-        if (IL) {
+        if (tp_enabled && tp_last_ratio != 100) {
+            /* ★ v2.4.0: 温度降档正在接管 input_current_limit。
+               本函数在 apply_control() 之后执行，若不跳过会覆盖降档值。
+               保持 cc_applied/cc_last_ma 原状，松开后自然恢复手动逻辑。 */
+            cc_last_ma = -1;
+        } else if (IL) {
             if (x_limit_current_en && x_limit_current_ma > 0 && x_limit_current_ma <= 6000) {
                 if (cc_last_ma != x_limit_current_ma) {
                     char ma[16]; snprintf(ma, sizeof(ma), "%d", x_limit_current_ma * 1000);
@@ -2194,9 +2199,9 @@ void apply_control(void) {
     }
     /* ---- ★ v2.4.0: 温度降档（可选，默认关）----
        只在 want==0（没有停充理由）时生效，避免与停充叠加。
-       写 MTK_MCHG/input_current_limit —— 实测 usb/input_current_limit 不存在。 */
+       写 MTK_MASTER/input_current_limit —— 实测 usb/input_current_limit 不存在。 */
     if (tp_base_ua <= 0)
-        tp_base_ua = read_int(MTK_MCHG "/input_current_limit");
+        tp_base_ua = read_int(MTK_MASTER "/input_current_limit");
     if (tp_enabled && want == 0 && bat_temp > 0 && tp_base_ua > 0) {
         int ratio = (bat_temp >= TP_T2) ? 30 : (bat_temp >= TP_T1) ? 60 : 100;
         if (ratio != tp_last_ratio) {
@@ -2205,7 +2210,7 @@ void apply_control(void) {
             if (ratio >= 100) target = tp_base_ua;
             char b[24];
             snprintf(b, sizeof(b), "%d", target);
-            if (write_str(MTK_MCHG "/input_current_limit", b) == 0) {
+            if (write_str(MTK_MASTER "/input_current_limit", b) == 0) {
                 char dj[96];
                 snprintf(dj, sizeof(dj), "{\"ratio\":%d,\"temp\":%d,\"ma\":%d}",
                          ratio, bat_temp, target / 1000);
@@ -2217,7 +2222,7 @@ void apply_control(void) {
     } else if ((!tp_enabled || want != 0) && tp_last_ratio != 100 && tp_base_ua > 0) {
         char b[24];
         snprintf(b, sizeof(b), "%d", tp_base_ua);
-        if (write_str(MTK_MCHG "/input_current_limit", b) == 0) {
+        if (write_str(MTK_MASTER "/input_current_limit", b) == 0) {
             tp_last_ratio = 100;
             log_event("解除温度限流（已关闭开关或进入停充）");
         }
