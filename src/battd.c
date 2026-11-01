@@ -26,6 +26,7 @@
    charge_term_current(终止电流) / calibrate(校准原始码) /
    input_voltage_limit(输入电压上限) / manufacturer(充电器厂商) */
 #define MTK_CHG     "/sys/class/power_supply/11280000.i2c:mt6375@34:chg"
+#define MTK_MCHG    "/sys/class/power_supply/mtk-master-charger"   /* 输入限流真实可写节点（usb/ 下那个不存在） */
 #define THERMAL     "/sys/class/thermal"
 #define CONFIG      "/data/adb/battery-manager/batt.conf"
 #define HISTORY     "/data/adb/battery-manager/history.json"
@@ -53,6 +54,13 @@ static int chg_temp_suspended = 0;  /* @deprecated v1.17.0: 由 susp_reason 取�
 static int resume_delta = 5;
 static int interval = 5;
 static int limit_enabled = 1;
+/* ★ v2.4.0: 温度降档（可选，默认关）。按电池温度限制输入电流，
+   只在没有停充理由时生效，避免与停充/PMIC 自身降流叠加。 */
+static int tp_enabled = 0;        /* 0=关 1=开 */
+static int tp_last_ratio = 100;   /* 上次应用的比例，100=不限 */
+static int tp_base_ua = -1;       /* 原始 input_current_limit（µA），用于恢复 */
+#define TP_T1 45                  /* 45°C 起降到 60% */
+#define TP_T2 47                  /* 47°C 起降到 30% */
 static int temp_suspended = 0;      /* @deprecated v1.17.0: 由 susp_reason 取代 */
 static time_t last_save = 0;
 static int full_once = 0;
@@ -2184,6 +2192,37 @@ void apply_control(void) {
             last_suspend_val = want;
         }
     }
+    /* ---- ★ v2.4.0: 温度降档（可选，默认关）----
+       只在 want==0（没有停充理由）时生效，避免与停充叠加。
+       写 MTK_MCHG/input_current_limit —— 实测 usb/input_current_limit 不存在。 */
+    if (tp_base_ua <= 0)
+        tp_base_ua = read_int(MTK_MCHG "/input_current_limit");
+    if (tp_enabled && want == 0 && bat_temp > 0 && tp_base_ua > 0) {
+        int ratio = (bat_temp >= TP_T2) ? 30 : (bat_temp >= TP_T1) ? 60 : 100;
+        if (ratio != tp_last_ratio) {
+            int target = tp_base_ua * ratio / 100;
+            if (target < 500000) target = 500000;   /* 500mA 地板：低于此可能充不进电 */
+            if (ratio >= 100) target = tp_base_ua;
+            char b[24];
+            snprintf(b, sizeof(b), "%d", target);
+            if (write_str(MTK_MCHG "/input_current_limit", b) == 0) {
+                char dj[96];
+                snprintf(dj, sizeof(dj), "{\"ratio\":%d,\"temp\":%d,\"ma\":%d}",
+                         ratio, bat_temp, target / 1000);
+                evt_dump(ratio >= 100 ? "tp_restore" : "tp_limit", dj);
+                log_event(ratio >= 100 ? "温度回落，解除输入限流" : "温度升高，限制输入电流");
+                tp_last_ratio = ratio;
+            }
+        }
+    } else if ((!tp_enabled || want != 0) && tp_last_ratio != 100 && tp_base_ua > 0) {
+        char b[24];
+        snprintf(b, sizeof(b), "%d", tp_base_ua);
+        if (write_str(MTK_MCHG "/input_current_limit", b) == 0) {
+            tp_last_ratio = 100;
+            log_event("解除温度限流（已关闭开关或进入停充）");
+        }
+    }
+
     susp_transition(reason, now);
 }
 
@@ -2204,6 +2243,7 @@ static void load_config(void) {
         else if (!strcmp(k, "resume_delta")) { x = atoi(v); resume_delta = (x >= 1 && x <= 20) ? x : 5; }
         else if (!strcmp(k, "interval")) { x = atoi(v); interval = (x >= 1 && x <= 60) ? x : 5; }
         else if (!strcmp(k, "enabled")) limit_enabled = atoi(v) ? 1 : 0;
+        else if (!strcmp(k, "tp")) tp_enabled = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "history_enabled")) history_enabled = atoi(v) ? 1 : 0;
         /* ★ v1.4.0: 高级控制开关纳入主配置。
            原先只存 extras.json，一旦该文件损坏/丢失，开关会静默丢失；
@@ -2230,6 +2270,7 @@ static void save_config(void) {
     fprintf(f, "resume_delta=%d\n", resume_delta);
     fprintf(f, "interval=%d\n", interval);
     fprintf(f, "enabled=%d\n", limit_enabled);
+    fprintf(f, "tp=%d\n", tp_enabled);
     fprintf(f, "history_enabled=%d\n", history_enabled);
     fprintf(f, "rec_temp_hyst=%d\n", rec_temp_hyst);
     fprintf(f, "rec_temp_hold=%d\n", rec_temp_hold);
@@ -3445,6 +3486,7 @@ static void handle_status(int fd) {
         "\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d,\"x_pp\":%d,\"x_pp_ok\":%d,\"x_cv\":%d,\"x_cv_mv\":%d,\"x_cv_ok\":%d,\"x_lc\":%d,\"x_lc_ma\":%d,\"x_nn\":%d,\"x_nn_ok\":%d,\"x_bmin\":%d,\"native_night\":%d,"
         "\"jeita_chg_index\":%d,\"jeita_chg_fcc\":%d,\"jeita_active\":%d,"
+        "\"tp_enabled\":%d,\"tp_ratio\":%d,"
         "\"chg_input_power_mw\":%d,\"chg_efficiency_pct\":%d,"
         "\"cl_tail\":\"%s\"}",
         CC_API_VERSION, CC_FEATURES,
@@ -3503,6 +3545,7 @@ static void handle_status(int fd) {
         x_bypass_min_soc,
         read_int(SYSFS "/night_charging"),
         jeita_chg_index, jeita_chg_fcc, jeita_active,
+        tp_enabled, tp_last_ratio,
         chg_input_power_mw, chg_efficiency_pct,
         cl_buf);
     /* 系统信息 */
@@ -3558,6 +3601,7 @@ static void handle_limit(int fd, const char *body) {
             else if (!strcmp(key, "resume_delta")) { int x = atoi(dec); if (x >= 1 && x <= 20) resume_delta = x; }
             else if (!strcmp(key, "interval")) { int x = atoi(dec); if (x >= 1 && x <= 60) interval = x; }
             else if (!strcmp(key, "enabled")) limit_enabled = atoi(dec) ? 1 : 0;
+            else if (!strcmp(key, "tp")) tp_enabled = atoi(dec) ? 1 : 0;
             else if (!strcmp(key, "history_enabled")) history_enabled = atoi(dec) ? 1 : 0;
             else if (!strcmp(key, "bypass")) {
                 if (bypass_supported) write_str(bypass_node, atoi(dec) ? "1" : "0");
