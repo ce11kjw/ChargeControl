@@ -590,7 +590,12 @@ static void slow_update_battery(void) {
 
     /* 充电器输入电压(稳定)：battery/ → usb/voltage_now（本机 usb 侧偶有值） */
     snprintf(path, sizeof(path), "%s/input_voltage_settled", SYSFS); v = read_int(path);
-    if (v < 0) v = read_int(SYSFS_USB "/voltage_now");
+    /* ★ 本机该节点存在但返回噪声（实测 =6，不是电压）：必须做值域校验，
+       否则永远不回退到 usb/voltage_now，输入电压一直是 6。 */
+    if (v < 3000000 || v > 30000000) {
+        int vu = read_int(SYSFS_USB "/voltage_now");
+        v = (vu >= 3000000 && vu <= 30000000) ? vu : -1;
+    }
     if (v >= 0) input_voltage_settled = v;
 
     /* v2.2.0: 充电类型（POWER_SUPPLY_CHARGE_TYPE_*）
@@ -1144,15 +1149,26 @@ static void update_gpu(void) {
         }
     }
 
-    /* ── 3. MTK ── */
-    if (gpu_freq_khz < 0) {
-        int v = read_int("/proc/gpufreq/gpufreq_var");
-        if (v > 0) { gpu_freq_khz = v / 1000; }
-        if (gpu_freq_khz < 0 && read_int("/sys/module/ged/parameters/gpu_freq") > 0) {
-            gpu_freq_khz = read_int("/sys/module/ged/parameters/gpu_freq") / 1000;
+    /* ── 3. MTK ged（MT6985 等）—— 权威来源，覆盖前面误读的 devfreq 值 ──
+       /sys/kernel/ged/hal/current_freqency 两行：第一行 dvfs 档位，第二行当前 kHz。
+       /sys/module/ged/parameters/gpu_loading 是 0-100 的百分比。
+       （旧实现只找 /proc/gpufreq/*，本机该目录为空 ⇒ 频率退到 devfreq 误读出 981000） */
+    {
+        FILE *gf = fopen("/sys/kernel/ged/hal/current_freqency", "r");
+        if (gf) {
+            /* 实测格式是「一行两字段」：41 376000 → dvfs 档位 + 当前 kHz */
+            int dvfs = 0, khz = 0;
+            if (fscanf(gf, "%d %d", &dvfs, &khz) == 2 && khz > 1000 && khz < 5000000)
+                gpu_freq_khz = khz;
+            fclose(gf);
+        }
+        int ld = read_int("/sys/module/ged/parameters/gpu_loading");
+        if (ld >= 0 && ld <= 100) {
+            gpu_load_pct = ld * 10;
+            snprintf(gpu_load_src, sizeof(gpu_load_src), "ged");
         }
         if (gpu_freq_khz < 0) {
-            v = read_int("/proc/gpufreq/gpufreq_opp_freq");
+            int v = read_int("/proc/gpufreq/gpufreq_var");
             if (v > 0) gpu_freq_khz = v / 1000;
         }
     }
@@ -4129,10 +4145,10 @@ static int serve_file(int fd, const char *uri) {
         ct = "application/manifest+json; charset=utf-8";
     else if (strstr(path, ".html")) ct = "text/html; charset=utf-8";
     else if (strstr(path, ".css")) ct = "text/css; charset=utf-8";
+    else if (strstr(path, ".json")) ct = "application/json; charset=utf-8";  /* ★ 必须排在 .js 之前 */
     else if (strstr(path, ".js")) ct = "application/javascript; charset=utf-8";
     else if (strstr(path, ".svg")) ct = "image/svg+xml";
     else if (strstr(path, ".png")) ct = "image/png";
-    else if (strstr(path, ".json")) ct = "application/json; charset=utf-8";
     char head[512];
     int n = snprintf(head, sizeof(head),
         "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n", ct, rd);
