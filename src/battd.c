@@ -55,6 +55,7 @@ static int interval = 5;
 static int limit_enabled = 1;
 /* ★ v2.4.0: 温度降档（可选，默认关）。按电池温度限制输入电流，
    只在没有停充理由时生效，避免与停充/PMIC 自身降流叠加。 */
+static int probe_nodes_enabled = 1;   /* 启动时自检写入节点（默认开） */
 static int tp_enabled = 0;        /* 0=关 1=开 */
 static int tp_last_ratio = 100;   /* 上次应用的比例，100=不限 */
 static int tp_base_ma = -1;       /* 原始电池侧恒流值（mA，来自 mt6375 chg），用于恢复 */
@@ -402,6 +403,53 @@ static int write_str(const char *path, const char *val) {
     int r = (n == (ssize_t)strlen(val)) ? 0 : -1;
     close(fd);
     return r;
+}
+
+/* ═══ ★ v2.5.0 M1-B: 写入节点自检 ═══
+   实测教训：mtk-master-charger/input_current_limit 写入被驱动静默忽略
+   （写 900000 读回仍是 3000000），温度降档差点因此变成假功能。
+   这里在启动时对每个「会写的节点」做一次：读原值 → 写回原值 → 读回比对。
+   因为写回去的就是刚读到的值，所以不改变任何状态。 */
+static void log_event(const char *msg);   /* 前向声明：定义在本函数之后 */
+static int node_suspend_ok = -1, node_ccur_ok = -1, node_limit_ok = -1;
+static int node_ppath_ok = -1, node_cv_ok = -1, node_night_ok = -1;
+
+/* 返回值：1=真可写  0=写入被忽略/不可用  -1=未探测
+   ⚠️ 不能「写原值再读回」——驱动即使忽略写入，读回也等于原值，全是假阳性。
+   必须写一个不同的值（原值的 90%）才能验出真假，然后恢复。 */
+static int probe_writable(const char *path) {
+    int cur = read_int(path);
+    if (cur < 1000) return -1;             /* 值太小无法安全试探（0/1 布尔节点） */
+    int probe = cur * 9 / 10;
+    if (probe == cur) probe = cur - 1;
+    char b[32];
+    snprintf(b, sizeof(b), "%d", probe);
+    if (write_str(path, b) != 0) {         /* 打开/写入失败 */
+        snprintf(b, sizeof(b), "%d", cur);
+        write_str(path, b);
+        return 0;
+    }
+    int back = read_int(path);
+    snprintf(b, sizeof(b), "%d", cur);     /* 无论结果如何都恢复原值 */
+    write_str(path, b);
+    return (back == probe) ? 1 : 0;
+}
+
+static void probe_all_nodes(void) {
+    /* 只对「电流类」节点做真实试探（写 90% 再恢复，副作用可忽略）。
+       布尔节点（suspend/ppath/night）和恒压点 cv 一试探就会真的停充/改压，
+       风险大于收益 ⇒ 标记 -1（未探测），前端显示「未验证」而不是「可用」。 */
+    node_suspend_ok = -1;
+    node_ppath_ok   = -1;
+    node_cv_ok      = -1;
+    node_night_ok   = -1;
+    node_ccur_ok    = probe_writable(MTK_CHG "/constant_charge_current");
+    node_limit_ok   = probe_writable(MTK_MASTER "/input_current_limit");
+    char m[192];
+    snprintf(m, sizeof(m),
+        "节点自检 suspend=%d ccur=%d limit=%d ppath=%d cv=%d night=%d",
+        node_suspend_ok, node_ccur_ok, node_limit_ok, node_ppath_ok, node_cv_ok, node_night_ok);
+    log_event(m);
 }
 
 static void log_event(const char *msg) {
@@ -2269,6 +2317,7 @@ static void load_config(void) {
         else if (!strcmp(k, "interval")) { x = atoi(v); interval = (x >= 1 && x <= 60) ? x : 5; }
         else if (!strcmp(k, "enabled")) limit_enabled = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "tp")) tp_enabled = atoi(v) ? 1 : 0;
+        else if (!strcmp(k, "probe_nodes")) probe_nodes_enabled = atoi(v) ? 1 : 0;
         else if (!strcmp(k, "tpbase")) { x = atoi(v); if (x >= 100 && x <= 10000) tp_base_ma = x; }
         else if (!strcmp(k, "history_enabled")) history_enabled = atoi(v) ? 1 : 0;
         /* ★ v1.4.0: 高级控制开关纳入主配置。
@@ -3513,6 +3562,7 @@ static void handle_status(int fd) {
         "\"wifi_rssi\":%d,\"wifi_on\":%d,\"mobile_on\":%d,\"ip_addr\":\"%s\",\"bat_technology\":\"%s\",\"bat_capacity_level\":\"%s\",\"bat_health\":\"%s\",\"charge_type\":%d,\"time_to_full\":%d,\"charge_counter\":%d,\"input_current_limit\":%d,\"bat_manufacturer\":\"%s\",\"bat_model_name\":\"%s\",\"voltage_ocv\":%d,\"current_avg\":%d,\"temp_ambient\":%d,\"constant_charge_current\":%d,\"constant_charge_voltage\":%d,\"capacity_error_margin\":%d,\"time_to_empty\":%d,\"bat_present\":%d,\"internal_resistance\":%d,\"charge_now\":%d,\"charge_term_current\":%d,\"constant_charge_current_max\":%d,\"constant_charge_voltage_max\":%d,\"temp_max\":%d,\"temp_min\":%d,\"charger_temp\":%d,\"charge_done\":%d,\"input_voltage_settled\":%d,\"safety_timer_expired\":%d,\"calibrate\":%d,\"bypass_ok\":%d,\"bypass_on\":%d,\"bypass_hw\":%d,\"sess_active\":%d,\"sess_min\":%d,\"sess_mah\":%d,"
         "\"stats_count\":%d,\"stats_min\":%ld,\"stats_mah\":%ld,\"night\":%d,\"scene\":%d,\"lang\":%d,\"theme\":%d,\"alerted\":%d,\"pd_pdo_count\":%d,\"pd_pdo_max_mv\":%d,\"pd_pdo_max_ma\":%d,\"pd_svid\":\"%s\",\"pd_state\":\"%s\",\"cc_limit_supported\":%d,\"cc_limit_val\":%d,\"power_path_en\":%d,\"jeita_index\":%d,\"soh_native\":%d,\"soh_first\":%d,\"soh_delta_x10\":%d,\"design_mah\":%d,\"chg_temp_limit\":%d,\"x_pp\":%d,\"x_pp_ok\":%d,\"x_cv\":%d,\"x_cv_mv\":%d,\"x_cv_ok\":%d,\"x_lc\":%d,\"x_lc_ma\":%d,\"x_nn\":%d,\"x_nn_ok\":%d,\"x_bmin\":%d,\"native_night\":%d,"
         "\"jeita_chg_index\":%d,\"jeita_chg_fcc\":%d,\"jeita_active\":%d,"
+        "\"nodes\":{\"suspend\":%d,\"ccur\":%d,\"limit\":%d,\"ppath\":%d,\"cv\":%d,\"night\":%d},"
         "\"tp_enabled\":%d,\"tp_ratio\":%d,"
         "\"chg_input_power_mw\":%d,\"chg_efficiency_pct\":%d,"
         "\"cl_tail\":\"%s\"}",
@@ -3572,6 +3622,7 @@ static void handle_status(int fd) {
         x_bypass_min_soc,
         read_int(SYSFS "/night_charging"),
         jeita_chg_index, jeita_chg_fcc, jeita_active,
+        node_suspend_ok, node_ccur_ok, node_limit_ok, node_ppath_ok, node_cv_ok, node_night_ok,
         tp_enabled, tp_last_ratio,
         chg_input_power_mw, chg_efficiency_pct,
         cl_buf);
@@ -4323,6 +4374,7 @@ static void on_sig(int sig) { (void)sig; running = 0; }
 
 int main(void) {
     load_config(); load_stats(); load_extras(); last_save = time(NULL);
+    if (probe_nodes_enabled) probe_all_nodes();   /* ★ 写入节点自检：必须在任何 apply_* 之前 */
     update_battery();
     /* ★ v1.4.0: 抓住未被污染的原厂恒压点（务必在任何 apply_* 之前） */
     snapshot_orig_cv();
