@@ -1,57 +1,73 @@
+// ChargeControl UI 静态 + 逻辑测试（适配 v2.4.0 黑+lime 新界面）
+// 老版测试检查 #chart / Chart.js 守卫 / loadHistory，已随 UI 重写而失效。
+// 这里改为检查当前实现的关键结构与契约。
 import fs from 'fs';
-const html = fs.readFileSync('module/webroot/index.html','utf8');
-let pass=0, fail=0;
-const chk=(name,cond,extra='')=>{ cond?pass++:fail++; console.log(`  ${cond?'OK':'XX'} ${name}${cond?'':'  '+extra}`); };
 
-console.log('-- 结构完整性 --');
-chk('#chart 元素存在',      /<canvas id="chart">/.test(html));
-chk('#chartWrap 容器存在',  /id="chartWrap"/.test(html));
-chk('趋势面板标题回来',      /fa-chart-line/.test(html) && html.includes('趋势'));
-chk('<script> 配对',        (html.match(/<script/g)||[]).length === (html.match(/<\/script>/g)||[]).length);
-chk('<style> 配对',         (html.match(/<style/g)||[]).length === (html.match(/<\/style>/g)||[]).length);
+const F = process.env.UI_FILE || 'module/webroot/index.html';
+const html = fs.readFileSync(F, 'utf8');
+let pass = 0, fail = 0;
+const ok = (n) => { console.log('  OK ' + n); pass++; };
+const no = (n, why) => { console.log('  XX ' + n + (why ? '  — ' + why : '')); fail++; };
+const has = (re, n) => { re.test(html) ? ok(n) : no(n); };
 
-console.log('\n-- P0 回归: Chart 不拿到 null --');
-chk('不再直接 new Chart(getElementById)', !/new Chart\(document\.getElementById\('chart'\)/.test(html));
-chk('改为 new Chart(chartEl)',            /new Chart\(chartEl,/.test(html));
-const guardIdx = html.indexOf("const chartEl = document.getElementById('chart')");
-const chartIdx = html.indexOf('new Chart(chartEl');
-chk('守卫在 new Chart 之前', guardIdx>0 && guardIdx < chartIdx);
-chk('守卫有 return', /if \(!chartEl[^)]*\) return;/.test(html));
-chk('守卫覆盖 Chart 未加载(CDN离线)', /typeof Chart === 'undefined'/.test(html));
+console.log('文件: ' + F + ' (' + html.length + ' 字符)');
 
-console.log('\n-- 口径检查 --');
-chk('无残留「需校准」',      !html.includes('需校准'));
-chk('无残留「已超时」',      !html.includes('已超时'));
-chk('calibrate 阈值 3800',   html.includes('calibrate < 3800') && !html.includes('calibrate < 3900'));
+console.log('\n-- 1. 页面结构 --');
+has(/id="v-over"/, '总览页 v-over');
+has(/id="v-curve"/, '曲线页 v-curve');
+has(/id="v-ev"/, '事件页 v-ev');
+has(/id="v-set"/, '设置页 v-set');
+has(/VIEWS\s*=\s*\[/, '导航配置 VIEWS 数组');
 
-console.log('\n-- 逻辑模拟: loadHistory 在有无 canvas 时的行为 --');
-const m = html.match(/async loadHistory\(\) \{[\s\S]*?\n    \},/);
-if(!m){ console.log('  XX 提取 loadHistory 失败'); fail++; }
-else {
-  global.__chartCtor=0;
-  class Chart { constructor(){ global.__chartCtor++; } update(){} }
-  const build = (hasChart) => {
-    const CH={};
-    const document={ getElementById:(id)=> id==='chart' ? (hasChart?{tagName:'CANVAS'}:null) : null,
-      documentElement:{}, createElement:()=>({getContext:()=>({createLinearGradient:()=>({addColorStop(){}})})}) };
-    const getComputedStyle=()=>({getPropertyValue:()=>'#000'});
-    let src = m[0]
-      .replace('async loadHistory() {','return async function(){')
-      .replace(/\n    \},$/,'\n    };');
-    const fn = new Function('CH','document','getComputedStyle','Chart','API_BASE','fetchJson', src)
-      (CH, document, getComputedStyle, Chart, '', async()=>[{t:1,c:50,tmp:35}]);
-    // loadHistory 内部用 this.fetchJson / this.API_BASE，需绑定一个 app 对象
-    const app = { fetchJson: async()=>[{t:1,c:50,tmp:35}], API_BASE: '' };
-    return fn.bind(app);
-  };
-  global.__chartCtor=0;
-  await build(true)();
-  chk('有 canvas => Chart 创建一次', global.__chartCtor===1, 'actual '+global.__chartCtor);
-  global.__chartCtor=0;
-  let threw=null;
-  try { await build(false)(); } catch(e){ threw=e; }
-  chk('无 canvas => 不抛异常', threw===null, threw && threw.message);
-  chk('无 canvas => 不创建 Chart', global.__chartCtor===0, 'actual '+global.__chartCtor);
-}
-console.log('\n结果: '+pass+' 通过 / '+fail+' 失败');
-process.exit(fail?1:0);
+console.log('\n-- 2. 关键卡片 --');
+const cards = {
+  'id="vBat"': '功率路径-电池',
+  'id="kpis"': 'KPI 条',
+  'id="thermo"': '温度分布',
+  'id="hwList"': '硬件耗电列表',
+  'id="etaBig"': '充满预测',
+  'id="segList"': '分段耗时',
+  'id="svgRate"': '充电速率图',
+  'id="svgLearn"': '学习曲线',
+  'id="lifeLine"': '电池寿命',
+  'id="diagPanel"': '系统诊断',
+  'id="sl_cap"': '充电上限滑块',
+  'id="sl_tmp"': '温度上限滑块',
+  'id="tpBtn"': '温度降档开关',
+  'id="calStart"': '校准按钮',
+  'id="expLoad"': '导出按钮',
+};
+for (const [k, v] of Object.entries(cards)) has(new RegExp(k.replace(/"/g, '"')), v);
+
+console.log('\n-- 3. 渲染函数 --');
+const fns = ['renderThermo','renderProfile','renderStats','renderRate','renderLife',
+             'renderDiag','renderPower','renderLearn','renderSessions','renderEvents','renderCal','diagnose'];
+for (const f of fns) has(new RegExp('function\\s+' + f + '\\s*\\('), f + '()');
+
+console.log('\n-- 4. 数据源契约 --');
+const feeds = ['/api/status','/api/history','/api/events','/api/sessions','/api/curve',
+               '/api/calibrate','/api/export','/api/limit',
+               '/power.json','/charge_profile.json','/stats.json','/baseline.json','/cycling.json'];
+for (const u of feeds) has(new RegExp(u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'fetch ' + u);
+
+console.log('\n-- 5. 标签配对 --');
+const sc = (html.match(/<script/g) || []).length;
+const scc = (html.match(/<\/script>/g) || []).length;
+sc === scc ? ok(`<script> 配对 (${sc})`) : no(`<script> 不配对 ${sc} vs ${scc}`);
+const st = (html.match(/<style/g) || []).length;
+const stc = (html.match(/<\/style>/g) || []).length;
+st === stc ? ok(`<style> 配对 (${st})`) : no(`<style> 不配对 ${st} vs ${stc}`);
+
+console.log('\n-- 6. 假数据防线（与 lint-fake.sh 呼应）--');
+!/还能约/.test(html) ? ok('无「还能约」文案') : no('仍有「还能约」');
+!/Math\.round\([^)]*\/\s*(300|365|250|400)\)/.test(html) ? ok('无魔数推年份') : no('仍有魔数推年份');
+
+console.log('\n-- 7. 安全性 --');
+// 只查字符串型字段：数字字段拼接无害（s.temp+'<small>°C</small>' 不是 XSS）
+const STR_FIELDS = ['suspend_reason','control_state','gpu_model','proto_name','cpu_model','oem_os_name','health_rating','device_model'];
+const unescaped = STR_FIELDS.filter(f => new RegExp('innerHTML\\s*=\\s*[^;]*\\bs\\.' + f + '\\s*\\+').test(html));
+unescaped.length ? no('字符串字段未转义: ' + unescaped.join(',')) : ok('字符串字段均已转义（数字字段不适用）');
+has(/cache:'no-store'|cache: *'no-store'/, 'fetch 带 no-store（避免缓存旧数据）');
+
+console.log('\n结果: ' + pass + ' 通过 / ' + fail + ' 失败');
+process.exit(fail ? 1 : 0);
