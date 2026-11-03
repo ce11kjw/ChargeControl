@@ -44,6 +44,12 @@ jobs:
           ls -l battd-x86_64
           file battd-x86_64
 
+      - name: Frontend fake-data lint
+        run: |
+          echo "::group::扫描编造数据模式（魔数推年份 / 无依据文案 / 无效值直出）"
+          bash scripts/lint-fake.sh module/webroot/index.html || exit 1
+          echo "::endgroup::"
+
       - name: Static analysis (strict warnings)
         run: |
           echo "::group::-Wformat=2 校验 JSON 模板与 200 个参数"

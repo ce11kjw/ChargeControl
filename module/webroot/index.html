@@ -723,7 +723,7 @@ function render(s){
   else if(chg && s.capacity>=s.charge_limit) cand.push({w:2,t:'已到上限 <b>'+s.charge_limit+'%</b>，下一步会自动停充。'});
   if(s.temp>=s.temp_limit-5) cand.push({w:3,t:'电池 <b>'+s.temp+' °C</b>，距上限 '+s.temp_limit+' °C 只剩 '+(s.temp_limit-s.temp)+' °C。'});
   if(s.chg_temp>=55) cand.push({w:2,t:'充电 IC <b>'+s.chg_temp+' °C</b>，充电会明显发热。'});
-  if(s.health<80) cand.push({w:2,t:'健康度 <b>'+s.health+'%</b>，已衰减 '+s.health_degrade+'%。'});
+  if(s.health<80) cand.push({w:2,t:'健康度 <b>'+s.health+'%</b>'+(s.health_degrade>=0?'，已衰减 '+s.health_degrade+'%':'')+'。'});
   if(!cand.length) cand.push({w:0,t:'一切正常：'+(chg?'正在充电':'正在放电')+'，电池 '+s.temp+' °C，距温度上限 '+(s.temp_limit-s.temp)+' °C，循环 '+s.cycle_count+' 次。'});
   cand.sort((a,b)=>b.w-a.w);
   $('#finding').innerHTML=cand[0].t;
